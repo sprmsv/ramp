@@ -1,0 +1,5 @@
+chex
+flax
+jax
+numpy
+optax
