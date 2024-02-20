@@ -1,6 +1,6 @@
 """A library of auxliary functions and classes."""
 
-from typing import Sequence, Callable
+from typing import Sequence, Callable, Tuple
 
 import jax.numpy as jnp
 import jax.tree_util as tree
@@ -45,7 +45,7 @@ class MLP(nn.Module):
 def grid_mesh_connectivity_fixed_dx(
         x: jnp.ndarray, n_cover: int, n_overlap: int,
         dx: float, minx: float, maxx: float,
-):
+) -> Tuple[Tuple[jnp.ndarray, jnp.ndarray], Tuple[jnp.ndarray, jnp.ndarray]]:
     """
     1D with periodic boundary conditions.
 
@@ -53,7 +53,7 @@ def grid_mesh_connectivity_fixed_dx(
     Shape of x has to be a power of 2.
     """
 
-    zeta_grid = (x - minx) / (maxx - minx) * 2 - 1
+    zeta_grid = jnp.array((x - minx) / (maxx - minx) * 2 - 1)
     dzeta = (dx / (maxx - minx)) * 2
     zeta_mesh = (n_cover - 1) / 2 * dzeta + jnp.arange(
         start=-1., stop=(1. - (n_cover-n_overlap)*dzeta/2), step=(n_cover-n_overlap)*dzeta)

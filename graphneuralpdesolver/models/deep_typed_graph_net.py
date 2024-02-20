@@ -284,7 +284,7 @@ class DeepTypedGraphNet(nn.Module):
     # with unshared weights, and repeat that `self._num_processor_repetitions`
     # times.
     latent_graph = latent_graph_0
-    for unused_repetition_i in range(self.num_processor_repetitions):
+    for _ in range(self.num_processor_repetitions):
       for processor_network in self._processor_networks:
         latent_graph = self._process_step(processor_network, latent_graph)
 
