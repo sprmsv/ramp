@@ -26,9 +26,9 @@ Generalization to TypedGraphs of the deep Graph Neural Network from:
 
 from typing import Mapping, Optional
 
-from graphneuraloperator.typed_graph import TypedGraph
-from graphneuraloperator.typed_graph_net import GraphMapFeatures, InteractionNetwork
-from graphneuraloperator.utils import MLP
+from graphneuralpdesolver.graph.typed_graph import TypedGraph
+from graphneuralpdesolver.graph.typed_graph_net import GraphMapFeatures, InteractionNetwork
+from graphneuralpdesolver.models.utils import MLP
 
 import jax
 import jax.numpy as jnp
@@ -189,7 +189,7 @@ class DeepTypedGraphNet(nn.Module):
             ),
             activation=self._activation,
             use_layer_norm=self.use_layer_norm,
-            name=f"processor_edges_{step_i}_{edge_set_name}",
+            name=f"processor_{step_i}_edges_{edge_set_name}",
           )
           for edge_set_name in self.edge_latent_size.keys()
         },
@@ -201,7 +201,7 @@ class DeepTypedGraphNet(nn.Module):
             ),
             activation=self._activation,
             use_layer_norm=self.use_layer_norm,
-            name=f"processor_nodes_{step_i}_{node_set_name}",
+            name=f"processor_{step_i}_nodes_{node_set_name}",
           )
           for node_set_name in self.node_latent_size.keys()
         },
@@ -239,7 +239,6 @@ class DeepTypedGraphNet(nn.Module):
       } if self.node_output_size else None,
     )
     self._output_network = GraphMapFeatures(**output_kwargs)
-
 
   def __call__(self, input_graph: TypedGraph) -> TypedGraph:
     """Forward pass of the learnable dynamics model."""
