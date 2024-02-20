@@ -1,7 +1,9 @@
 """A library of auxliary functions and classes."""
 
 from typing import Sequence, Callable, Tuple
+import functools
 
+import jax
 import jax.numpy as jnp
 import jax.tree_util as tree
 import flax.linen as nn
@@ -42,6 +44,7 @@ class MLP(nn.Module):
       x = self.layernorm(x)
     return x
 
+@functools.partial(jax.jit, static_argnums=(1, 2, 3, 4, 5))
 def grid_mesh_connectivity_fixed_dx(
         x: jnp.ndarray, n_cover: int, n_overlap: int,
         dx: float, minx: float, maxx: float,
