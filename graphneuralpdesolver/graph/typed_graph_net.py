@@ -202,16 +202,16 @@ def _global_update(graph: TypedGraph, global_fn: GNUpdateGlobalFn, edge_aggregat
 
 
 InteractionUpdateNodeFn = Callable[
-    [jraph.NodeFeatures,
-     Mapping[str, SenderFeatures],
-     Mapping[str, ReceiverFeatures]],
-    jraph.NodeFeatures]
+  [jraph.NodeFeatures,
+    Mapping[str, SenderFeatures],
+    Mapping[str, ReceiverFeatures]],
+  jraph.NodeFeatures]
 
 
 InteractionUpdateNodeFnNoSentEdges = Callable[
-    [jraph.NodeFeatures,
-     Mapping[str, ReceiverFeatures]],
-    jraph.NodeFeatures]
+  [jraph.NodeFeatures,
+    Mapping[str, ReceiverFeatures]],
+  jraph.NodeFeatures]
 
 
 def InteractionNetwork(
@@ -220,7 +220,8 @@ def InteractionNetwork(
                                        InteractionUpdateNodeFnNoSentEdges]],
     aggregate_edges_for_nodes_fn: jraph.AggregateEdgesToNodesFn = jraph
     .segment_sum,
-    include_sent_messages_in_node_update: bool = False):
+    include_sent_messages_in_node_update: bool = False
+  ):
   """Returns a method that applies a configured InteractionNetwork.
 
   An interaction network computes interactions on the edges based on the
@@ -248,20 +249,20 @@ def InteractionNetwork(
   # An InteractionNetwork edge function does not have global feature inputs,
   # so we filter the passed global argument in the GraphNetwork.
   wrapped_update_edge_fn = tree.tree_map(
-      lambda fn: lambda e, s, r, g: fn(e, s, r), update_edge_fn)
+    lambda fn: lambda e, s, r, g: fn(e, s, r), update_edge_fn)
 
   # Similarly, we wrap the update_node_fn to ensure only the expected
   # arguments are passed to the Interaction net.
   if include_sent_messages_in_node_update:
     wrapped_update_node_fn = tree.tree_map(
-        lambda fn: lambda n, s, r, g: fn(n, s, r), update_node_fn)
+      lambda fn: lambda n, s, r, g: fn(n, s, r), update_node_fn)
   else:
     wrapped_update_node_fn = tree.tree_map(
-        lambda fn: lambda n, s, r, g: fn(n, r), update_node_fn)
+      lambda fn: lambda n, s, r, g: fn(n, r), update_node_fn)
   return GraphNetwork(
-      update_edge_fn=wrapped_update_edge_fn,
-      update_node_fn=wrapped_update_node_fn,
-      aggregate_edges_for_nodes_fn=aggregate_edges_for_nodes_fn)
+    update_edge_fn=wrapped_update_edge_fn,
+    update_node_fn=wrapped_update_node_fn,
+    aggregate_edges_for_nodes_fn=aggregate_edges_for_nodes_fn)
 
 
 def GraphMapFeatures(
@@ -292,12 +293,12 @@ def GraphMapFeatures(
       for node_set_key, embed_fn in embed_node_fn.items():
         node_set = graph.nodes[node_set_key]
         updated_nodes[node_set_key] = node_set._replace(
-            features=embed_fn(node_set.features))
+          features=embed_fn(node_set.features))
 
     updated_context = graph.context
     if embed_global_fn:
       updated_context = updated_context._replace(
-          features=embed_global_fn(updated_context.features))
+        features=embed_global_fn(updated_context.features))
 
     return graph._replace(edges=updated_edges, nodes=updated_nodes,
                           context=updated_context)
