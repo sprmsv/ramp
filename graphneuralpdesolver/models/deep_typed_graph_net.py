@@ -26,14 +26,14 @@ Generalization to TypedGraphs of the deep Graph Neural Network from:
 
 from typing import Mapping, Optional
 
-from graphneuralpdesolver.graph.typed_graph import TypedGraph
-from graphneuralpdesolver.graph.typed_graph_net import GraphMapFeatures, InteractionNetwork
-from graphneuralpdesolver.models.utils import MLP
-
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
 import jraph
+
+from graphneuralpdesolver.graph.typed_graph import TypedGraph
+from graphneuralpdesolver.graph.typed_graph_net import GraphMapFeatures, InteractionNetwork
+from graphneuralpdesolver.models.utils import MLP
 
 
 class DeepTypedGraphNet(nn.Module):
@@ -109,9 +109,9 @@ class DeepTypedGraphNet(nn.Module):
   edge_output_size: Optional[Mapping[str, int]] = None
   include_sent_messages_in_node_update: bool = False
   use_layer_norm: bool = True
-  activation: str = "relu"
+  activation: str = 'relu'
   f32_aggregation: bool = False
-  aggregate_edges_for_nodes_fn: str = "segment_sum"
+  aggregate_edges_for_nodes_fn: str = 'segment_sum'
   aggregate_normalization: Optional[float] = None
 
   def setup(self):
@@ -119,7 +119,7 @@ class DeepTypedGraphNet(nn.Module):
     self._aggregate_edges_for_nodes_fn = _get_aggregate_edges_for_nodes_fn(self.aggregate_edges_for_nodes_fn)
     if self.aggregate_normalization:
       # using aggregate_normalization only makes sense with segment_sum.
-      assert self.aggregate_edges_for_nodes_fn == "segment_sum"
+      assert self.aggregate_edges_for_nodes_fn == 'segment_sum'
 
     # The embedder graph network independently embeds edge and node features.
     if self.embed_edges:
@@ -131,7 +131,7 @@ class DeepTypedGraphNet(nn.Module):
           ),
           activation=self._activation,
           use_layer_norm=self.use_layer_norm,
-          name=f"encoder_edges_{edge_set_name}",
+          name=f'encoder_edges_{edge_set_name}',
         )
         for edge_set_name in self.edge_latent_size.keys()
       }
@@ -146,7 +146,7 @@ class DeepTypedGraphNet(nn.Module):
           ),
           activation=self._activation,
           use_layer_norm=self.use_layer_norm,
-          name=f"encoder_nodes_{node_set_name}",
+          name=f'encoder_nodes_{node_set_name}',
         )
         for node_set_name in self.node_latent_size.keys()
       }
@@ -189,7 +189,7 @@ class DeepTypedGraphNet(nn.Module):
             ),
             activation=self._activation,
             use_layer_norm=self.use_layer_norm,
-            name=f"processor_{step_i}_edges_{edge_set_name}",
+            name=f'processor_{step_i}_edges_{edge_set_name}',
           )
           for edge_set_name in self.edge_latent_size.keys()
         },
@@ -201,7 +201,7 @@ class DeepTypedGraphNet(nn.Module):
             ),
             activation=self._activation,
             use_layer_norm=self.use_layer_norm,
-            name=f"processor_{step_i}_nodes_{node_set_name}",
+            name=f'processor_{step_i}_nodes_{node_set_name}',
           )
           for node_set_name in self.node_latent_size.keys()
         },
@@ -221,7 +221,7 @@ class DeepTypedGraphNet(nn.Module):
           ),
           activation=self._activation,
           use_layer_norm=False,
-          name=f"decoder_edges_{edge_set_name}",
+          name=f'decoder_edges_{edge_set_name}',
         )
         for edge_set_name in self.edge_output_size.keys()
       } if self.edge_output_size else None,
@@ -233,7 +233,7 @@ class DeepTypedGraphNet(nn.Module):
           ),
           activation=self._activation,
           use_layer_norm=False,
-          name=f"decoder_nodes_{node_set_name}",
+          name=f'decoder_nodes_{node_set_name}',
         )
         for node_set_name in self.node_output_size.keys()
       } if self.node_output_size else None,
@@ -317,17 +317,17 @@ class DeepTypedGraphNet(nn.Module):
 
 def _get_activation_fn(name):
   """Return activation function corresponding to function_name."""
-  if name == "identity":
+  if name == 'identity':
     return lambda x: x
   if hasattr(jax.nn, name):
     return getattr(jax.nn, name)
   if hasattr(jnp, name):
     return getattr(jnp, name)
-  raise ValueError(f"Unknown activation function {name} specified.")
+  raise ValueError(f'Unknown activation function {name} specified.')
 
 def _get_aggregate_edges_for_nodes_fn(name):
   """Return aggregate_edges_for_nodes_fn corresponding to function_name."""
   if hasattr(jraph, name):
     return getattr(jraph, name)
   raise ValueError(
-      f"Unknown aggregate_edges_for_nodes_fn function {name} specified.")
+      f'Unknown aggregate_edges_for_nodes_fn function {name} specified.')

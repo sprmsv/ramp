@@ -1,5 +1,3 @@
-
-import jax
 import jax.numpy as jnp
 from flax import linen as nn
 
@@ -59,10 +57,10 @@ class GraphNeuralPDESolver(nn.Module):
       num_message_passing_steps=1,
       use_layer_norm=True,
       include_sent_messages_in_node_update=False,
-      activation="swish",
+      activation='swish',
       f32_aggregation=True,
       aggregate_normalization=None,
-      name="grid2mesh_gnn",
+      name='grid2mesh_gnn',
     )
 
     # Processor, which performs message passing on the multi-mesh.
@@ -76,9 +74,9 @@ class GraphNeuralPDESolver(nn.Module):
       num_message_passing_steps=self.num_message_passing_steps,
       use_layer_norm=True,
       include_sent_messages_in_node_update=False,
-      activation="swish",
+      activation='swish',
       f32_aggregation=False,
-      name="mesh_gnn",
+      name='mesh_gnn',
     )
 
     # Decoder, which moves data from the mesh back into the grid with a single
@@ -97,9 +95,9 @@ class GraphNeuralPDESolver(nn.Module):
       num_message_passing_steps=1,
       use_layer_norm=True,
       include_sent_messages_in_node_update=False,
-      activation="swish",
+      activation='swish',
       f32_aggregation=False,
-      name="mesh2grid_gnn",
+      name='mesh2grid_gnn',
     )
 
   def _init_grid2mesh_graph(self) -> TypedGraph:
@@ -125,8 +123,8 @@ class GraphNeuralPDESolver(nn.Module):
 
     graph = TypedGraph(
       context=Context(n_graph=jnp.array([1]), features=()),
-      nodes={"grid_nodes": grid_node_set, "mesh_nodes": mesh_node_set},
-      edges={EdgeSetKey("grid2mesh", ("grid_nodes", "mesh_nodes")): edge_set},
+      nodes={'grid_nodes': grid_node_set, 'mesh_nodes': mesh_node_set},
+      edges={EdgeSetKey('grid2mesh', ('grid_nodes', 'mesh_nodes')): edge_set},
     )
 
     return graph
@@ -170,8 +168,8 @@ class GraphNeuralPDESolver(nn.Module):
 
     graph = TypedGraph(
       context=Context(n_graph=jnp.array([1]), features=()),
-      nodes={"mesh_nodes": mesh_node_set},
-      edges={EdgeSetKey("mesh", ("mesh_nodes", "mesh_nodes")): edge_set},
+      nodes={'mesh_nodes': mesh_node_set},
+      edges={EdgeSetKey('mesh', ('mesh_nodes', 'mesh_nodes')): edge_set},
     )
 
     return graph
@@ -199,8 +197,8 @@ class GraphNeuralPDESolver(nn.Module):
 
     graph = TypedGraph(
       context=Context(n_graph=jnp.array([1]), features=()),
-      nodes={"grid_nodes": grid_node_set, "mesh_nodes": mesh_node_set},
-      edges={EdgeSetKey("mesh2grid", ("mesh_nodes", "grid_nodes")): edge_set},
+      nodes={'grid_nodes': grid_node_set, 'mesh_nodes': mesh_node_set},
+      edges={EdgeSetKey('mesh2grid', ('mesh_nodes', 'grid_nodes')): edge_set},
     )
 
     return graph
@@ -247,8 +245,8 @@ class GraphNeuralPDESolver(nn.Module):
     grid2mesh_graph = self._grid2mesh_graph
 
     # Concatenate node structural features with input features
-    grid_nodes = grid2mesh_graph.nodes["grid_nodes"]
-    mesh_nodes = grid2mesh_graph.nodes["mesh_nodes"]
+    grid_nodes = grid2mesh_graph.nodes['grid_nodes']
+    mesh_nodes = grid2mesh_graph.nodes['mesh_nodes']
     new_grid_nodes = grid_nodes._replace(
       features=jnp.concatenate([
         grid_node_features,
@@ -271,7 +269,7 @@ class GraphNeuralPDESolver(nn.Module):
     )
 
     # Broadcast edge structural features to the required batch size.
-    grid2mesh_edges_key = grid2mesh_graph.edge_key_by_name("grid2mesh")
+    grid2mesh_edges_key = grid2mesh_graph.edge_key_by_name('grid2mesh')
     edges = grid2mesh_graph.edges[grid2mesh_edges_key]
     new_edges = edges._replace(
       features=_add_batch_second_axis(
@@ -281,14 +279,14 @@ class GraphNeuralPDESolver(nn.Module):
     input_graph = self._grid2mesh_graph._replace(
       edges={grid2mesh_edges_key: new_edges},
       nodes={
-        "grid_nodes": new_grid_nodes,
-        "mesh_nodes": new_mesh_nodes
+        'grid_nodes': new_grid_nodes,
+        'mesh_nodes': new_mesh_nodes
       })
 
     # Run the GNN.
     grid2mesh_out = self._grid2mesh_gnn(input_graph)
-    latent_mesh_nodes = grid2mesh_out.nodes["mesh_nodes"].features
-    latent_grid_nodes = grid2mesh_out.nodes["grid_nodes"].features
+    latent_mesh_nodes = grid2mesh_out.nodes['mesh_nodes'].features
+    latent_grid_nodes = grid2mesh_out.nodes['grid_nodes'].features
     return latent_mesh_nodes, latent_grid_nodes
 
   def _run_mesh_gnn(self, latent_mesh_nodes: jnp.ndarray) -> jnp.ndarray:
@@ -301,17 +299,17 @@ class GraphNeuralPDESolver(nn.Module):
     # TODO: Try keeping the structural ones
     # NOTE: We don't need to add the structural node features, because these are
     # already part of  the latent state, via the original Grid2Mesh gnn.
-    nodes = mesh_graph.nodes["mesh_nodes"]
+    nodes = mesh_graph.nodes['mesh_nodes']
     nodes = nodes._replace(features=latent_mesh_nodes)
 
     # Add the structural edge features of this graph.
     # NOTE: We need the structural edge features, because it is the first
     # time we are seeing this particular set of edges.
-    mesh_edges_key = mesh_graph.edge_key_by_name("mesh")
+    mesh_edges_key = mesh_graph.edge_key_by_name('mesh')
     # We are assuming here that the mesh gnn uses a single set of edge keys
-    # named "mesh" for the edges and that it uses a single set of nodes named
-    # "mesh_nodes"
-    msg = ("The setup currently requires to only have one kind of edge in the mesh GNN.")
+    # named 'mesh' for the edges and that it uses a single set of nodes named
+    # 'mesh_nodes'
+    msg = ('The setup currently requires to only have one kind of edge in the mesh GNN.')
     assert len(mesh_graph.edges) == 1, msg
     edges = mesh_graph.edges[mesh_edges_key]
     new_edges = edges._replace(
@@ -321,11 +319,11 @@ class GraphNeuralPDESolver(nn.Module):
 
     # Build the graph
     input_graph = mesh_graph._replace(
-      edges={mesh_edges_key: new_edges}, nodes={"mesh_nodes": nodes}
+      edges={mesh_edges_key: new_edges}, nodes={'mesh_nodes': nodes}
     )
 
     # Run the GNN
-    return self._mesh_gnn(input_graph).nodes["mesh_nodes"].features
+    return self._mesh_gnn(input_graph).nodes['mesh_nodes'].features
 
   def _run_mesh2grid_gnn(self, updated_latent_mesh_nodes: jnp.ndarray,
                         latent_grid_nodes: jnp.ndarray) -> jnp.ndarray:
@@ -336,15 +334,15 @@ class GraphNeuralPDESolver(nn.Module):
 
     # NOTE: We don't need to add the structural node features, because these are
     # already part of the latent state, via the original Grid2Mesh gnn.
-    mesh_nodes = mesh2grid_graph.nodes["mesh_nodes"]
-    grid_nodes = mesh2grid_graph.nodes["grid_nodes"]
+    mesh_nodes = mesh2grid_graph.nodes['mesh_nodes']
+    grid_nodes = mesh2grid_graph.nodes['grid_nodes']
     new_mesh_nodes = mesh_nodes._replace(features=updated_latent_mesh_nodes)
     new_grid_nodes = grid_nodes._replace(features=latent_grid_nodes)
 
     # Add the structural edge features of this graph.
     # NOTE: We need the structural edge features, because it is the first time we
     # are seeing this particular set of edges.
-    mesh2grid_key = mesh2grid_graph.edge_key_by_name("mesh2grid")
+    mesh2grid_key = mesh2grid_graph.edge_key_by_name('mesh2grid')
     edges = mesh2grid_graph.edges[mesh2grid_key]
     new_edges = edges._replace(
       features=_add_batch_second_axis(
@@ -354,13 +352,13 @@ class GraphNeuralPDESolver(nn.Module):
     input_graph = mesh2grid_graph._replace(
       edges={mesh2grid_key: new_edges},
       nodes={
-        "mesh_nodes": new_mesh_nodes,
-        "grid_nodes": new_grid_nodes
+        'mesh_nodes': new_mesh_nodes,
+        'grid_nodes': new_grid_nodes
       })
 
     # Run the GNN
     output_graph = self._mesh2grid_gnn(input_graph)
-    output_grid_nodes = output_graph.nodes["grid_nodes"].features
+    output_grid_nodes = output_graph.nodes['grid_nodes'].features
 
     return output_grid_nodes
 

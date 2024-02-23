@@ -11,7 +11,7 @@ ArrayLikeTree = Union[Any, ArrayLike]  # Nest of ArrayLike
 _T = TypeVar('_T')
 
 
-# All tensors have a "flat_batch_axis", which is similar to the leading
+# All tensors have a 'flat_batch_axis', which is similar to the leading
 # axes of graph_tuples:
 # * In the case of nodes this is simply a shared node and flat batch axis, with
 # size corresponding to the total number of nodes in the flattened batch.
@@ -20,15 +20,15 @@ _T = TypeVar('_T')
 # * In the case of globals this is simply the number of graphs in the flattened
 # batch.
 
-# All shapes may also have any additional leading shape "batch_shape".
+# All shapes may also have any additional leading shape 'batch_shape'.
 # Options for building batches are:
-# * Use a provided "flatten" method that takes a leading `batch_shape` and
+# * Use a provided 'flatten' method that takes a leading `batch_shape` and
 #   it into the flat_batch_axis (this will be useful when using `tf.Dataset`
 #   which supports batching into RaggedTensors, with leading batch shape even
 #   if graphs have different numbers of nodes and edges), so the RaggedBatches
 #   can then be converted into something without ragged dimensions that jax can
 #   use.
-# * Directly build a "flat batch" using a provided function for batching a list
+# * Directly build a 'flat batch' using a provided function for batching a list
 #   of graphs (how it is done in `jraph`).
 
 
@@ -79,7 +79,7 @@ class TypedGraph(NamedTuple):
   def edge_key_by_name(self, name: str) -> EdgeSetKey:
     found_key = [k for k in self.edges.keys() if k.name == name]
     if len(found_key) != 1:
-      raise KeyError("invalid edge key '{}'. Available edges: [{}]".format(
+      raise KeyError('invalid edge key "{}". Available edges: [{}]'.format(
         name, ', '.join(x.name for x in self.edges.keys())))
     return found_key[0]
 

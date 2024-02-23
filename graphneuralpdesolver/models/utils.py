@@ -8,6 +8,7 @@ import jax.numpy as jnp
 import jax.tree_util as tree
 import flax.linen as nn
 
+
 def concatenate_args(args, kwargs, axis: int = -1):
   combined_args = tree.tree_flatten(args)[0] + tree.tree_flatten(kwargs)[0]
   concat_args = jnp.concatenate(combined_args, axis=axis)

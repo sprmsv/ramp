@@ -1,5 +1,11 @@
 from absl import logging
+from typing import Union
 
+import numpy as np
+import jax.numpy as jnp
+
+
+Array = Union[jnp.ndarray, np.ndarray]
 
 class disable_logging:
   """TODO: Write"""
