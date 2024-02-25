@@ -20,8 +20,6 @@ from graphneuralpdesolver.losses import loss_mse, error_rel_l2
 
 SEED = 43
 
-# TODO: DOCSTRINGS, TYPE ANNOTATIONS
-
 FLAGS = flags.FLAGS
 flags.DEFINE_string(name='datadir', default=None, required=True,
   help='Path of the folder containing the datasets'
@@ -66,10 +64,7 @@ PDETYPE = {
 
 def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[str, Array],
           epochs: int, key: flax.typing.PRNGKey, params: flax.typing.Collection = None):
-
-  # TODO: Check these below
-  # NOTE: BRANDSTETTER: Default is to unroll zero steps in the first epoch and then increase the max amount of unrolling steps per additional epoch.
-  # NOTE: # Randomly choose number of unrollings
+  """Trains a model and returns the state."""
 
   num_samples_trn = dataset_trn['trajectories'].shape[0]
   num_times = dataset_trn['trajectories'].shape[1]
@@ -99,6 +94,8 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
   def compute_loss(params: flax.typing.Collection, specs: Array,
                    u_inp: Array, u_out: Array) -> Array:
+    """Computes the prediction of the model and returns its loss."""
+
     variables = {'params': params}
     pred = predictor(
       variables=variables,
@@ -110,6 +107,9 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
   def get_loss_and_grads(params: flax.typing.Collection, specs: Array,
                          u_inp: Array, u_out: Array) -> Tuple[Array, Any]:
+    """
+    Computes the loss and the gradients of the loss w.r.t the parameters.
+    """
 
     # TODO: Optionally no push-forward
 
@@ -144,8 +144,10 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     return state, loss
 
   @jax.jit
-  def compute_error_norm_per_var(state: TrainState, trajectory: Array, specs: Array) -> Array:
-    """TODO: Write"""
+  def compute_error_norm_per_var(state: TrainState, specs: Array, trajectory: Array) -> Array:
+    """
+    Predicts the trajectories autoregressively and returns L2-norm of the relative error.
+    """
 
     input = trajectory[:, :num_times_input]
     label = trajectory[:, num_times_input:]
@@ -161,7 +163,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     return error_rel_l2(pred, label)
 
   # EVALUATE BEFORE TRAINING
-  error_val_per_var = compute_error_norm_per_var(state, dataset_val['trajectories'], dataset_val['specs'])
+  error_val_per_var = compute_error_norm_per_var(state, dataset_val['specs'], dataset_val['trajectories'])
   error_val = jnp.sqrt(jnp.mean(jnp.power(error_val_per_var, 2))).item()
   print('\t'.join([
     f'EPCH: {0:04d}/{epochs:04d}',
@@ -190,8 +192,9 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       subkey, key = jax.random.split(key)
       lead_times_per_batch.append(jax.random.permutation(subkey, lead_times))
 
+    loss_trn = []
     for idx_lead_time in range(len(lead_times)):
-      loss_trn = 0.
+      _loss_trn = 0.
       # TODO: Concatenate multiple batches together to make the trainings even faster
       for idx_batch, batch in enumerate(zip(*batches)):
         lead_time = lead_times_per_batch[idx_batch][idx_lead_time].item()
@@ -199,13 +202,21 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
         u_inp = trajectory[:, (lead_time-offset-num_times_input):(lead_time-offset)]
         u_out = trajectory[:, lead_time:(lead_time+num_times_output)]
         state, loss_batch = update(state, u_inp, u_out)
-        loss_trn += loss_batch.item() * batch_size / num_samples_trn
+        _loss_trn += loss_batch.item() * batch_size / num_samples_trn
+      loss_trn.append(_loss_trn)
       if idx_lead_time % 10 == 0:
-        print(f'{(idx_lead_time+1) / len(lead_times) : 2.1%}', f'{loss_trn:.2e}', f'{time() - begin : 06.1f}s')
+        print('\t'.join([
+          f'----',
+          f'EPCH: {epoch+1:04d}/{epochs:04d}',
+          f'PRGS: {(idx_lead_time+1) / len(lead_times) : 2.1%}',
+          f'TIME: {time()-begin:06.1f}s',
+          f'LOSS: {loss_trn[-1]:.2e}',
+        ]))
         sys.stdout.flush()
+    loss_trn_mean = np.mean(loss_trn)
 
     # Evaluation
-    error_val_per_var = compute_error_norm_per_var(state, dataset_val['trajectories'], dataset_val['specs'])
+    error_val_per_var = compute_error_norm_per_var(state, dataset_val['specs'], dataset_val['trajectories'])
     error_val = jnp.sqrt(jnp.mean(jnp.power(error_val_per_var, 2))).item()
 
     time_tot = time() - begin
@@ -213,7 +224,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     print('\t'.join([
       f'EPCH: {epoch+1:04d}/{epochs:04d}',
       f'TIME: {time_tot:06.1f}s',
-      f'LOSS: {loss_trn:.2e}',
+      f'LOSS: {loss_trn_mean:.2e}',
       f'EVAL: {error_val:.2e}',
     ]))
     sys.stdout.flush()
@@ -274,7 +285,7 @@ def main(argv):
       num_times_output=FLAGS.bundle_outputs,
       # TODO: Parameterize the model configs
       num_outputs=1,
-      latent_size=64,
+      latent_size=128,
       num_mlp_hidden_layers=2,
       num_message_passing_steps=6,
       num_gridmesh_cover=4,

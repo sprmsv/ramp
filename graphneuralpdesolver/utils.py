@@ -8,7 +8,7 @@ import jax.numpy as jnp
 Array = Union[jnp.ndarray, np.ndarray]
 
 class disable_logging:
-  """TODO: Write"""
+  """Context manager for disabling the logging."""
 
   def __init__(self):
     self.level = None

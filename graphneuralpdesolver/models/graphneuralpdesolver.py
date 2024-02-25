@@ -15,6 +15,8 @@ class GraphNeuralPDESolver(nn.Module):
   # NOTE: Only fixed dx for now
   dx: float
   domain_x: tuple[float, float]
+  # NOTE: Only fixed dt for now
+  dt: float
 
   num_times_input: int = 1
   num_times_output: int = 1
@@ -33,7 +35,6 @@ class GraphNeuralPDESolver(nn.Module):
     # NOTE: Only 1D for now  # TODO: Handle 2D cases
     # NOTE: Only fixed dx for now
     # NOTE: Only for periodic BCs for now (circle connections)
-    # TODO: Generate data with odd nx
     (self.indices_grid, self.indices_mesh), (self.zeta_grid, self.zeta_mesh) =\
       grid_mesh_connectivity_fixed_dx(
         x=self.x, n_cover=self.num_gridmesh_cover, n_overlap=self.num_gridmesh_overlap,
@@ -142,7 +143,6 @@ class GraphNeuralPDESolver(nn.Module):
     senders = []
     receivers = []
     edge_feats = []
-    # TODO: Optimize these loops
     for edges in multimesh_edges:
       for e in edges:
         # CHECK: Try other features
@@ -203,20 +203,20 @@ class GraphNeuralPDESolver(nn.Module):
 
     return graph
 
-  def __call__(self, u: jnp.ndarray, specs: jnp.ndarray):
-    assert u.ndim == 4  # [batch_size, num_times_input, num_grid_nodes, num_inputs]
-    bsz = u.shape[0]
-    assert u.shape[1] == self.num_times_input
-    assert u.shape[2] == self.x.shape[0] == self._num_grid_nodes
+  def __call__(self, u_inp: jnp.ndarray, specs: jnp.ndarray):
+    assert u_inp.ndim == 4  # [batch_size, num_times_input, num_grid_nodes, num_inputs]
+    batch_size = u_inp.shape[0]
+    assert u_inp.shape[1] == self.num_times_input
+    assert u_inp.shape[2] == self.x.shape[0] == self._num_grid_nodes
     assert specs.ndim == 2  # [batch_size, num_params]
-    assert specs.shape[0] == bsz
+    assert specs.shape[0] == batch_size
 
     # Prepare the grid node features
     # TODO: Concatenate with specs?
     # u -> [num_grid_nodes, batch_size, num_times_input * num_inputs]
     grid_node_features = jnp.moveaxis(
-      u, source=(0, 1, 2), destination=(1, 2, 0)
-    ).reshape(self._num_grid_nodes, bsz, -1)
+      u_inp, source=(0, 1, 2), destination=(1, 2, 0)
+    ).reshape(self._num_grid_nodes, batch_size, -1)
 
     # Transfer data for the grid to the mesh
     # [num_mesh_nodes, batch_size, latent_size], [num_grid_nodes, batch_size, latent_size]
@@ -232,11 +232,19 @@ class GraphNeuralPDESolver(nn.Module):
 
     # Reshape the output to [batch_size, num_times_output, num_grid_nodes, num_outputs]
     output = (output_grid_nodes
-      .reshape(self._num_grid_nodes, bsz, self.num_times_output, self.num_outputs)
+      .reshape(self._num_grid_nodes, batch_size, self.num_times_output, self.num_outputs)
       .swapaxes(0, 1).swapaxes(1, 2)
     )
 
-    return output
+    # Interpret the output as the first-order derivative
+    dt = self.dt * (jnp.arange(1, self.num_times_output)[None, :, None, None]
+      .repeat(batch_size, axis=0)
+      .repeat(self._num_grid_nodes, axis=2)
+      .repeat(self.num_outputs, axis=3))
+    dudt = output
+    u_out = u_inp + dudt * dt
+
+    return u_out
 
   def _run_grid2mesh_gnn(self, grid_node_features: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
     """Runs the grid2mesh_gnn, extracting latent mesh and grid nodes."""
