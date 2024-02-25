@@ -105,26 +105,38 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     )
     return loss_mse(pred, u_out)
 
+  def get_noisy_input(params: flax.typing.Collection, specs: Array,
+                         u_inp_lagged: Array) -> Array:
+    """Apply the model to the lagged input to get a noisy input."""
+
+    variables = {'params': params}
+    rollout = predictor(
+      variables=variables,
+      u_inp=u_inp_lagged,
+      specs=specs,
+      num_steps=(offset // num_times_output)
+    )
+    u_inp_noisy = jnp.concatenate([u_inp_lagged, rollout], axis=1)[:, -num_times_input:]
+
+    return u_inp_noisy
+
   def get_loss_and_grads(params: flax.typing.Collection, specs: Array,
                          u_inp: Array, u_out: Array) -> Tuple[Array, Any]:
     """
     Computes the loss and the gradients of the loss w.r.t the parameters.
     """
 
-    # TODO: Optionally no push-forward
+    def compute_loss_without_cutting_the_grad(params, specs, u_inp, u_out):
+      u_inp_noisy = get_noisy_input(params, specs, u_inp, u_out)
+      return compute_loss(params, specs, u_inp_noisy, u_out)
 
-    # GET NOISY INPUT
-    variables = {'params': params}
-    rollout = predictor(
-      variables=variables,
-      u_inp=u_inp,
-      specs=specs,
-      num_steps=(offset // num_times_output)
-    )
-    u_inp_noisy = jnp.concatenate([u_inp, rollout], axis=1)[:, -num_times_input:]
-
-    # COMPUTE AND APPLY GRADS
-    loss, grads = jax.value_and_grad(compute_loss)(params, specs, u_inp_noisy, u_out)
+    if FLAGS.push_forward:
+      u_inp_noisy = get_noisy_input(params, specs, u_inp, u_out)
+      loss, grads = jax.value_and_grad(compute_loss)(
+        params, specs, u_inp_noisy, u_out)
+    else:
+      loss, grads = jax.value_and_grad(compute_loss_without_cutting_the_grad)(
+        params, specs, u_inp, u_out)
 
     return loss, grads
 
@@ -240,6 +252,7 @@ def get_model(spatial: Mapping[str, Mapping[str, Any]],
     x=spatial['x']['grid'],
     dx=spatial['x']['delta'],
     domain_x=spatial['x']['domain'],
+    dt=spatial['t']['delta'],
     **model_configs,
   )
 
@@ -264,9 +277,14 @@ def main(argv):
   datasets = read_datasets(
     dir=FLAGS.datadir, pde_type=PDETYPE[experiment],
     experiment=experiment, nx=FLAGS.resolution)
+  assert np.all(datasets['test']['t'] == datasets['valid']['t'])
+  assert np.all(datasets['test']['t'] == datasets['train']['t'])
   assert np.all(datasets['test']['x'] == datasets['valid']['x'])
   assert np.all(datasets['test']['x'] == datasets['train']['x'])
   spatial = {
+    't': {
+      'delta': datasets['test']['dt'],
+    },
     'x': {
       'grid': datasets['test']['x'],
       'delta': datasets['test']['dx'],
