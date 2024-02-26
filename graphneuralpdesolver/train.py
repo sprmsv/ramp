@@ -77,9 +77,8 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   assert dataset_trn['trajectories'].shape[0] % batch_size == 0
 
   # Normalize train dataset
-  # TODO: Do the normalization inside the model instead
-  dataset_trn['trajectories'], stats_trn = normalize(dataset_trn['trajectories'])
   # NOTE: The validation dataset is normalized in the evaluation function
+  dataset_trn['trajectories'], stats_trn = normalize(dataset_trn['trajectories'])
 
   # Initialzize the model
   subkey, key = jax.random.split(key)
@@ -307,20 +306,13 @@ def main(argv):
       domain[space_dim]['grid'] = jax.device_put(domain[space_dim]['grid'])
 
   # Get the model
-  model_configs = dict(
+  model_kwargs = dict(
     domain=domain,
     num_times_input=FLAGS.time_bundling,
     num_times_output=FLAGS.time_bundling,
-    # TODO: Parameterize the model configs
-    num_outputs=1,
-    latent_size=16,
-    num_mlp_hidden_layers=2,
-    num_message_passing_steps=6,
-    num_gridmesh_cover=4,
-    num_gridmesh_overlap=2,
-    num_multimesh_levels=5,
+    num_outputs=datasets['test']['trajectories'].shape[3],
   )
-  model = get_model(model_configs)
+  model = get_model(model_kwargs)
 
   # Check the array devices
   assert jax.devices()[0] in datasets['train']['trajectories'].devices()

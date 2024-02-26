@@ -42,6 +42,7 @@ class GraphNeuralPDESolver(AbstractPDESolver):
   residual_update: bool = True
 
   def setup(self):
+    # Check the validity of the configurations
     # NOTE: Only fixed dt for now
     self.dt=self.domain['t']['delta']
     self.x=self.domain['x']['grid']
@@ -229,15 +230,24 @@ class GraphNeuralPDESolver(AbstractPDESolver):
     batch_size = u_inp.shape[0]
     assert u_inp.shape[1] == self.num_times_input
     assert u_inp.shape[2] == self.x.shape[0] == self._num_grid_nodes
+    if self.residual_update:
+      assert u_inp.shape[3] == self.num_outputs
     assert specs.ndim == 2  # [batch_size, num_params]
     assert specs.shape[0] == batch_size
 
     # Prepare the grid node features
-    # TODO: Concatenate with specs?
     # u -> [num_grid_nodes, batch_size, num_times_input * num_inputs]
     grid_node_features = jnp.moveaxis(
       u_inp, source=(0, 1, 2), destination=(1, 2, 0)
     ).reshape(self._num_grid_nodes, batch_size, -1)
+    # Concatente with equation specifications (parameters, BCs, etc.)
+    # CHECK: time is also encoded in Brandstetter
+    grid_node_features = jnp.concatenate(axis=-1,
+      arrays=[
+        jnp.repeat(specs[None, :, :], repeats=self._num_grid_nodes, axis=0),
+        grid_node_features,
+      ],
+    )
 
     # Transfer data for the grid to the mesh
     # [num_mesh_nodes, batch_size, latent_size], [num_grid_nodes, batch_size, latent_size]
@@ -328,7 +338,7 @@ class GraphNeuralPDESolver(AbstractPDESolver):
     mesh_graph = self._mesh_graph
 
     # Replace the node features
-    # TODO: Try keeping the structural ones
+    # CHECK: Try keeping the structural ones
     # NOTE: We don't need to add the structural node features, because these are
     # already part of  the latent state, via the original Grid2Mesh gnn.
     nodes = mesh_graph.nodes['mesh_nodes']
