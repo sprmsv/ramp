@@ -58,3 +58,20 @@ def shuffle_arrays(key: flax.typing.PRNGKey, arrays: Sequence[Array]) -> Sequenc
   permutation = jax.random.permutation(key, size)
 
   return [arr[permutation] for arr in arrays]
+
+def normalize(trajectories, stats=None):
+  if stats:
+    mean, std = stats
+  else:
+    mean = np.mean(trajectories, axis=0)[None, :]
+    std = np.std(trajectories, axis=0)[None, :]
+
+  trajectories = (trajectories - mean) / std
+
+  return trajectories, (mean, std)
+
+def unnormalize(trajectories, stats):
+  mean, std = stats
+  trajectories = std * trajectories + mean
+
+  return trajectories

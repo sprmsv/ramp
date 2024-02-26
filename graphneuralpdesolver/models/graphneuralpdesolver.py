@@ -27,9 +27,12 @@ class GraphNeuralPDESolver(nn.Module):
   num_gridmesh_cover: int = 4
   num_gridmesh_overlap: int = 2
   num_multimesh_levels: int = 5
+  residual_update: bool = True
 
   def setup(self):
     assert self.x.ndim == 1
+    if self.residual_update:
+      assert self.num_times_input == self.num_times_output
 
     # Initial graphs (holding structural features)
     # NOTE: Only 1D for now  # TODO: Handle 2D cases
@@ -237,12 +240,15 @@ class GraphNeuralPDESolver(nn.Module):
     )
 
     # Interpret the output as the first-order derivative
-    dt = self.dt * (jnp.arange(1, self.num_times_output)[None, :, None, None]
-      .repeat(batch_size, axis=0)
-      .repeat(self._num_grid_nodes, axis=2)
-      .repeat(self.num_outputs, axis=3))
-    dudt = output
-    u_out = u_inp + dudt * dt
+    if self.residual_update:
+      dt = self.dt * (jnp.arange(1, self.num_times_output+1)[None, :, None, None]
+        .repeat(batch_size, axis=0)
+        .repeat(self._num_grid_nodes, axis=2)
+        .repeat(self.num_outputs, axis=3))
+      dudt = output
+      u_out = u_inp + dudt * dt
+    else:
+      u_out = output
 
     return u_out
 

@@ -12,7 +12,7 @@ import flax.typing
 from flax.training.train_state import TrainState
 
 from graphneuralpdesolver.autoregressive import AutoregressivePredictor
-from graphneuralpdesolver.dataset import read_datasets, shuffle_arrays
+from graphneuralpdesolver.dataset import read_datasets, shuffle_arrays, normalize, unnormalize
 from graphneuralpdesolver.models.graphneuralpdesolver import GraphNeuralPDESolver
 from graphneuralpdesolver.utils import disable_logging, Array
 from graphneuralpdesolver.losses import loss_mse, error_rel_l2
@@ -39,11 +39,8 @@ flags.DEFINE_float(name='lr', default=1e-03, required=False,
 flags.DEFINE_integer(name='epochs', default=20, required=False,
   help='Number of training epochs'
 )
-flags.DEFINE_integer(name='bundle_inputs', default=2, required=False,
+flags.DEFINE_integer(name='time_bundling', default=2, required=False,
   help='Number of the input time steps of the model'
-)
-flags.DEFINE_integer(name='bundle_outputs', default=1, required=False,
-  help='Number of time steps as predicted by the model at each autoregressive step'
 )
 flags.DEFINE_integer(name='noise_steps', default=1, required=False,
   help='Number of autoregressive steps for getting a noisy input'
@@ -66,19 +63,25 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
           epochs: int, key: flax.typing.PRNGKey, params: flax.typing.Collection = None):
   """Trains a model and returns the state."""
 
+  # Set constants
   num_samples_trn = dataset_trn['trajectories'].shape[0]
   num_times = dataset_trn['trajectories'].shape[1]
-  num_times_input = FLAGS.bundle_inputs
-  num_times_output = FLAGS.bundle_outputs
+  num_times_input = FLAGS.time_bundling
+  num_times_output = FLAGS.time_bundling
   batch_size = FLAGS.batch_size
   offset = FLAGS.noise_steps * num_times_output
   assert dataset_trn['trajectories'].shape[0] % batch_size == 0
+
+  # Normalize train dataset
+  # TODO: Do the normalization inside the model instead
+  dataset_trn['trajectories'], stats_trn = normalize(dataset_trn['trajectories'])
+  # NOTE: The validation dataset is normalized in the evaluation function
 
   # Initialzize the model
   subkey, key = jax.random.split(key)
   sample_input_u = dataset_trn['trajectories'][:batch_size, :num_times_input]
   sample_input_specs = dataset_trn['specs'][:batch_size]
-  variables = model.init(subkey, u=sample_input_u, specs=sample_input_specs)
+  variables = model.init(subkey, u_inp=sample_input_u, specs=sample_input_specs)
   n_model_parameters = np.sum(
   jax.tree_util.tree_flatten(
     jax.tree_map(
@@ -127,11 +130,11 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     """
 
     def compute_loss_without_cutting_the_grad(params, specs, u_inp, u_out):
-      u_inp_noisy = get_noisy_input(params, specs, u_inp, u_out)
+      u_inp_noisy = get_noisy_input(params, specs, u_inp)
       return compute_loss(params, specs, u_inp_noisy, u_out)
 
     if FLAGS.push_forward:
-      u_inp_noisy = get_noisy_input(params, specs, u_inp, u_out)
+      u_inp_noisy = get_noisy_input(params, specs, u_inp)
       loss, grads = jax.value_and_grad(compute_loss)(
         params, specs, u_inp_noisy, u_out)
     else:
@@ -156,14 +159,18 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     return state, loss
 
   @jax.jit
-  def compute_error_norm_per_var(state: TrainState, specs: Array, trajectory: Array) -> Array:
+  def compute_error_norm_per_var(state: TrainState, specs: Array, trajectories: Array) -> Array:
     """
     Predicts the trajectories autoregressively and returns L2-norm of the relative error.
     """
 
-    input = trajectory[:, :num_times_input]
-    label = trajectory[:, num_times_input:]
+    input = trajectories[:, :num_times_input]
+    label = trajectories[:, num_times_input:]
 
+    # Normalize the inputs
+    input, _ = normalize(input, stats=(s[:, :num_times_input] for s in stats_trn))
+
+    # Get normalized predictions
     variables = {'params': state.params}
     pred = predictor(
       variables=variables,
@@ -171,6 +178,9 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       specs=specs,
       num_steps=((num_times - num_times_input) // num_times_output),
     )
+
+    # Un-normalize the predictions
+    pred = unnormalize(pred, stats=(s[:, num_times_input:] for s in stats_trn))
 
     return error_rel_l2(pred, label)
 
@@ -277,13 +287,15 @@ def main(argv):
   datasets = read_datasets(
     dir=FLAGS.datadir, pde_type=PDETYPE[experiment],
     experiment=experiment, nx=FLAGS.resolution)
-  assert np.all(datasets['test']['t'] == datasets['valid']['t'])
-  assert np.all(datasets['test']['t'] == datasets['train']['t'])
+  assert np.all(datasets['test']['dt'] == datasets['valid']['dt'])
+  assert np.all(datasets['test']['dt'] == datasets['train']['dt'])
   assert np.all(datasets['test']['x'] == datasets['valid']['x'])
   assert np.all(datasets['test']['x'] == datasets['train']['x'])
   spatial = {
     't': {
       'delta': datasets['test']['dt'],
+      'min': datasets['test']['tmin'],
+      'max': datasets['test']['tmax'],
     },
     'x': {
       'grid': datasets['test']['x'],
@@ -291,19 +303,23 @@ def main(argv):
       'domain': datasets['test']['domain_x']
     }
   }
+  # datasets['train']['trajectories'], stats_trn = normalize(datasets['train']['trajectories'])
+  # datasets['valid']['trajectories'], _ = normalize(datasets['valid']['trajectories'], stats=stats_trn)
+  # datasets['test']['trajectories'], _ = normalize(datasets['test']['trajectories'], stats=stats_trn)
   datasets = jax.tree_map(jax.device_put, datasets)
   for space_dim in spatial.keys():
-    spatial[space_dim]['grid'] = jax.device_put(spatial[space_dim]['grid'])
+    if 'grid' in spatial[space_dim]:
+      spatial[space_dim]['grid'] = jax.device_put(spatial[space_dim]['grid'])
 
   # Get the model
   model = get_model(
     spatial=spatial,
     model_configs=dict(
-      num_times_input=FLAGS.bundle_inputs,
-      num_times_output=FLAGS.bundle_outputs,
+      num_times_input=FLAGS.time_bundling,
+      num_times_output=FLAGS.time_bundling,
       # TODO: Parameterize the model configs
       num_outputs=1,
-      latent_size=128,
+      latent_size=64,
       num_mlp_hidden_layers=2,
       num_message_passing_steps=6,
       num_gridmesh_cover=4,

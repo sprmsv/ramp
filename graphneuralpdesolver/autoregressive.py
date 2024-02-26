@@ -22,7 +22,7 @@ class AutoregressivePredictor:
     num_outputs = u_inp.shape[3]
 
     def scan_fn(u_inp, forcing):
-      u_out = self._predictor.apply(variables, u=u_inp, specs=specs)
+      u_out = self._predictor.apply(variables, u_inp=u_inp, specs=specs)
       if num_times_input > num_times_output:
         u_inp_next = jnp.concatenate([u_inp[:, -(num_times_input-num_times_output):], u_out], axis=1)
       else:
