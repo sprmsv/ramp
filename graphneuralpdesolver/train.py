@@ -37,7 +37,7 @@ flags.DEFINE_string(name='experiment', default=None, required=True,
 flags.DEFINE_integer(name='batch_size', default=2048, required=False,
   help='Size of a batch of training samples'
 )
-flags.DEFINE_float(name='lr', default=1e-03, required=False,
+flags.DEFINE_float(name='lr', default=1e-04, required=False,
   help='Training learning rate'
 )
 flags.DEFINE_integer(name='epochs', default=20, required=False,
@@ -99,7 +99,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   ).item()
   print(f'Total number of trainable paramters: {n_model_parameters}')
 
-  lr = optax.cosine_decay_schedule(init_value=1e-4, decay_steps=FLAGS.epochs, alpha=1e-7)
+  lr = optax.cosine_decay_schedule(init_value=FLAGS.lr, decay_steps=FLAGS.epochs, alpha=1e-7)
   tx = optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-8)
   state = TrainState.create(apply_fn=model.apply, params=variables['params'], tx=tx)
   predictor = AutoregressivePredictor(predictor=model)
