@@ -80,11 +80,16 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   # NOTE: The validation dataset is normalized in the evaluation function
   dataset_trn['trajectories'], stats_trn = normalize(dataset_trn['trajectories'])
 
-  # Initialzize the model
-  subkey, key = jax.random.split(key)
-  sample_input_u = dataset_trn['trajectories'][:batch_size, :num_times_input]
-  sample_input_specs = dataset_trn['specs'][:batch_size]
-  variables = model.init(subkey, u_inp=sample_input_u, specs=sample_input_specs)
+  # Initialzize the model or use the loaded parameters
+  if params:
+    variables = {'params': params}
+  else:
+    subkey, key = jax.random.split(key)
+    sample_input_u = dataset_trn['trajectories'][:batch_size, :num_times_input]
+    sample_input_specs = dataset_trn['specs'][:batch_size]
+    variables = model.init(subkey, u_inp=sample_input_u, specs=sample_input_specs)
+
+  # Calculate the total number of parameters
   n_model_parameters = np.sum(
   jax.tree_util.tree_flatten(
     jax.tree_map(
@@ -285,7 +290,7 @@ def main(argv):
   experiment = FLAGS.experiment
   datasets = read_datasets(
     dir=FLAGS.datadir, pde_type=PDETYPE[experiment],
-    experiment=experiment, nx=FLAGS.resolution)
+    experiment=experiment, nx=FLAGS.resolution, downsample_x=True)
   assert np.all(datasets['test']['dt'] == datasets['valid']['dt'])
   assert np.all(datasets['test']['dt'] == datasets['train']['dt'])
   assert np.all(datasets['test']['x'] == datasets['valid']['x'])

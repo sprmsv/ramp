@@ -7,12 +7,17 @@ from typing import Any, Union, Sequence
 
 import numpy as np
 import jax
+import jax.lax
 import flax.typing
 
 from graphneuralpdesolver.utils import Array
 
 
+NX_SUPER_RESOLUTION = 256
+NT_SUPER_RESOLUTION = 256
+
 def read_datasets(dir: Union[Path, str], pde_type: str, experiment: str, nx: int,
+                  downsample_x: bool = True,
                   modes: Sequence[str] = ['train', 'valid', 'test'],
                 ) -> dict[str, dict[str, Any]]:
   """Reads a dataset from its source file and prepares the shapes and specifications."""
@@ -22,10 +27,18 @@ def read_datasets(dir: Union[Path, str], pde_type: str, experiment: str, nx: int
   datasets = {
     mode: _read_dataset_attributes(
       h5group=h5py.File(dir / f'{pde_type}_{mode}_{experiment}.h5')[mode],
-      nx=nx, nt=256,
+      nx=(NX_SUPER_RESOLUTION if downsample_x else nx),
+      nt=NT_SUPER_RESOLUTION,
     )
     for mode in modes
   }
+
+  if downsample_x:
+    ratio = NX_SUPER_RESOLUTION // nx
+    for dataset in datasets.values():
+      dataset['trajectories'] = downsample(dataset['trajectories'], ratio=ratio, axis=2)
+      dataset['x'] = downsample(dataset['x'], ratio=ratio, axis=0)
+      dataset['dx'] = dataset['dx'] * ratio
 
   return datasets
 
@@ -75,3 +88,22 @@ def unnormalize(trajectories, stats):
   trajectories = std * trajectories + mean
 
   return trajectories
+
+def downsample_convolution(trajectories: Array, ratio: int) -> Array:
+  trj_padded = np.concatenate([trajectories[:, :, -(ratio//2+1):-1], trajectories, trajectories[:, :, :(ratio//2)]], axis=2)
+  kernel = np.array([1/(ratio+1)]*(ratio+1)).reshape(1, 1, ratio+1, 1)
+  trj_downsampled = jax.lax.conv_general_dilated(
+    lhs=trj_padded,
+    rhs=kernel,
+    window_strides=(1,ratio),
+    padding='VALID',
+    dimension_numbers=jax.lax.conv_dimension_numbers(
+      trajectories.shape, kernel.shape, ('NHWC', 'OHWI', 'NHWC')),
+  )
+
+  return trj_downsampled
+
+def downsample(arr: Array, ratio: int, axis: int = 0) -> Array:
+  slc = [slice(None)] * len(arr.shape)
+  slc[axis] = slice(None, None, ratio)
+  return arr[tuple(slc)]
