@@ -199,6 +199,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   # EVALUATE BEFORE TRAINING
   error_val_per_var = compute_error_norm_per_var(state, dataset_val['specs'], dataset_val['trajectories'])
   error_val = jnp.sqrt(jnp.mean(jnp.power(error_val_per_var, 2))).item()
+  # TODO: Add loss_val by calculating all input outputs
   print('\t'.join([
     f'EPCH: {0:04d}/{epochs:04d}',
     f'EVAL: {error_val:.2e}',
@@ -237,14 +238,14 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
         _loss_trn += loss_batch.item() * batch_size / num_samples_trn
       loss_trn.append(_loss_trn)
       lr = state.opt_state.hyperparams['learning_rate'].item()
-      if idx_lead_time % 10 == 0:
+      if idx_lead_time % (len(lead_times // 10)) == 0:
         print('\t'.join([
           f'----',
           f'EPCH: {epoch+1:04d}/{epochs:04d}',
           f'PRGS: {(idx_lead_time+1) / len(lead_times) : 2.1%}',
           f'TIME: {time()-begin:06.1f}s',
-          f'LOSS: {loss_trn[-1]:.2e}',
           f'LR: {lr:.4e}',
+          f'LTRN: {loss_trn[-1]:.2e}',
         ]))
         sys.stdout.flush()
     loss_trn_mean = np.mean(loss_trn)
@@ -258,7 +259,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     print('\t'.join([
       f'EPCH: {epoch+1:04d}/{epochs:04d}',
       f'TIME: {time_tot:06.1f}s',
-      f'LOSS: {loss_trn_mean:.2e}',
+      f'LTRN: {loss_trn_mean:.2e}',
       f'EVAL: {error_val:.2e}',
     ]))
     sys.stdout.flush()
@@ -347,6 +348,7 @@ def main(argv):
     orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
     save_args = orbax_utils.save_args_from_target(ckpt)
     orbax_checkpointer.save(DIR, ckpt, save_args=save_args)
+  logging.info(f'Checkpoint saved at {DIR.as_posix()}')
 
 if __name__ == '__main__':
   logging.set_verbosity('info')
