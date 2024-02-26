@@ -236,6 +236,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
         state, loss_batch = update(state, u_inp, u_out)
         _loss_trn += loss_batch.item() * batch_size / num_samples_trn
       loss_trn.append(_loss_trn)
+      lr = state.opt_state.hyperparams['learning_rate'].item()
       if idx_lead_time % 10 == 0:
         print('\t'.join([
           f'----',
@@ -243,6 +244,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
           f'PRGS: {(idx_lead_time+1) / len(lead_times) : 2.1%}',
           f'TIME: {time()-begin:06.1f}s',
           f'LOSS: {loss_trn[-1]:.2e}',
+          f'LR: {lr:.4e}',
         ]))
         sys.stdout.flush()
     loss_trn_mean = np.mean(loss_trn)
