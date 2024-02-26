@@ -238,7 +238,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
         _loss_trn += loss_batch.item() * batch_size / num_samples_trn
       loss_trn.append(_loss_trn)
       lr = state.opt_state.hyperparams['learning_rate'].item()
-      if idx_lead_time % (len(lead_times // 10)) == 0:
+      if idx_lead_time % (len(lead_times) // 10) == 0:
         print('\t'.join([
           f'----',
           f'EPCH: {epoch+1:04d}/{epochs:04d}',
