@@ -99,7 +99,10 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   ).item()
   print(f'Total number of trainable paramters: {n_model_parameters}')
 
-  lr = optax.cosine_decay_schedule(init_value=FLAGS.lr, decay_steps=FLAGS.epochs, alpha=1e-7)
+  # Define the permissible lead times
+  lead_times = jnp.arange(offset+num_times_input, num_times-num_times_output+1)
+
+  lr = optax.cosine_decay_schedule(init_value=FLAGS.lr, decay_steps=(FLAGS.epochs * len(lead_times)), alpha=1e-7)
   tx = optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-8)
   state = TrainState.create(apply_fn=model.apply, params=variables['params'], tx=tx)
   predictor = AutoregressivePredictor(predictor=model)
@@ -200,8 +203,6 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     f'EPCH: {0:04d}/{epochs:04d}',
     f'EVAL: {error_val:.2e}',
   ]))
-
-  lead_times = jnp.arange(offset+num_times_input, num_times-num_times_output+1)
 
   for epoch in range(epochs):
     begin = time()
