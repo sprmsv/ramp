@@ -1,4 +1,5 @@
 import sys
+from datetime import datetime
 from time import time
 from typing import Tuple, Any, Mapping
 
@@ -9,11 +10,14 @@ import numpy as np
 import optax
 import flax.linen as nn
 import flax.typing
+from flax.training import orbax_utils
 from flax.training.train_state import TrainState
+import orbax.checkpoint
 
+from graphneuralpdesolver.experiments import EXP_DIR
 from graphneuralpdesolver.autoregressive import AutoregressivePredictor
 from graphneuralpdesolver.dataset import read_datasets, shuffle_arrays, normalize, unnormalize
-from graphneuralpdesolver.models.graphneuralpdesolver import GraphNeuralPDESolver
+from graphneuralpdesolver.models.graphneuralpdesolver import GraphNeuralPDESolver, AbstractPDESolver
 from graphneuralpdesolver.utils import disable_logging, Array
 from graphneuralpdesolver.losses import loss_mse, error_rel_l2
 
@@ -253,16 +257,11 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
   return state
 
-def get_model(spatial: Mapping[str, Mapping[str, Any]],
-              model_configs: Mapping[str, Any]) -> nn.Module:
+def get_model(model_configs: Mapping[str, Any]) -> AbstractPDESolver:
 
-  assert jax.devices()[0] in spatial['x']['grid'].devices()
+  assert jax.devices()[0] in model_configs['domain']['x']['grid'].devices()
 
   model = GraphNeuralPDESolver(
-    x=spatial['x']['grid'],
-    dx=spatial['x']['delta'],
-    domain_x=spatial['x']['domain'],
-    dt=spatial['t']['delta'],
     **model_configs,
   )
 
@@ -291,42 +290,37 @@ def main(argv):
   assert np.all(datasets['test']['dt'] == datasets['train']['dt'])
   assert np.all(datasets['test']['x'] == datasets['valid']['x'])
   assert np.all(datasets['test']['x'] == datasets['train']['x'])
-  spatial = {
+  domain = {
     't': {
       'delta': datasets['test']['dt'],
-      'min': datasets['test']['tmin'],
-      'max': datasets['test']['tmax'],
+      'range': (datasets['test']['tmin'], datasets['test']['tmax']),
     },
     'x': {
       'grid': datasets['test']['x'],
       'delta': datasets['test']['dx'],
-      'domain': datasets['test']['domain_x']
+      'range': datasets['test']['range_x']
     }
   }
-  # datasets['train']['trajectories'], stats_trn = normalize(datasets['train']['trajectories'])
-  # datasets['valid']['trajectories'], _ = normalize(datasets['valid']['trajectories'], stats=stats_trn)
-  # datasets['test']['trajectories'], _ = normalize(datasets['test']['trajectories'], stats=stats_trn)
   datasets = jax.tree_map(jax.device_put, datasets)
-  for space_dim in spatial.keys():
-    if 'grid' in spatial[space_dim]:
-      spatial[space_dim]['grid'] = jax.device_put(spatial[space_dim]['grid'])
+  for space_dim in domain.keys():
+    if 'grid' in domain[space_dim]:
+      domain[space_dim]['grid'] = jax.device_put(domain[space_dim]['grid'])
 
   # Get the model
-  model = get_model(
-    spatial=spatial,
-    model_configs=dict(
-      num_times_input=FLAGS.time_bundling,
-      num_times_output=FLAGS.time_bundling,
-      # TODO: Parameterize the model configs
-      num_outputs=1,
-      latent_size=64,
-      num_mlp_hidden_layers=2,
-      num_message_passing_steps=6,
-      num_gridmesh_cover=4,
-      num_gridmesh_overlap=2,
-      num_multimesh_levels=5,
-    )
+  model_configs = dict(
+    domain=domain,
+    num_times_input=FLAGS.time_bundling,
+    num_times_output=FLAGS.time_bundling,
+    # TODO: Parameterize the model configs
+    num_outputs=1,
+    latent_size=16,
+    num_mlp_hidden_layers=2,
+    num_message_passing_steps=6,
+    num_gridmesh_cover=4,
+    num_gridmesh_overlap=2,
+    num_multimesh_levels=5,
   )
+  model = get_model(model_configs)
 
   # Check the array devices
   assert jax.devices()[0] in datasets['train']['trajectories'].devices()
@@ -345,7 +339,13 @@ def main(argv):
     params=None,
   )
 
-  # TODO: Store the model / state / ModelConfigs
+  # Save the model and the parameters
+  DIR = EXP_DIR / datetime.now().strftime('%Y%m%d-%H%M%S.%f')
+  ckpt = {'model_configs': model.configs, 'state': state}
+  with disable_logging(level=logging.FATAL):
+    orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
+    save_args = orbax_utils.save_args_from_target(ckpt)
+    orbax_checkpointer.save(DIR, ckpt, save_args=save_args)
 
 if __name__ == '__main__':
   logging.set_verbosity('info')

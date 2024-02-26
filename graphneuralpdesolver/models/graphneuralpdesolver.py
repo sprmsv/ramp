@@ -1,3 +1,5 @@
+from typing import Mapping, Any
+
 import jax.numpy as jnp
 from flax import linen as nn
 
@@ -8,16 +10,26 @@ from graphneuralpdesolver.models.deep_typed_graph_net import DeepTypedGraphNet
 from graphneuralpdesolver.models.utils import grid_mesh_connectivity_fixed_dx
 
 
-class GraphNeuralPDESolver(nn.Module):
+class AbstractPDESolver(nn.Module):
+  def setup():
+    raise NotImplementedError
+
+  def __call__():
+    raise NotImplementedError
+
+  @property
+  def configs(self):
+    configs = {
+      attr: self.__getattr__(attr)
+      for attr in self.__annotations__.keys() if attr != 'parent'
+    }
+    return configs
+
+
+class GraphNeuralPDESolver(AbstractPDESolver):
   """TODO: Add docstrings"""
 
-  x: jnp.ndarray
-  # NOTE: Only fixed dx for now
-  dx: float
-  domain_x: tuple[float, float]
-  # NOTE: Only fixed dt for now
-  dt: float
-
+  domain: Mapping[str, Mapping[str, Any]]
   num_times_input: int = 1
   num_times_output: int = 1
   num_outputs: int = 1
@@ -30,6 +42,12 @@ class GraphNeuralPDESolver(nn.Module):
   residual_update: bool = True
 
   def setup(self):
+    # NOTE: Only fixed dt for now
+    self.dt=self.domain['t']['delta']
+    self.x=self.domain['x']['grid']
+    # NOTE: Only fixed dx for now
+    self.dx=self.domain['x']['delta']
+    self.range_x=self.domain['x']['range']
     assert self.x.ndim == 1
     if self.residual_update:
       assert self.num_times_input == self.num_times_output
@@ -41,7 +59,7 @@ class GraphNeuralPDESolver(nn.Module):
     (self.indices_grid, self.indices_mesh), (self.zeta_grid, self.zeta_mesh) =\
       grid_mesh_connectivity_fixed_dx(
         x=self.x, n_cover=self.num_gridmesh_cover, n_overlap=self.num_gridmesh_overlap,
-        dx=self.dx, minx=self.domain_x[0], maxx=self.domain_x[1],
+        dx=self.dx, minx=self.range_x[0], maxx=self.range_x[1],
       )
     self._num_grid_nodes = self.zeta_grid.shape[0]
     self._num_mesh_nodes = self.zeta_mesh.shape[0]

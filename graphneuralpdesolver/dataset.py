@@ -46,7 +46,7 @@ def _read_dataset_attributes(h5group: h5py.Group, nx: int, nt: int) -> dict[str,
     # nt = h5group[resolution].attrs['nt'].item(),
   )
   dataset['dx'] = (dataset['x'][1] - dataset['x'][0]).item()  # CHECK: Why is it different from data['dx']?
-  dataset['domain_x'] = (0., 16.)
+  dataset['range_x'] = (0., 16.)
 
   return dataset
 
