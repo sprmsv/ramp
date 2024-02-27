@@ -274,7 +274,9 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     ]))
     sys.stdout.flush()
 
-  return state
+  metrics = (epoch, loss_trn_mean, error_val)
+
+  return state, metrics
 
 def get_model(model_configs: Mapping[str, Any]) -> AbstractPDESolver:
 
@@ -354,7 +356,7 @@ def main(argv):
 
   # Train the model
   key = jax.random.PRNGKey(SEED)
-  state = train(
+  state, metrics = train(
     model=model,
     dataset_trn=datasets['train'],
     dataset_val=datasets['valid'],
@@ -366,6 +368,8 @@ def main(argv):
   # Save the model and the parameters
   DIR = DIR_EXPERIMENTS / datetime.now().strftime('%Y%m%d-%H%M%S.%f')
   DIR.mkdir()
+  with open(DIR / 'metrics.json', 'wb') as f:
+    json.dump(obj=metrics, fp=f)
   flags = {f: FLAGS.get_flag_value(f, default=None) for f in FLAGS}
   with open(DIR / 'flags.json', 'wb') as f:
     json.dump(obj=flags, fp=f)
