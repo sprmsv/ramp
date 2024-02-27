@@ -101,7 +101,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       variables['params']
     ))[0]
   ).item()
-  print(f'Total number of trainable paramters: {n_model_parameters}')
+  logging.info(f'Total number of trainable paramters: {n_model_parameters}')
 
   # Define the permissible lead times
   lead_times = jnp.arange(offset+num_times_input, num_times-num_times_output+1)
@@ -210,7 +210,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   error_val_per_var = compute_error_norm_per_var(state, dataset_val['specs'], dataset_val['trajectories'])
   error_val = jnp.sqrt(jnp.mean(jnp.power(error_val_per_var, 2))).item()
   # TODO: Add loss_val by calculating all input outputs
-  print('\t'.join([
+  logging.info('\t'.join([
     f'EPCH: {0:04d}/{epochs:04d}',
     f'EVAL: {error_val:.2e}',
   ]))
@@ -249,7 +249,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       loss_trn.append(_loss_trn)
       lr = state.opt_state.hyperparams['learning_rate'].item()
       if idx_lead_time % (len(lead_times) // 10) == 0:
-        print('\t'.join([
+        logging.info('\t'.join([
           f'----',
           f'EPCH: {epoch+1:04d}/{epochs:04d}',
           f'PRGS: {(idx_lead_time+1) / len(lead_times) : 2.1%}',
@@ -266,7 +266,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
     time_tot = time() - begin
 
-    print('\t'.join([
+    logging.info('\t'.join([
       f'EPCH: {epoch+1:04d}/{epochs:04d}',
       f'TIME: {time_tot:06.1f}s',
       f'LTRN: {loss_trn_mean:.2e}',
