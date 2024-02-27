@@ -140,33 +140,39 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     return u_inp_noisy
 
   def get_loss_and_grads(params: flax.typing.Collection, specs: Array,
-                         u_inp: Array, u_out: Array) -> Tuple[Array, Any]:
+                         u_lag: Array, u_out: Array) -> Tuple[Array, Any]:
     """
     Computes the loss and the gradients of the loss w.r.t the parameters.
     """
 
-    def compute_loss_without_cutting_the_grad(params, specs, u_inp, u_out):
-      u_inp_noisy = get_noisy_input(params, specs, u_inp)
-      return compute_loss(params, specs, u_inp_noisy, u_out)
+    def compute_loss_without_cutting_the_grad(params, specs, u_lag, u_out):
+      if offset:
+        u_inp = get_noisy_input(params, specs, u_lag)
+      else:
+        u_inp = u_lag
+      return compute_loss(params, specs, u_inp, u_out)
 
     if FLAGS.push_forward:
-      u_inp_noisy = get_noisy_input(params, specs, u_inp)
+      if offset:
+        u_inp = get_noisy_input(params, specs, u_lag)
+      else:
+        u_inp = u_lag
       loss, grads = jax.value_and_grad(compute_loss)(
-        params, specs, u_inp_noisy, u_out)
+        params, specs, u_inp, u_out)
     else:
       loss, grads = jax.value_and_grad(compute_loss_without_cutting_the_grad)(
-        params, specs, u_inp, u_out)
+        params, specs, u_lag, u_out)
 
     return loss, grads
 
   @jax.jit
-  def update(state: TrainState, u_inp: Array, u_out: Array) -> Tuple[TrainState, Array]:
+  def update(state: TrainState, u_lag: Array, u_out: Array) -> Tuple[TrainState, Array]:
     """Returns updated variables and state."""
 
     loss, grads = get_loss_and_grads(
       params=state.params,
       specs=specs,
-      u_inp=u_inp,
+      u_lag=u_lag,
       u_out=u_out,
     )
 
@@ -236,9 +242,9 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       for idx_batch, batch in enumerate(zip(*batches)):
         lead_time = lead_times_per_batch[idx_batch][idx_lead_time].item()
         trajectory, specs = batch
-        u_inp = trajectory[:, (lead_time-offset-num_times_input):(lead_time-offset)]
+        u_lag = trajectory[:, (lead_time-offset-num_times_input):(lead_time-offset)]
         u_out = trajectory[:, lead_time:(lead_time+num_times_output)]
-        state, loss_batch = update(state, u_inp, u_out)
+        state, loss_batch = update(state, u_lag, u_out)
         _loss_trn += loss_batch.item() * batch_size / num_samples_trn
       loss_trn.append(_loss_trn)
       lr = state.opt_state.hyperparams['learning_rate'].item()
@@ -248,7 +254,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
           f'EPCH: {epoch+1:04d}/{epochs:04d}',
           f'PRGS: {(idx_lead_time+1) / len(lead_times) : 2.1%}',
           f'TIME: {time()-begin:06.1f}s',
-          f'LR: {lr:.4e}',
+          f'LR: {lr:.2e}',
           f'LTRN: {loss_trn[-1]:.2e}',
         ]))
         sys.stdout.flush()
