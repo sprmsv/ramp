@@ -4,11 +4,12 @@ import flax.linen as nn
 import flax.typing
 
 from graphneuralpdesolver.utils import Array
+from graphneuralpdesolver.models.graphneuralpdesolver import AbstractPDESolver
 
 
 class AutoregressivePredictor:
 
-  def __init__(self, predictor: nn.Module):
+  def __init__(self, predictor: AbstractPDESolver):
     self._predictor = predictor
 
   def __call__(self, variables: flax.typing.VariableDict,

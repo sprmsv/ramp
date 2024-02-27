@@ -2,6 +2,7 @@ import sys
 from datetime import datetime
 from time import time
 from typing import Tuple, Any, Mapping
+import json
 
 from absl import app, flags, logging
 import jax
@@ -14,7 +15,7 @@ from flax.training import orbax_utils
 from flax.training.train_state import TrainState
 import orbax.checkpoint
 
-from graphneuralpdesolver.experiments import EXP_DIR
+from graphneuralpdesolver.experiments import DIR_EXPERIMENTS
 from graphneuralpdesolver.autoregressive import AutoregressivePredictor
 from graphneuralpdesolver.dataset import read_datasets, shuffle_arrays, normalize, unnormalize
 from graphneuralpdesolver.models.graphneuralpdesolver import GraphNeuralPDESolver, AbstractPDESolver
@@ -27,6 +28,9 @@ SEED = 43
 FLAGS = flags.FLAGS
 flags.DEFINE_string(name='datadir', default=None, required=True,
   help='Path of the folder containing the datasets'
+)
+flags.DEFINE_string(name='params', default=None, required=False,
+  help='Path of the previous experiment containing the initial parameters'
 )
 flags.DEFINE_integer(name='resolution', default=128, required=False,
   help='Resolution of the physical discretization'
@@ -315,13 +319,25 @@ def main(argv):
     if 'grid' in domain[space_dim]:
       domain[space_dim]['grid'] = jax.device_put(domain[space_dim]['grid'])
 
+  # Read the checkpoint
+  orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
+  if FLAGS.params:
+    ckpt = orbax_checkpointer.restore(DIR_EXPERIMENTS / FLAGS.params / 'checkpoints')
+    state = ckpt['state']
+    model_kwargs = ckpt['model_configs']
+    model_kwargs['domain'] = domain
+  else:
+    state = None
+    model_kwargs = None
+
   # Get the model
-  model_kwargs = dict(
-    domain=domain,
-    num_times_input=FLAGS.time_bundling,
-    num_times_output=FLAGS.time_bundling,
-    num_outputs=datasets['test']['trajectories'].shape[3],
-  )
+  if not model_kwargs:
+    model_kwargs = dict(
+      domain=domain,
+      num_times_input=FLAGS.time_bundling,
+      num_times_output=FLAGS.time_bundling,
+      num_outputs=datasets['test']['trajectories'].shape[3],
+    )
   model = get_model(model_kwargs)
 
   # Check the array devices
@@ -338,17 +354,21 @@ def main(argv):
     dataset_val=datasets['valid'],
     epochs=FLAGS.epochs,
     key=key,
-    params=None,
+    params=(state['params'] if state else None),
   )
 
   # Save the model and the parameters
-  DIR = EXP_DIR / datetime.now().strftime('%Y%m%d-%H%M%S.%f')
+  DIR = DIR_EXPERIMENTS / datetime.now().strftime('%Y%m%d-%H%M%S.%f')
+  DIR.mkdir()
+  flags = {f: FLAGS.get_flag_value(f, default=None) for f in FLAGS}
+  with open(DIR / 'flags.json', 'wb') as f:
+    json.dump(obj=flags, fp=f)
   ckpt = {'model_configs': model.configs, 'state': state}
   with disable_logging(level=logging.FATAL):
     orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
     save_args = orbax_utils.save_args_from_target(ckpt)
-    orbax_checkpointer.save(DIR, ckpt, save_args=save_args)
-  logging.info(f'Checkpoint saved at {DIR.as_posix()}')
+    orbax_checkpointer.save((DIR / 'checkpoints'), ckpt, save_args=save_args)
+  logging.info(f'Final model saved in {DIR.as_posix()}')
 
 if __name__ == '__main__':
   logging.set_verbosity('info')

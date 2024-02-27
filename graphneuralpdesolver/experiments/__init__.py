@@ -1,3 +1,3 @@
 from pathlib import Path
 
-EXP_DIR = Path(__file__).resolve().parent
+DIR_EXPERIMENTS = Path(__file__).resolve().parent
