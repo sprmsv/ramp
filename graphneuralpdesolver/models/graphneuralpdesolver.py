@@ -44,11 +44,11 @@ class GraphNeuralPDESolver(AbstractPDESolver):
   def setup(self):
     # Check the validity of the configurations
     # NOTE: Only fixed dt for now
-    self.dt=self.domain['t']['delta']
-    self.x=self.domain['x']['grid']
+    self.dt = self.domain['t']['delta']
     # NOTE: Only fixed dx for now
-    self.dx=self.domain['x']['delta']
-    self.range_x=self.domain['x']['range']
+    self.dx = self.domain['x']['delta']
+    self.range_x = self.domain['x']['range']
+    self.x = jnp.arange(start=self.range_x[0], stop=self.range_x[1]+self.dx, step=self.dx)
     assert self.x.ndim == 1
     if self.residual_update:
       assert self.num_times_input == self.num_times_output

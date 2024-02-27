@@ -3,6 +3,7 @@ from datetime import datetime
 from time import time
 from typing import Tuple, Any, Mapping
 import json
+from dataclasses import dataclass
 
 from absl import app, flags, logging
 import jax
@@ -66,9 +67,15 @@ PDETYPE = {
   'WE3': 'WE',
 }
 
+@dataclass
+class TrainMetrics:
+  loss_trn: float = 0.
+  error_val: float = 0.
+
+DIR = DIR_EXPERIMENTS / datetime.now().strftime('%Y%m%d-%H%M%S.%f')
 
 def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[str, Array],
-          epochs: int, key: flax.typing.PRNGKey, params: flax.typing.Collection = None):
+          epochs: int, key: flax.typing.PRNGKey, params: flax.typing.Collection = None) -> TrainState:
   """Trains a model and returns the state."""
 
   # Set constants
@@ -91,7 +98,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     subkey, key = jax.random.split(key)
     sample_input_u = dataset_trn['trajectories'][:batch_size, :num_times_input]
     sample_input_specs = dataset_trn['specs'][:batch_size]
-    variables = model.init(subkey, u_inp=sample_input_u, specs=sample_input_specs)
+    variables = jax.jit(model.init)(subkey, u_inp=sample_input_u, specs=sample_input_specs)
 
   # Calculate the total number of parameters
   n_model_parameters = np.sum(
@@ -106,9 +113,12 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   # Define the permissible lead times
   lead_times = jnp.arange(offset+num_times_input, num_times-num_times_output+1)
 
+  # Set up the optimizer and state
   lr = optax.cosine_decay_schedule(init_value=FLAGS.lr, decay_steps=(FLAGS.epochs * len(lead_times)), alpha=1e-7)
   tx = optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-8)
   state = TrainState.create(apply_fn=model.apply, params=variables['params'], tx=tx)
+
+  # Define the autoregressive predictor
   predictor = AutoregressivePredictor(predictor=model)
 
   def compute_loss(params: flax.typing.Collection, specs: Array,
@@ -206,7 +216,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
     return error_rel_l2(pred, label)
 
-  # EVALUATE BEFORE TRAINING
+  # Evaluate before training
   error_val_per_var = compute_error_norm_per_var(state, dataset_val['specs'], dataset_val['trajectories'])
   error_val = jnp.sqrt(jnp.mean(jnp.power(error_val_per_var, 2))).item()
   # TODO: Add loss_val by calculating all input outputs
@@ -214,6 +224,15 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     f'EPCH: {0:04d}/{epochs:04d}',
     f'EVAL: {error_val:.2e}',
   ]))
+  metrics = TrainMetrics(loss_trn=0., error_val=error_val)
+
+  # Set the checkpoint manager
+  with disable_logging(level=logging.FATAL):
+    orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
+    options = orbax.checkpoint.CheckpointManagerOptions(max_to_keep=2, create=True)
+    save_args = orbax_utils.save_args_from_target({'state': state, 'metrics': metrics})
+    checkpoint_manager = orbax.checkpoint.CheckpointManager(
+      (DIR / 'checkpoints'), orbax_checkpointer, options)
 
   for epoch in range(epochs):
     begin = time()
@@ -274,14 +293,20 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     ]))
     sys.stdout.flush()
 
-  metrics = (epoch, loss_trn_mean, error_val)
+    # Save checkpoint
+    with disable_logging(level=logging.FATAL):
+      checkpoint_manager.save(
+        step=epoch,
+        items={
+          'state': state,
+          'metrics': TrainMetrics(loss_trn=loss_trn_mean, error_val=error_val),
+        },
+        save_kwargs={'save_args': save_args}
+      )
 
-  return state, metrics
+  return state
 
 def get_model(model_configs: Mapping[str, Any]) -> AbstractPDESolver:
-
-  assert jax.devices()[0] in model_configs['domain']['x']['grid'].devices()
-
   model = GraphNeuralPDESolver(
     **model_configs,
   )
@@ -317,7 +342,6 @@ def main(argv):
       'range': (datasets['test']['tmin'], datasets['test']['tmax']),
     },
     'x': {
-      'grid': datasets['test']['x'],
       'delta': datasets['test']['dx'],
       'range': datasets['test']['range_x']
     }
@@ -327,13 +351,21 @@ def main(argv):
     if 'grid' in domain[space_dim]:
       domain[space_dim]['grid'] = jax.device_put(domain[space_dim]['grid'])
 
+  # Check the array devices
+  assert jax.devices()[0] in datasets['train']['trajectories'].devices()
+  assert jax.devices()[0] in datasets['train']['specs'].devices()
+  assert jax.devices()[0] in datasets['valid']['trajectories'].devices()
+  assert jax.devices()[0] in datasets['valid']['specs'].devices()
+
   # Read the checkpoint
-  orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
   if FLAGS.params:
-    ckpt = orbax_checkpointer.restore(DIR_EXPERIMENTS / FLAGS.params / 'checkpoints')
+    DIR_OLD_EXPERIMENT = DIR_EXPERIMENTS / FLAGS.params
+    orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
+    step = orbax.checkpoint.CheckpointManager(DIR_OLD_EXPERIMENT / 'checkpoints').latest_step()
+    ckpt = orbax_checkpointer.restore(directory=(DIR_OLD_EXPERIMENT / 'checkpoints' / str(step) / 'default'))
     state = ckpt['state']
-    model_kwargs = ckpt['model_configs']
-    model_kwargs['domain'] = domain
+    with open(DIR_OLD_EXPERIMENT / 'configs.json', 'rb') as f:
+      model_kwargs = json.load(f)['model_configs']
   else:
     state = None
     model_kwargs = None
@@ -344,19 +376,22 @@ def main(argv):
       domain=domain,
       num_times_input=FLAGS.time_bundling,
       num_times_output=FLAGS.time_bundling,
-      num_outputs=datasets['test']['trajectories'].shape[3],
+      num_outputs=datasets['valid']['trajectories'].shape[3],
     )
   model = get_model(model_kwargs)
 
-  # Check the array devices
-  assert jax.devices()[0] in datasets['train']['trajectories'].devices()
-  assert jax.devices()[0] in datasets['train']['specs'].devices()
-  assert jax.devices()[0] in datasets['valid']['trajectories'].devices()
-  assert jax.devices()[0] in datasets['valid']['specs'].devices()
+  # Store the configurations
+  DIR.mkdir()
+  flags = {f: FLAGS.get_flag_value(f, default=None) for f in FLAGS}
+  with open(DIR / 'configs.json', 'w') as f:
+    json.dump(fp=f,
+      obj={'flags': flags, 'model_configs': model.configs},
+      indent=2,
+    )
 
   # Train the model
   key = jax.random.PRNGKey(SEED)
-  state, metrics = train(
+  state = train(
     model=model,
     dataset_trn=datasets['train'],
     dataset_val=datasets['valid'],
@@ -364,21 +399,6 @@ def main(argv):
     key=key,
     params=(state['params'] if state else None),
   )
-
-  # Save the model and the parameters
-  DIR = DIR_EXPERIMENTS / datetime.now().strftime('%Y%m%d-%H%M%S.%f')
-  DIR.mkdir()
-  with open(DIR / 'metrics.json', 'wb') as f:
-    json.dump(obj=metrics, fp=f)
-  flags = {f: FLAGS.get_flag_value(f, default=None) for f in FLAGS}
-  with open(DIR / 'flags.json', 'wb') as f:
-    json.dump(obj=flags, fp=f)
-  ckpt = {'model_configs': model.configs, 'state': state}
-  with disable_logging(level=logging.FATAL):
-    orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
-    save_args = orbax_utils.save_args_from_target(ckpt)
-    orbax_checkpointer.save((DIR / 'checkpoints'), ckpt, save_args=save_args)
-  logging.info(f'Final model saved in {DIR.as_posix()}')
 
 if __name__ == '__main__':
   logging.set_verbosity('info')
