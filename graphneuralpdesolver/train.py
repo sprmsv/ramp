@@ -253,8 +253,8 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
           f'----',
           f'EPCH: {epoch+1:04d}/{epochs:04d}',
           f'PRGS: {(idx_lead_time+1) / len(lead_times) : 2.1%}',
-          f'TIME: {time()-begin:06.1f}s',
           f'LR: {lr:.2e}',
+          f'TIME: {time()-begin:06.1f}s',
           f'LTRN: {loss_trn[-1]:.2e}',
         ]))
         sys.stdout.flush()
