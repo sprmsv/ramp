@@ -1,7 +1,6 @@
-import sys
 from datetime import datetime
 from time import time
-from typing import Tuple, Any, Mapping
+from typing import Tuple, Any, Mapping, Sequence
 import json
 from dataclasses import dataclass
 
@@ -39,7 +38,7 @@ flags.DEFINE_integer(name='resolution', default=128, required=False,
 flags.DEFINE_string(name='experiment', default=None, required=True,
   help='Name of the experiment: {"E1", "E2", "E3", "WE1", "WE2", "WE3"'
 )
-flags.DEFINE_integer(name='batch_size', default=2048, required=False,
+flags.DEFINE_integer(name='batch_size', default=128, required=False,
   help='Size of a batch of training samples'
 )
 flags.DEFINE_float(name='lr', default=1e-04, required=False,
@@ -81,11 +80,12 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   # Set constants
   num_samples_trn = dataset_trn['trajectories'].shape[0]
   num_times = dataset_trn['trajectories'].shape[1]
+  num_grid_points = dataset_trn['trajectories'].shape[2]
   num_times_input = FLAGS.time_bundling
   num_times_output = FLAGS.time_bundling
   batch_size = FLAGS.batch_size
   offset = FLAGS.noise_steps * num_times_output
-  assert dataset_trn['trajectories'].shape[0] % batch_size == 0
+  assert num_samples_trn % batch_size == 0
 
   # Normalize train dataset
   # NOTE: The validation dataset is normalized in the evaluation function
@@ -110,11 +110,13 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   ).item()
   logging.info(f'Total number of trainable paramters: {n_model_parameters}')
 
-  # Define the permissible lead times
+  # Define the permissible lead times and number of batches
   lead_times = jnp.arange(offset+num_times_input, num_times-num_times_output+1)
+  num_batches = num_samples_trn // batch_size
+  num_lead_times = num_times - (num_times_input + num_times_output + offset) + 1
 
   # Set up the optimizer and state
-  lr = optax.cosine_decay_schedule(init_value=FLAGS.lr, decay_steps=(FLAGS.epochs * len(lead_times)), alpha=1e-7)
+  lr = optax.cosine_decay_schedule(init_value=FLAGS.lr, decay_steps=(FLAGS.epochs * num_batches), alpha=1e-4)
   tx = optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-8)
   state = TrainState.create(apply_fn=model.apply, params=variables['params'], tx=tx)
 
@@ -176,19 +178,50 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     return loss, grads
 
   @jax.jit
-  def update(state: TrainState, u_lag: Array, u_out: Array) -> Tuple[TrainState, Array]:
-    """Returns updated variables and state."""
+  def train_one_epoch(
+    state: TrainState, batches: Tuple[Sequence[Array], Sequence[Array]],
+    shuffle_key: flax.typing.PRNGKey = None) -> Tuple[TrainState, Array]:
+    """Updates the state based on accumulated losses and gradients."""
 
-    loss, grads = get_loss_and_grads(
-      params=state.params,
-      specs=specs,
-      u_lag=u_lag,
-      u_out=u_out,
-    )
+    loss_epoch = 0.
+    for batch in zip(*batches):
+      trajectory, specs = batch
+      # Get input and outputs for all lead times
+      u_lag_batch = jax.vmap(
+        lambda lt: jax.lax.dynamic_slice_in_dim(
+          operand=trajectory,
+          start_index=lt-offset-num_times_input,
+          slice_size=num_times_input,
+          axis=1,
+        )
+      )(lead_times)
+      u_out_batch = jax.vmap(
+        lambda lt: jax.lax.dynamic_slice_in_dim(
+          trajectory, start_index=lt, slice_size=num_times_output, axis=1)
+      )(lead_times)
+      specs_batch = specs[None, :, :].repeat(repeats=num_lead_times, axis=1)
+      # Concatenate lead times along the batch axis
+      u_lag_batch = u_lag_batch.reshape(
+        (batch_size * num_lead_times), num_times_input, num_grid_points, -1)
+      u_out_batch = u_out_batch.reshape(
+        (batch_size * num_lead_times), num_times_output, num_grid_points, -1)
+      specs_batch = specs_batch.reshape(
+        (batch_size * num_lead_times), -1)
+      # Shuffle the input/outputs along the batch axis
+      if shuffle_key is not None:
+        specs_batch, u_lag_batch, u_out_batch = shuffle_arrays(
+          shuffle_key, [specs_batch, u_lag_batch, u_out_batch])
+      # Calculate loss and grads and update state
+      loss, grads = get_loss_and_grads(
+        params=state.params,
+        specs=specs_batch,
+        u_lag=u_lag_batch,
+        u_out=u_out_batch,
+      )
+      state = state.apply_gradients(grads=grads)
+      loss_epoch += loss * batch_size / num_samples_trn
 
-    state = state.apply_gradients(grads=grads)
-
-    return state, loss
+    return state, loss_epoch
 
   @jax.jit
   def compute_error_norm_per_var(state: TrainState, specs: Array, trajectories: Array) -> Array:
@@ -242,42 +275,15 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     trajectories, specs = shuffle_arrays(subkey, [dataset_trn['trajectories'], dataset_trn['specs']])
 
     # SPLIT IN BATCHES
-    num_batches = num_samples_trn // batch_size
     batches = (
       jnp.split(trajectories, num_batches),
       jnp.split(specs, num_batches)
     )
 
-    # PERMUTE LEAD TIME RANDOMLY FOR EACH BATCH
-    lead_times_per_batch: list[jnp.ndarray] = []
-    for _ in range(num_batches):
-      subkey, key = jax.random.split(key)
-      lead_times_per_batch.append(jax.random.permutation(subkey, lead_times))
-
-    loss_trn = []
-    for idx_lead_time in range(len(lead_times)):
-      _loss_trn = 0.
-      # TODO: Concatenate multiple batches together to make the trainings even faster
-      for idx_batch, batch in enumerate(zip(*batches)):
-        lead_time = lead_times_per_batch[idx_batch][idx_lead_time].item()
-        trajectory, specs = batch
-        u_lag = trajectory[:, (lead_time-offset-num_times_input):(lead_time-offset)]
-        u_out = trajectory[:, lead_time:(lead_time+num_times_output)]
-        state, loss_batch = update(state, u_lag, u_out)
-        _loss_trn += loss_batch.item() * batch_size / num_samples_trn
-      loss_trn.append(_loss_trn)
-      lr = state.opt_state.hyperparams['learning_rate'].item()
-      if idx_lead_time % (len(lead_times) // 10) == 0:
-        logging.info('\t'.join([
-          f'----',
-          f'EPCH: {epoch+1:04d}/{epochs:04d}',
-          f'PRGS: {(idx_lead_time+1) / len(lead_times) : 2.1%}',
-          f'LR: {lr:.2e}',
-          f'TIME: {time()-begin:06.1f}s',
-          f'LTRN: {loss_trn[-1]:.2e}',
-        ]))
-        sys.stdout.flush()
-    loss_trn_mean = np.mean(loss_trn)
+    # Train one epoch
+    subkey, key = jax.random.split(key)
+    state, loss_trn = train_one_epoch(state, batches, shuffle_key=subkey)
+    loss_trn = loss_trn.item()
 
     # Evaluation
     error_val_per_var = compute_error_norm_per_var(state, dataset_val['specs'], dataset_val['trajectories'])
@@ -285,13 +291,14 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
     time_tot = time() - begin
 
+    lr = state.opt_state.hyperparams['learning_rate'].item()
     logging.info('\t'.join([
       f'EPCH: {epoch+1:04d}/{epochs:04d}',
       f'TIME: {time_tot:06.1f}s',
-      f'LTRN: {loss_trn_mean:.2e}',
+      f'LR: {lr:.2e}',
+      f'LTRN: {loss_trn:.2e}',
       f'EVAL: {error_val:.2e}',
     ]))
-    sys.stdout.flush()
 
     # Save checkpoint
     with disable_logging(level=logging.FATAL):
@@ -299,7 +306,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
         step=epoch,
         items={
           'state': state,
-          'metrics': TrainMetrics(loss_trn=loss_trn_mean, error_val=error_val),
+          'metrics': TrainMetrics(loss_trn=loss_trn, error_val=error_val),
         },
         save_kwargs={'save_args': save_args}
       )
