@@ -177,7 +177,6 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
     return loss, grads
 
-  @jax.jit
   def train_one_epoch(
     state: TrainState, batches: Tuple[Sequence[Array], Sequence[Array]],
     shuffle_key: flax.typing.PRNGKey = None) -> Tuple[TrainState, Array]:
@@ -223,7 +222,6 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
     return state, loss_epoch
 
-  @jax.jit
   def compute_error_norm_per_var(state: TrainState, specs: Array, trajectories: Array) -> Array:
     """
     Predicts the trajectories autoregressively and returns L2-norm of the relative error.
@@ -249,8 +247,12 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
     return error_rel_l2(pred, label)
 
+  # Compile the functions in the loop
+  train_one_epoch_jitted = jax.jit(train_one_epoch)
+  compute_error_norm_per_var_jitted = jax.jit(compute_error_norm_per_var)
+
   # Evaluate before training
-  error_val_per_var = compute_error_norm_per_var(state, dataset_val['specs'], dataset_val['trajectories'])
+  error_val_per_var = compute_error_norm_per_var_jitted(state, dataset_val['specs'], dataset_val['trajectories'])
   error_val = jnp.sqrt(jnp.mean(jnp.power(error_val_per_var, 2))).item()
   # TODO: Add loss_val by calculating all input outputs
   logging.info('\t'.join([
@@ -270,11 +272,9 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   for epoch in range(epochs):
     begin = time()
 
-    # SHUFFLE TO GET DIFFERENT BATCHES
+    # Shuffle and split to batches
     subkey, key = jax.random.split(key)
     trajectories, specs = shuffle_arrays(subkey, [dataset_trn['trajectories'], dataset_trn['specs']])
-
-    # SPLIT IN BATCHES
     batches = (
       jnp.split(trajectories, num_batches),
       jnp.split(specs, num_batches)
@@ -282,11 +282,11 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
     # Train one epoch
     subkey, key = jax.random.split(key)
-    state, loss_trn = train_one_epoch(state, batches, shuffle_key=subkey)
+    state, loss_trn = train_one_epoch_jitted(state, batches, shuffle_key=subkey)
     loss_trn = loss_trn.item()
 
     # Evaluation
-    error_val_per_var = compute_error_norm_per_var(state, dataset_val['specs'], dataset_val['trajectories'])
+    error_val_per_var = compute_error_norm_per_var_jitted(state, dataset_val['specs'], dataset_val['trajectories'])
     error_val = jnp.sqrt(jnp.mean(jnp.power(error_val_per_var, 2))).item()
 
     time_tot = time() - begin
