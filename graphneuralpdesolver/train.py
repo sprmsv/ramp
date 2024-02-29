@@ -390,7 +390,7 @@ def main(argv):
   if FLAGS.params:
     DIR_OLD_EXPERIMENT = DIR_EXPERIMENTS / FLAGS.params
     orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
-    step = orbax.checkpoint.CheckpointManager(DIR_OLD_EXPERIMENT / 'checkpoints').latest_step()
+    step = orbax.checkpoint.CheckpointManager(DIR_OLD_EXPERIMENT / 'checkpoints', orbax_checkpointer).latest_step()
     ckpt = orbax_checkpointer.restore(directory=(DIR_OLD_EXPERIMENT / 'checkpoints' / str(step) / 'default'))
     state = ckpt['state']
     with open(DIR_OLD_EXPERIMENT / 'configs.json', 'rb') as f:
