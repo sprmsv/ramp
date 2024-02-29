@@ -177,16 +177,16 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
     return loss, grads
 
-  def train_one_epoch(
-    state: TrainState, batches: Tuple[Sequence[Array], Sequence[Array]],
-    shuffle_key: flax.typing.PRNGKey = None) -> Tuple[TrainState, Array]:
-    """Updates the state based on accumulated losses and gradients."""
+  @jax.jit
+  def train_one_batch(
+    state: TrainState, batch: Tuple[Array, Array],
+    key: flax.typing.PRNGKey = None) -> Tuple[TrainState, Array]:
+    """TODO: WRITE."""
 
-    loss_epoch = 0.
-    for batch in zip(*batches):
-      trajectory, specs = batch
-      # Get input and outputs for all lead times
-      u_lag_batch = jax.vmap(
+    trajectory, specs = batch
+
+    # Get input and outputs for all lead times
+    u_lag_batch = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
           operand=trajectory,
           start_index=lt-offset-num_times_input,
@@ -194,34 +194,67 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
           axis=1,
         )
       )(lead_times)
-      u_out_batch = jax.vmap(
+    u_out_batch = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
           trajectory, start_index=lt, slice_size=num_times_output, axis=1)
       )(lead_times)
-      specs_batch = specs[None, :, :].repeat(repeats=num_lead_times, axis=1)
-      # Concatenate lead times along the batch axis
-      u_lag_batch = u_lag_batch.reshape(
+    specs_batch = specs[None, :, :].repeat(repeats=num_lead_times, axis=1)
+
+    # Concatenate lead times along the batch axis
+    u_lag_batch = u_lag_batch.reshape(
         (batch_size * num_lead_times), num_times_input, num_grid_points, -1)
-      u_out_batch = u_out_batch.reshape(
+    u_out_batch = u_out_batch.reshape(
         (batch_size * num_lead_times), num_times_output, num_grid_points, -1)
-      specs_batch = specs_batch.reshape(
+    specs_batch = specs_batch.reshape(
         (batch_size * num_lead_times), -1)
-      # Shuffle the input/outputs along the batch axis
-      if shuffle_key is not None:
-        specs_batch, u_lag_batch, u_out_batch = shuffle_arrays(
-          shuffle_key, [specs_batch, u_lag_batch, u_out_batch])
-      # Calculate loss and grads and update state
-      loss, grads = get_loss_and_grads(
+
+    # Shuffle the input/outputs along the batch axis
+    if key is not None:
+      specs_batch, u_lag_batch, u_out_batch = shuffle_arrays(
+        key, [specs_batch, u_lag_batch, u_out_batch])
+    # Calculate loss and grads and update state
+    loss, grads = get_loss_and_grads(
         params=state.params,
         specs=specs_batch,
         u_lag=u_lag_batch,
         u_out=u_out_batch,
-      )
-      state = state.apply_gradients(grads=grads)
+    )
+
+    state = state.apply_gradients(grads=grads)
+
+    return state, loss
+
+  def train_one_epoch(state: TrainState, key: flax.typing.PRNGKey) -> Tuple[TrainState, Array]:
+    """Updates the state based on accumulated losses and gradients."""
+
+    # Shuffle and split to batches
+    subkey, key = jax.random.split(key)
+    trajectories, specs = shuffle_arrays(subkey, [dataset_trn['trajectories'], dataset_trn['specs']])
+    batches = (
+      jnp.split(trajectories, num_batches),
+      jnp.split(specs, num_batches)
+    )
+
+    # Loop over the batches
+    loss_epoch = 0.
+    for idx, batch in enumerate(zip(*batches)):
+      begin_batch = time()
+      subkey, key = jax.random.split(key)
+      state, loss = train_one_batch(state, batch, subkey)
       loss_epoch += loss * batch_size / num_samples_trn
+      time_batch = time() - begin_batch
+
+      if not (idx % (num_batches // 5)):
+        logging.info('\t'.join([
+          f'\t',
+          f'BTCH: {idx+1:04d}/{num_batches:04d}',
+          f'TIME: {time_batch:06.1f}s',
+          f'LOSS: {loss:.2e}',
+        ]))
 
     return state, loss_epoch
 
+  @jax.jit
   def compute_error_norm_per_var(state: TrainState, specs: Array, trajectories: Array) -> Array:
     """
     Predicts the trajectories autoregressively and returns L2-norm of the relative error.
@@ -247,12 +280,8 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
     return error_rel_l2(pred, label)
 
-  # Compile the functions in the loop
-  train_one_epoch_jitted = jax.jit(train_one_epoch)
-  compute_error_norm_per_var_jitted = jax.jit(compute_error_norm_per_var)
-
   # Evaluate before training
-  error_val_per_var = compute_error_norm_per_var_jitted(state, dataset_val['specs'], dataset_val['trajectories'])
+  error_val_per_var = compute_error_norm_per_var(state, dataset_val['specs'], dataset_val['trajectories'])
   error_val = jnp.sqrt(jnp.mean(jnp.power(error_val_per_var, 2))).item()
   # TODO: Add loss_val by calculating all input outputs
   logging.info('\t'.join([
@@ -272,32 +301,25 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   for epoch in range(epochs):
     begin = time()
 
-    # Shuffle and split to batches
-    subkey, key = jax.random.split(key)
-    trajectories, specs = shuffle_arrays(subkey, [dataset_trn['trajectories'], dataset_trn['specs']])
-    batches = (
-      jnp.split(trajectories, num_batches),
-      jnp.split(specs, num_batches)
-    )
-
     # Train one epoch
     subkey, key = jax.random.split(key)
-    state, loss_trn = train_one_epoch_jitted(state, batches, shuffle_key=subkey)
+    state, loss_trn = train_one_epoch(state, key=subkey)
     loss_trn = loss_trn.item()
 
-    # Evaluation
-    error_val_per_var = compute_error_norm_per_var_jitted(state, dataset_val['specs'], dataset_val['trajectories'])
+    # Evaluate
+    error_val_per_var = compute_error_norm_per_var(state, dataset_val['specs'], dataset_val['trajectories'])
     error_val = jnp.sqrt(jnp.mean(jnp.power(error_val_per_var, 2))).item()
 
     time_tot = time() - begin
 
+    # Log the results
     lr = state.opt_state.hyperparams['learning_rate'].item()
     logging.info('\t'.join([
       f'EPCH: {epoch+1:04d}/{epochs:04d}',
       f'TIME: {time_tot:06.1f}s',
       f'LR: {lr:.2e}',
-      f'LTRN: {loss_trn:.2e}',
-      f'EVAL: {error_val:.2e}',
+      f'LOSS: {loss_trn:.2e}',
+      f'ERROR: {error_val:.2e}',
     ]))
 
     # Save checkpoint

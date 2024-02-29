@@ -33,7 +33,7 @@ class GraphNeuralPDESolver(AbstractPDESolver):
   num_times_input: int = 1
   num_times_output: int = 1
   num_outputs: int = 1
-  latent_size: int = 32
+  latent_size: int = 128
   num_mlp_hidden_layers: int = 2
   num_message_passing_steps: int = 6
   num_gridmesh_cover: int = 4
