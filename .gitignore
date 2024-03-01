@@ -165,5 +165,6 @@ tmp.*
 *_tmp.*
 *tmp_*.*
 venv*/
-todo.md
 .DS_Store
+*.job
+slurm-*.out
