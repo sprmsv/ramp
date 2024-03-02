@@ -9,6 +9,13 @@
 
 - Compute l1-norm of the error too
 
+- Add the mixed training approach
+    - num_noise_steps
+    - num_unroll_steps (backprop through time)
+    - pick the two above randomly
+    - optionally, compute loss for all the predictions
+    - increase the two above in a training curriculum
+
 - Implement the new idea for grid-mesh connectivity in 1D
 
 - Implement training curriculum as in GraphCast
@@ -24,6 +31,7 @@
 - parameterize dtype
 
 - Adopt the models from the other works and extend your repo
+- Reproduce the experiments of the other works
 
 # EXPERIMENTS
 

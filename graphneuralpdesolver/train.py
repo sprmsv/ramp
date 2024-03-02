@@ -47,7 +47,7 @@ flags.DEFINE_float(name='lr', default=1e-04, required=False,
 flags.DEFINE_integer(name='epochs', default=20, required=False,
   help='Number of training epochs'
 )
-flags.DEFINE_integer(name='time_bundling', default=2, required=False,
+flags.DEFINE_integer(name='time_bundling', default=1, required=False,
   help='Number of the input time steps of the model'
 )
 flags.DEFINE_integer(name='noise_steps', default=1, required=False,
