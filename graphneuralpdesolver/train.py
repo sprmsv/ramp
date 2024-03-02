@@ -20,7 +20,7 @@ from graphneuralpdesolver.autoregressive import AutoregressivePredictor
 from graphneuralpdesolver.dataset import read_datasets, shuffle_arrays, normalize, unnormalize
 from graphneuralpdesolver.models.graphneuralpdesolver import GraphNeuralPDESolver, AbstractPDESolver
 from graphneuralpdesolver.utils import disable_logging, Array
-from graphneuralpdesolver.losses import loss_mse, error_rel_l2
+from graphneuralpdesolver.metrics import mse, rel_l2_error, rel_l1_error
 
 
 SEED = 43
@@ -55,6 +55,9 @@ flags.DEFINE_integer(name='noise_steps', default=1, required=False,
 )
 flags.DEFINE_bool(name='push_forward', default=False, required=False,
   help='If passed, the push-forward trick is applied'
+)
+flags.DEFINE_bool(name='verbose', default=False, required=False,
+  help='If passed, training reports for batches are printed'
 )
 
 PDETYPE = {
@@ -134,7 +137,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       specs=specs,
       num_steps=1,
     )
-    return loss_mse(pred, u_out)
+    return mse(pred, u_out)
 
   def get_noisy_input(params: flax.typing.Collection, specs: Array,
                          u_inp_lagged: Array) -> Array:
@@ -278,7 +281,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     # Un-normalize the predictions
     pred = unnormalize(pred, stats=(s[:, num_times_input:] for s in stats_trn))
 
-    return error_rel_l2(pred, label)
+    return rel_l2_error(pred, label)
 
   # Evaluate before training
   error_val_per_var = compute_error_norm_per_var(state, dataset_val['specs'], dataset_val['trajectories'])

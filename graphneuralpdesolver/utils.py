@@ -6,6 +6,7 @@ import jax.numpy as jnp
 
 
 Array = Union[jnp.ndarray, np.ndarray]
+ScalarArray = Union[jnp.ndarray, np.ndarray]
 
 class disable_logging:
   """Context manager for disabling the logging."""
