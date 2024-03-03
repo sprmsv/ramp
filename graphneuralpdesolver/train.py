@@ -39,7 +39,7 @@ flags.DEFINE_integer(name='resolution', default=128, required=False,
 flags.DEFINE_string(name='experiment', default=None, required=True,
   help='Name of the experiment: {"E1", "E2", "E3", "WE1", "WE2", "WE3"'
 )
-flags.DEFINE_integer(name='batch_size', default=128, required=False,
+flags.DEFINE_integer(name='batch_size', default=4, required=False,
   help='Size of a batch of training samples'
 )
 flags.DEFINE_float(name='lr', default=1e-04, required=False,

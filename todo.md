@@ -1,28 +1,27 @@
-
 # PRIORITY
 
-- Add the mixed training approach
-    - optionally, compute loss for ALL the predictions (not only the last one)
-    - increase unroll_steps in a training curriculum
-
 - Implement the new idea for grid-mesh connectivity in 1D
-
-- Implement training curriculum as in GraphCast
-    - First start with only one unrolling step
-    - Then increase the unrolling steps
-    - In Brandstetter, the number of unrolling steps is chosen randomly
 
 - RE-GENERATE THE DATA !! PARAMETERS ARE REPEATED !!
 - Change the structure of the data and support all datasets
 
-- Consider parallel computing with pmap
-
-- parameterize dtype
-
 - Adopt the models from the other works and extend your repo
 - Reproduce the experiments of the other works
 
+# EXPERIMENT
+
+- compute loss for ALL the predictions (not only the last one)
+
+
+- Training curriculum as in GraphCast
+    - First start with only one unrolling step
+    - Then increase the unrolling steps
+
 # LATER
+
+- Consider parallel computing with pmap
+
+- parameterize dtype
 
 - Imrpove the momory footprint
     - It works with smaller batches
