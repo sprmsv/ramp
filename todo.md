@@ -23,12 +23,6 @@
 
 - parameterize dtype
 
-- Imrpove the momory footprint
-    - It works with smaller batches
-    - Still, why memory is being accumulated over epochs? Is something jitted multiple times? Make sure by creating the jitted function only once.
-    - Concatenations in the model could be the issue
-    - jax.vmap might solve this
-
 - Add setup.py with setuptools and read use cases:
     - %pip install --upgrade https://github.com/.../master.zip
 
