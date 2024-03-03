@@ -326,18 +326,20 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     f'L2ER-VAL: {metrics_val.error_l2 : .2e}',
   ]))
 
-  # Set the checkpoint manager
-  # TODO: Follow the pattern in this notebook and add best_fn to the options based on the metrics
-  # (https://colab.research.google.com/github/google/orbax/blob/main/checkpoint/orbax/checkpoint/orbax_checkpoint.ipynb)
+  # Set up the checkpoint manager
   with disable_logging(level=logging.FATAL):
     checkpointer = orbax.checkpoint.PyTreeCheckpointer()
-    checkpointer_options = orbax.checkpoint.CheckpointManagerOptions(max_to_keep=2, keep_period=5, create=True)
-    checkpoint_template = {'state': state, 'metrics_trn': metrics_trn, 'metrics_val': metrics_val}
-    checkpointer_save_args = orbax_utils.save_args_from_target(target=checkpoint_template)
+    checkpointer_options = orbax.checkpoint.CheckpointManagerOptions(
+      max_to_keep=2,
+      keep_period=10,
+      best_fn=(lambda metrics: metrics['loss']),
+      best_mode='min',
+      create=True,)
+    checkpointer_save_args = orbax_utils.save_args_from_target(target={'state': state})
     checkpoint_manager = orbax.checkpoint.CheckpointManager(
       (DIR / 'checkpoints'), checkpointer, checkpointer_options)
 
-  for epoch in range(epochs):
+  for epoch in range(1, epochs+1):
     # Store the initial time
     time_int = time()
 
@@ -352,7 +354,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     # Log the results
     time_tot = time() - time_int
     logging.info('\t'.join([
-      f'EPCH: {epoch+1 : 04d}/{epochs : 04d}',
+      f'EPCH: {epoch : 04d}/{epochs : 04d}',
       f'TIME: {time_tot : 06.1f}s',
       f'LR: {state.opt_state.hyperparams["learning_rate"].item() : .2e}',
       f'LOSS: {loss.item() : .2e}',
@@ -362,17 +364,14 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       f'L2ER-VAL: {metrics_val.error_l2 : .2e}',
     ]))
 
-    # Save checkpoint
     with disable_logging(level=logging.FATAL):
       checkpoint_manager.save(
         step=epoch,
-        items={
-          'state': state,
-          'metrics_val': metrics_val,
-          'metrics_trn': metrics_trn,
-        },
+        items={'state': state,},
+        metrics={'loss': loss.item(), 'l1': metrics_val.error_l1, 'l2': metrics_val.error_l2},
         save_kwargs={'save_args': checkpointer_save_args}
       )
+      checkpoint_manager.wait_until_finished()
 
   return state
 
