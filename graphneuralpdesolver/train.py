@@ -51,11 +51,8 @@ flags.DEFINE_integer(name='epochs', default=20, required=False,
 flags.DEFINE_integer(name='time_bundling', default=1, required=False,
   help='Number of the input time steps of the model'
 )
-flags.DEFINE_integer(name='noise_steps', default=1, required=False,
-  help='Number of autoregressive steps for getting a noisy input'
-)
-flags.DEFINE_bool(name='push_forward', default=False, required=False,
-  help='If passed, the push-forward trick is applied'
+flags.DEFINE_integer(name='unroll_steps', default=1, required=False,
+  help='Number of steps for getting a noisy input and applying the model autoregressively'
 )
 flags.DEFINE_bool(name='verbose', default=False, required=False,
   help='If passed, training reports for batches are printed'
@@ -88,7 +85,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   num_times_input = FLAGS.time_bundling
   num_times_output = FLAGS.time_bundling
   batch_size = FLAGS.batch_size
-  offset = FLAGS.noise_steps * num_times_output
+  offset = FLAGS.unroll_steps * num_times_output
   assert num_samples_trn % batch_size == 0
 
   # Store the initial time
@@ -132,20 +129,21 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   predictor = AutoregressivePredictor(predictor=model)
 
   def compute_loss(params: flax.typing.Collection, specs: Array,
-                   u_inp: Array, u_out: Array) -> Array:
+                   u_inp: Array, u_out: Array, num_steps: int) -> Array:
     """Computes the prediction of the model and returns its loss."""
 
     variables = {'params': params}
-    pred = predictor(
+    rollout = predictor(
       variables=variables,
       u_inp=u_inp,
       specs=specs,
-      num_steps=1,
+      num_steps=num_steps,
     )
-    return criterion_loss(pred, u_out)
+    u_out_pred = rollout[:, -num_times_output:]
+    return criterion_loss(u_out_pred, u_out)
 
   def get_noisy_input(params: flax.typing.Collection, specs: Array,
-                         u_inp_lagged: Array) -> Array:
+                      u_inp_lagged: Array, num_steps: int) -> Array:
     """Apply the model to the lagged input to get a noisy input."""
 
     variables = {'params': params}
@@ -153,7 +151,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       variables=variables,
       u_inp=u_inp_lagged,
       specs=specs,
-      num_steps=(offset // num_times_output)
+      num_steps=num_steps,
     )
     u_inp_noisy = jnp.concatenate([u_inp_lagged, rollout], axis=1)[:, -num_times_input:]
 
@@ -165,23 +163,17 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     Computes the loss and the gradients of the loss w.r.t the parameters.
     """
 
-    def compute_loss_without_cutting_the_grad(params, specs, u_lag, u_out):
-      if offset:
-        u_inp = get_noisy_input(params, specs, u_lag)
-      else:
-        u_inp = u_lag
-      return compute_loss(params, specs, u_inp, u_out)
+    # Split the unrolling steps randomly to cut the gradients along the way
+    # MODIFY: Change to JAX-generated random number (reproducability)
+    noise_steps = np.random.choice(FLAGS.unroll_steps + 1) if FLAGS.unroll_steps else 0
+    grads_steps = FLAGS.unroll_steps - noise_steps
 
-    if FLAGS.push_forward:
-      if offset:
-        u_inp = get_noisy_input(params, specs, u_lag)
-      else:
-        u_inp = u_lag
-      loss, grads = jax.value_and_grad(compute_loss)(
-        params, specs, u_inp, u_out)
-    else:
-      loss, grads = jax.value_and_grad(compute_loss_without_cutting_the_grad)(
-        params, specs, u_lag, u_out)
+    # Get noisy input
+    u_inp = get_noisy_input(
+      params, specs, u_lag, num_steps=noise_steps)
+    # Use noisy input and compute gradients
+    loss, grads = jax.value_and_grad(compute_loss)(
+      params, specs, u_inp, u_out, num_steps=(grads_steps + 1))
 
     return loss, grads
 
