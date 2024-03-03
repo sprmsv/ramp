@@ -54,6 +54,9 @@ flags.DEFINE_integer(name='time_bundling', default=1, required=False,
 flags.DEFINE_integer(name='unroll_steps', default=1, required=False,
   help='Number of steps for getting a noisy input and applying the model autoregressively'
 )
+flags.DEFINE_float(name='lr_decay', default=None, required=False,
+  help='The minimum learning rate decay in the cosine scheduler'
+)
 flags.DEFINE_bool(name='verbose', default=False, required=False,
   help='If passed, training reports for batches are printed'
 )
@@ -121,7 +124,11 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
   # Set up the optimization components
   criterion_loss = mse
-  lr = optax.cosine_decay_schedule(init_value=FLAGS.lr, decay_steps=(FLAGS.epochs * num_batches), alpha=1e-4)
+  lr = optax.cosine_decay_schedule(
+    init_value=FLAGS.lr,
+    decay_steps=(FLAGS.epochs * num_batches),
+    alpha=FLAGS.lr_decay,
+  ) if FLAGS.lr_decay else FLAGS.lr
   tx = optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-8)
   state = TrainState.create(apply_fn=model.apply, params=variables['params'], tx=tx)
 
