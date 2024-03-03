@@ -72,7 +72,6 @@ PDETYPE = {
 
 @dataclass
 class TrainMetrics:
-  loss: float = 0.
   error_l1: float = 0.
   error_l2: float = 0.
 
@@ -253,7 +252,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       loss_epoch += loss * batch_size / num_samples_trn
       time_batch = time() - begin_batch
 
-      if not (idx % (num_batches // 5)):
+      if FLAGS.verbose and not (idx % (num_batches // 5)):
         logging.info('\t'.join([
           f'\t',
           f'BTCH: {idx+1:04d}/{num_batches:04d}',
@@ -296,17 +295,14 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
       # Compute the metrics
       error_l1_per_var = compute_error_norm_per_var(
-        state, dataset['specs'], dataset['trajectories'], criterion=error_l1)
+        state, dataset['specs'], dataset['trajectories'], criterion=rel_l1_error)
       error_l1 = jnp.sqrt(jnp.mean(jnp.power(error_l1_per_var, 2)))
       error_l2_per_var = compute_error_norm_per_var(
-        state, dataset['specs'], dataset['trajectories'], criterion=error_l2)
+        state, dataset['specs'], dataset['trajectories'], criterion=rel_l2_error)
       error_l2 = jnp.sqrt(jnp.mean(jnp.power(error_l2_per_var, 2)))
-      loss = compute_error_norm_per_var(
-        state, dataset['specs'], dataset['trajectories'], criterion=criterion_loss)
 
       # Build metric object
       metrics = TrainMetrics(
-        loss=loss.item(),
         error_l1=error_l1.item(),
         error_l2=error_l2.item(),
       )
@@ -320,11 +316,10 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   # Report the initial evaluations
   time_tot_pre = time() - time_int_pre
   logging.info('\t'.join([
-    f'EPCH: {epoch+1 : 04d}/{epochs : 04d}',
+    f'EPCH: {0 : 04d}/{epochs : 04d}',
     f'TIME: {time_tot_pre : 06.1f}s',
-    f'LR: {state.opt_state.hyperparams['learning_rate'].item() : .2e}',
-    f'LOSS-TRN: {metrics_trn.loss : .2e}',
-    f'LOSS-VAL: {metrics_val.loss : .2e}',
+    f'LR: {state.opt_state.hyperparams["learning_rate"].item() : .2e}',
+    f'LOSS: {0. : .2e}',
     f'L1ER-TRN: {metrics_trn.error_l1 : .2e}',
     f'L1ER-VAL: {metrics_val.error_l1 : .2e}',
     f'L2ER-TRN: {metrics_trn.error_l2 : .2e}',
@@ -348,8 +343,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
     # Train one epoch
     subkey, key = jax.random.split(key)
-    state, loss_trn = train_one_epoch(state, key=subkey)
-    loss_trn = loss_trn.item()
+    state, loss = train_one_epoch(state, key=subkey)
 
     # Evaluate
     metrics_trn = evaluate(state=state, dataset=dataset_trn)
@@ -360,9 +354,8 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     logging.info('\t'.join([
       f'EPCH: {epoch+1 : 04d}/{epochs : 04d}',
       f'TIME: {time_tot : 06.1f}s',
-      f'LR: {state.opt_state.hyperparams['learning_rate'].item() : .2e}',
-      f'LOSS-TRN: {metrics_trn.loss : .2e}',
-      f'LOSS-VAL: {metrics_val.loss : .2e}',
+      f'LR: {state.opt_state.hyperparams["learning_rate"].item() : .2e}',
+      f'LOSS: {loss.item() : .2e}',
       f'L1ER-TRN: {metrics_trn.error_l1 : .2e}',
       f'L1ER-VAL: {metrics_val.error_l1 : .2e}',
       f'L2ER-TRN: {metrics_trn.error_l2 : .2e}',
