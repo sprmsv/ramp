@@ -1,7 +1,7 @@
 from datetime import datetime
 import functools
 from time import time
-from typing import Tuple, Any, Mapping, Callable
+from typing import Tuple, Any, Mapping, Sequence, Union
 import json
 from dataclasses import dataclass
 
@@ -71,9 +71,9 @@ PDETYPE = {
 }
 
 @dataclass
-class TrainMetrics:
-  error_l1: float = 0.
-  error_l2: float = 0.
+class EvalMetrics:
+  error_l1: Sequence[Tuple[int, Sequence[float]]] = None
+  error_l2: Sequence[Tuple[int, Sequence[float]]] = None
 
 DIR = DIR_EXPERIMENTS / datetime.now().strftime('%Y%m%d-%H%M%S.%f')
 
@@ -94,16 +94,15 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   # Store the initial time
   time_int_pre = time()
 
-  # Normalize train dataset
-  # NOTE: The validation dataset is normalized in the evaluation function
-  dataset_trn['trajectories'], stats_trn = normalize(dataset_trn['trajectories'])
+  # Normalize the train dataset
+  dataset_trn['trajectories_nrm'], stats_trn = normalize(dataset_trn['trajectories'])
 
   # Initialzize the model or use the loaded parameters
   if params:
     variables = {'params': params}
   else:
     subkey, key = jax.random.split(key)
-    sample_input_u = dataset_trn['trajectories'][:batch_size, :num_times_input]
+    sample_input_u = dataset_trn['trajectories_nrm'][:batch_size, :num_times_input]
     sample_input_specs = dataset_trn['specs'][:batch_size]
     variables = jax.jit(model.init)(subkey, u_inp=sample_input_u, specs=sample_input_specs)
 
@@ -236,7 +235,8 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
     # Shuffle and split to batches
     subkey, key = jax.random.split(key)
-    trajectories, specs = shuffle_arrays(subkey, [dataset_trn['trajectories'], dataset_trn['specs']])
+    trajectories, specs = shuffle_arrays(
+      subkey, [dataset_trn['trajectories_nrm'], dataset_trn['specs']])
     batches = (
       jnp.split(trajectories, num_batches),
       jnp.split(specs, num_batches)
@@ -261,56 +261,79 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
     return state, loss_epoch
 
-  @functools.partial(jax.jit, static_argnames=('criterion',))
-  def compute_error_norm_per_var(
-      state: TrainState, specs: Array, trajectories: Array,
-      criterion: Callable[[Array, Array], Array]) -> Array:
+  @functools.partial(jax.jit, static_argnames=('num_steps',))
+  def predict_trajectory(
+      state: TrainState, specs: Array, input: Array, num_steps: int,
+      stats_input: Tuple[Array, Array], stats_target: Tuple[Array, Array],
+    ) -> Array:
     """
-    Predicts the trajectories autoregressively and evaluates the criterion on them.
+    Normalizes the input and predicts the trajectories autoregressively.
+    The input dataset must be raw (not normalized).
     """
 
-    input = trajectories[:, :num_times_input]
-    label = trajectories[:, num_times_input:]
-
-    # Normalize the inputs
-    input, _ = normalize(input, stats=(s[:, :num_times_input] for s in stats_trn))
-
+    # Normalize the input
+    input, _ = normalize(input, stats=stats_input)
     # Get normalized predictions
     variables = {'params': state.params}
     pred = predictor(
       variables=variables,
-      u_inp=input,
       specs=specs,
-      num_steps=((num_times - num_times_input) // num_times_output),
+      u_inp=input,
+      num_steps=num_steps,
     )
+    # Denormalize the predictions
+    pred = unnormalize(pred, stats=stats_target)
 
-    # Un-normalize the predictions
-    pred = unnormalize(pred, stats=(s[:, num_times_input:] for s in stats_trn))
+    return pred
 
-    return criterion(pred, label)
+  def evaluate(state: TrainState, dataset: Array,
+        parts: Union[Sequence[int], int] = 1) -> EvalMetrics:
+      """Evaluates the model on a dataset based on multiple trajectory lengths."""
 
-  def evaluate(state: TrainState, dataset: Array) -> TrainMetrics:
-      """Evaluates the model on a dataset based on multiple metrics."""
+      # Initialize the containers
+      if isinstance(parts, int):
+        parts = [parts]
+      error_l1 = {p: [] for p in parts}
+      error_l2 = {p: [] for p in parts}
 
-      # Compute the metrics
-      error_l1_per_var = compute_error_norm_per_var(
-        state, dataset['specs'], dataset['trajectories'], criterion=rel_l1_error)
-      error_l1 = jnp.sqrt(jnp.mean(jnp.power(error_l1_per_var, 2)))
-      error_l2_per_var = compute_error_norm_per_var(
-        state, dataset['specs'], dataset['trajectories'], criterion=rel_l2_error)
-      error_l2 = jnp.sqrt(jnp.mean(jnp.power(error_l2_per_var, 2)))
+      for p in parts:
+        for idx_sub_trajectory in np.split(np.arange(num_times), p):
+          # Get the input/target time indices
+          idx_input = idx_sub_trajectory[:num_times_input]
+          idx_target = idx_sub_trajectory[num_times_input:]
+          # Split the dataset along the time axis
+          specs = dataset['specs']
+          input = dataset['trajectories'][:, idx_input]
+          target = dataset['trajectories'][:, idx_target]
+          # Get predictions and target
+          pred = predict_trajectory(
+            state=state,
+            specs=specs,
+            input=input,
+            num_steps=(target.shape[1] // num_times_output),
+            stats_input=tuple([s[:, idx_input] for s in stats_trn]),
+            stats_target=tuple([s[:, idx_target] for s in stats_trn]),
+          )
+          # Compute and store metrics
+          error_l1_per_var = rel_l1_error(pred, target)
+          error_l2_per_var = rel_l2_error(pred, target)
+          error_l1[p].append(jnp.sqrt(jnp.mean(jnp.power(error_l1_per_var, 2))).item())
+          error_l2[p].append(jnp.sqrt(jnp.mean(jnp.power(error_l2_per_var, 2))).item())
 
-      # Build metric object
-      metrics = TrainMetrics(
-        error_l1=error_l1.item(),
-        error_l2=error_l2.item(),
+      # Build the metrics object
+      metrics = EvalMetrics(
+        error_l1=[(p, errors) for p, errors in error_l1.items()],
+        error_l2=[(p, errors) for p, errors in error_l1.items()],
       )
 
       return metrics
 
+  # Set the evaluation partitions
+  eval_parts = [1, 4, 8, 16]
+  assert all([(num_times / p) >= (num_times_input + num_times_output) for p in eval_parts])
   # Evaluate before training
-  metrics_trn = evaluate(state=state, dataset=dataset_trn)
-  metrics_val = evaluate(state=state, dataset=dataset_val)
+  metrics_trn = evaluate(state=state, dataset=dataset_trn, parts=eval_parts)
+  metrics_val = evaluate(state=state, dataset=dataset_val, parts=eval_parts)
 
   # Report the initial evaluations
   time_tot_pre = time() - time_int_pre
@@ -318,15 +341,14 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     f'EPCH: {0 : 04d}/{epochs : 04d}',
     f'TIME: {time_tot_pre : 06.1f}s',
     f'LR: {state.opt_state.hyperparams["learning_rate"].item() : .2e}',
-    f'LOSS: {0. : .2e}',
-    f'L1ER-TRN: {metrics_trn.error_l1 : .2e}',
-    f'L1ER-VAL: {metrics_val.error_l1 : .2e}',
-    f'L2ER-TRN: {metrics_trn.error_l2 : .2e}',
-    f'L2ER-VAL: {metrics_val.error_l2 : .2e}',
+    f'RMSE: {0. : .2e}',
+    f'L2/{eval_parts[0]}: {metrics_val.error_l2[0][1][0] * 100 : .2f}%',
+    f'L2/{eval_parts[1]}: {metrics_val.error_l2[1][1][0] * 100 : .2f}%',
   ]))
 
   # Set up the checkpoint manager
   with disable_logging(level=logging.FATAL):
+    (DIR / 'metrics').mkdir()
     checkpointer = orbax.checkpoint.PyTreeCheckpointer()
     checkpointer_options = orbax.checkpoint.CheckpointManagerOptions(
       max_to_keep=1,
@@ -347,8 +369,8 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     state, loss = train_one_epoch(state, key=subkey)
 
     # Evaluate
-    metrics_trn = evaluate(state=state, dataset=dataset_trn)
-    metrics_val = evaluate(state=state, dataset=dataset_val)
+    metrics_trn = evaluate(state=state, dataset=dataset_trn, parts=eval_parts)
+    metrics_val = evaluate(state=state, dataset=dataset_val, parts=eval_parts)
 
     # Log the results
     time_tot = time() - time_int
@@ -356,21 +378,32 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       f'EPCH: {epoch : 04d}/{epochs : 04d}',
       f'TIME: {time_tot : 06.1f}s',
       f'LR: {state.opt_state.hyperparams["learning_rate"].item() : .2e}',
-      f'LOSS: {loss.item() : .2e}',
-      f'L1ER-TRN: {metrics_trn.error_l1 : .2e}',
-      f'L1ER-VAL: {metrics_val.error_l1 : .2e}',
-      f'L2ER-TRN: {metrics_trn.error_l2 : .2e}',
-      f'L2ER-VAL: {metrics_val.error_l2 : .2e}',
+      f'RMSE: {np.sqrt(loss).item() : .2e}',
+      f'L2/{eval_parts[0]}: {metrics_val.error_l2[0][1][0] * 100 : .2f}%',
+      f'L2/{eval_parts[1]}: {metrics_val.error_l2[1][1][0] * 100 : .2f}%',
     ]))
 
     with disable_logging(level=logging.FATAL):
+      checkpoint_metrics = {
+        'loss': loss.item(),
+        'train': {
+          'l1': metrics_trn.error_l1,
+          'l2': metrics_trn.error_l2
+        },
+        'valid': {
+          'l1': metrics_val.error_l1,
+          'l2': metrics_val.error_l2
+        },
+      }
+      # Store the state and the metrics
       checkpoint_manager.save(
         step=epoch,
         items={'state': state,},
-        metrics={'loss': loss.item(), 'l1': metrics_val.error_l1, 'l2': metrics_val.error_l2},
+        metrics=checkpoint_metrics,
         save_kwargs={'save_args': checkpointer_save_args}
       )
-      checkpoint_manager.wait_until_finished()
+      with open(DIR / 'metrics' / f'{str(epoch)}.json', 'w') as f:
+        json.dump(checkpoint_metrics, f)
 
   return state
 

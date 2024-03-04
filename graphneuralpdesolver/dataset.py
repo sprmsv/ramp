@@ -3,7 +3,7 @@
 from pathlib import Path
 import h5py
 import numpy as np
-from typing import Any, Union, Sequence
+from typing import Any, Union, Sequence, Tuple
 
 import numpy as np
 import jax
@@ -72,7 +72,7 @@ def shuffle_arrays(key: flax.typing.PRNGKey, arrays: Sequence[Array]) -> Sequenc
 
   return [arr[permutation] for arr in arrays]
 
-def normalize(trajectories, stats=None):
+def normalize(trajectories: Array, stats: Tuple[Array, Array] = None):
   if stats:
     mean, std = stats
   else:
@@ -83,7 +83,7 @@ def normalize(trajectories, stats=None):
 
   return trajectories, (mean, std)
 
-def unnormalize(trajectories, stats):
+def unnormalize(trajectories: Array, stats: Tuple[Array, Array]):
   mean, std = stats
   trajectories = std * trajectories + mean
 
