@@ -9,7 +9,6 @@ from graphneuralpdesolver.models.graphneuralpdesolver import AbstractPDESolver
 class AutoregressivePredictor:
 
   def __init__(self, predictor: AbstractPDESolver):
-    # self._predictor = predictor
     self._num_times_input = predictor.num_times_input
     self._num_times_output = predictor.num_times_output
     self._apply_predictor = jax.checkpoint(predictor.apply)

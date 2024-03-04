@@ -329,8 +329,8 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   with disable_logging(level=logging.FATAL):
     checkpointer = orbax.checkpoint.PyTreeCheckpointer()
     checkpointer_options = orbax.checkpoint.CheckpointManagerOptions(
-      max_to_keep=2,
-      keep_period=10,
+      max_to_keep=1,
+      keep_period=None,
       best_fn=(lambda metrics: metrics['loss']),
       best_mode='min',
       create=True,)
