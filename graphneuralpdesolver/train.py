@@ -42,20 +42,23 @@ flags.DEFINE_string(name='experiment', default=None, required=True,
 flags.DEFINE_integer(name='batch_size', default=4, required=False,
   help='Size of a batch of training samples'
 )
+flags.DEFINE_integer(name='epochs', default=20, required=False,
+  help='Number of training epochs'
+)
 flags.DEFINE_float(name='lr', default=1e-04, required=False,
   help='Training learning rate'
 )
-flags.DEFINE_integer(name='epochs', default=20, required=False,
-  help='Number of training epochs'
+flags.DEFINE_float(name='lr_decay', default=None, required=False,
+  help='The minimum learning rate decay in the cosine scheduler'
+)
+flags.DEFINE_integer(name='latent_size', default=128, required=False,
+  help='Size of latent node and edge features'
 )
 flags.DEFINE_integer(name='time_bundling', default=1, required=False,
   help='Number of the input time steps of the model'
 )
 flags.DEFINE_integer(name='unroll_steps', default=1, required=False,
   help='Number of steps for getting a noisy input and applying the model autoregressively'
-)
-flags.DEFINE_float(name='lr_decay', default=None, required=False,
-  help='The minimum learning rate decay in the cosine scheduler'
 )
 flags.DEFINE_bool(name='verbose', default=False, required=False,
   help='If passed, training reports for batches are printed'
@@ -478,6 +481,7 @@ def main(argv):
       num_times_input=FLAGS.time_bundling,
       num_times_output=FLAGS.time_bundling,
       num_outputs=datasets['valid']['trajectories'].shape[3],
+      latent_size=FLAGS.latent_size,
     )
   model = get_model(model_kwargs)
 
