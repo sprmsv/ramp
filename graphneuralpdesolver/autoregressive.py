@@ -14,7 +14,7 @@ class AutoregressivePredictor:
     self._apply_predictor = jax.checkpoint(predictor.apply)
 
   def __call__(self, variables: flax.typing.VariableDict,
-               u_inp: Array, specs: Array, num_steps: int) -> Array:
+               specs: Array, u_inp: Array, num_steps: int) -> Array:
 
     batch_size = u_inp.shape[0]
     assert u_inp.shape[1] == self._num_times_input
@@ -22,7 +22,7 @@ class AutoregressivePredictor:
     num_outputs = u_inp.shape[3]
 
     def scan_fn(u_inp, forcing):
-      u_out = self._apply_predictor(variables, u_inp=u_inp, specs=specs)
+      u_out = self._apply_predictor(variables, specs=specs, u_inp=u_inp)
       if self._num_times_input > self._num_times_output:
         u_inp_next = jnp.concatenate([u_inp[:, -(self._num_times_input-self._num_times_output):], u_out], axis=1)
       else:

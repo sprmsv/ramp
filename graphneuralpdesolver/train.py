@@ -54,14 +54,17 @@ flags.DEFINE_float(name='lr_decay', default=None, required=False,
 flags.DEFINE_integer(name='latent_size', default=128, required=False,
   help='Size of latent node and edge features'
 )
-flags.DEFINE_integer(name='time_bundling', default=1, required=False,
-  help='Number of the input time steps of the model'
-)
 flags.DEFINE_integer(name='unroll_steps', default=1, required=False,
   help='Number of steps for getting a noisy input and applying the model autoregressively'
 )
+flags.DEFINE_integer(name='direct_steps', default=1, required=False,
+  help='Maximum number of time steps between input/output pairs during training'
+)
 flags.DEFINE_bool(name='verbose', default=False, required=False,
   help='If passed, training reports for batches are printed'
+)
+flags.DEFINE_bool(name='debug', default=False, required=False,
+  help='If passed, the code is launched only for debugging purposes.'
 )
 
 PDETYPE = {
@@ -88,10 +91,8 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   num_samples_trn = dataset_trn['trajectories'].shape[0]
   num_times = dataset_trn['trajectories'].shape[1]
   num_grid_points = dataset_trn['trajectories'].shape[2]
-  num_times_input = FLAGS.time_bundling
-  num_times_output = FLAGS.time_bundling
   batch_size = FLAGS.batch_size
-  offset = FLAGS.unroll_steps * num_times_output
+  offset = FLAGS.unroll_steps
   assert num_samples_trn % batch_size == 0
 
   # Store the initial time
@@ -105,9 +106,9 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     variables = {'params': params}
   else:
     subkey, key = jax.random.split(key)
-    sample_input_u = dataset_trn['trajectories_nrm'][:batch_size, :num_times_input]
+    sample_input_u = dataset_trn['trajectories_nrm'][:batch_size, :1]
     sample_input_specs = dataset_trn['specs'][:batch_size]
-    variables = jax.jit(model.init)(subkey, u_inp=sample_input_u, specs=sample_input_specs)
+    variables = jax.jit(model.init)(subkey, specs=sample_input_specs, u_inp=sample_input_u)
 
   # Calculate the total number of parameters
   n_model_parameters = np.sum(
@@ -120,9 +121,9 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   logging.info(f'Total number of trainable paramters: {n_model_parameters}')
 
   # Define the permissible lead times and number of batches
-  lead_times = jnp.arange(offset+num_times_input, num_times-num_times_output+1)
+  lead_times = jnp.arange(offset+1, num_times)
   num_batches = num_samples_trn // batch_size
-  num_lead_times = num_times - (num_times_input + num_times_output + offset) + 1
+  num_lead_times = num_times + offset - 1
 
   # Set up the optimization components
   criterion_loss = mse
@@ -144,11 +145,11 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     variables = {'params': params}
     rollout = predictor(
       variables=variables,
-      u_inp=u_inp,
       specs=specs,
+      u_inp=u_inp,
       num_steps=num_steps,
     )
-    u_out_pred = rollout[:, -num_times_output:]
+    u_out_pred = rollout[:, -1:]
     return criterion_loss(u_out_pred, u_out)
 
   def get_noisy_input(params: flax.typing.Collection, specs: Array,
@@ -158,11 +159,11 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     variables = {'params': params}
     rollout = predictor(
       variables=variables,
-      u_inp=u_inp_lagged,
       specs=specs,
+      u_inp=u_inp_lagged,
       num_steps=num_steps,
     )
-    u_inp_noisy = jnp.concatenate([u_inp_lagged, rollout], axis=1)[:, -num_times_input:]
+    u_inp_noisy = rollout[:, -1:]
 
     return u_inp_noisy
 
@@ -198,22 +199,22 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     u_lag_batch = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
           operand=trajectory,
-          start_index=lt-offset-num_times_input,
-          slice_size=num_times_input,
+          start_index=lt-offset-1,
+          slice_size=1,
           axis=1,
         )
       )(lead_times)
     u_out_batch = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
-          trajectory, start_index=lt, slice_size=num_times_output, axis=1)
+          trajectory, start_index=lt, slice_size=1, axis=1)
       )(lead_times)
     specs_batch = specs[None, :, :].repeat(repeats=num_lead_times, axis=1)
 
     # Concatenate lead times along the batch axis
     u_lag_batch = u_lag_batch.reshape(
-        (batch_size * num_lead_times), num_times_input, num_grid_points, -1)
+        (batch_size * num_lead_times), 1, num_grid_points, -1)
     u_out_batch = u_out_batch.reshape(
-        (batch_size * num_lead_times), num_times_output, num_grid_points, -1)
+        (batch_size * num_lead_times), 1, num_grid_points, -1)
     specs_batch = specs_batch.reshape(
         (batch_size * num_lead_times), -1)
 
@@ -302,8 +303,8 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       for p in parts:
         for idx_sub_trajectory in np.split(np.arange(num_times), p):
           # Get the input/target time indices
-          idx_input = idx_sub_trajectory[:num_times_input]
-          idx_target = idx_sub_trajectory[num_times_input:]
+          idx_input = idx_sub_trajectory[:1]
+          idx_target = idx_sub_trajectory[1:]
           # Split the dataset along the time axis
           specs = dataset['specs']
           input = dataset['trajectories'][:, idx_input]
@@ -313,7 +314,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
             state=state,
             specs=specs,
             input=input,
-            num_steps=(target.shape[1] // num_times_output),
+            num_steps=target.shape[1],
             stats_input=tuple([s[:, idx_input] for s in stats_trn]),
             stats_target=tuple([s[:, idx_target] for s in stats_trn]),
           )
@@ -333,7 +334,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
   # Set the evaluation partitions
   eval_parts = [1, 4, 8, 16]
-  assert all([(num_times / p) >= (num_times_input + num_times_output) for p in eval_parts])
+  assert all([(num_times / p) >= 2 for p in eval_parts])
   # Evaluate before training
   metrics_trn = evaluate(state=state, dataset=dataset_trn, parts=eval_parts)
   metrics_val = evaluate(state=state, dataset=dataset_val, parts=eval_parts)
@@ -478,10 +479,9 @@ def main(argv):
   if not model_kwargs:
     model_kwargs = dict(
       domain=domain,
-      num_times_input=FLAGS.time_bundling,
-      num_times_output=FLAGS.time_bundling,
       num_outputs=datasets['valid']['trajectories'].shape[3],
-      latent_size=FLAGS.latent_size,
+      latent_size=(2 if FLAGS.debug else FLAGS.latent_size),
+      time_conditioned=True,
     )
   model = get_model(model_kwargs)
 
@@ -498,7 +498,7 @@ def main(argv):
   key = jax.random.PRNGKey(SEED)
   state = train(
     model=model,
-    dataset_trn=datasets['train'],
+    dataset_trn=(datasets['valid'] if FLAGS.debug else datasets['train']),
     dataset_val=datasets['valid'],
     epochs=FLAGS.epochs,
     key=key,

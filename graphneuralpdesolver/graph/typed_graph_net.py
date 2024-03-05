@@ -72,7 +72,7 @@ def GraphNetwork(
     A method that applies the configured GraphNetwork.
   """
 
-  def _apply_graph_net(graph: TypedGraph) -> TypedGraph:
+  def _apply_graph_net(graph: TypedGraph, **kwargs) -> TypedGraph:
     """Applies a configured GraphNetwork to a graph.
 
     This implementation follows Algorithm 1 in https://arxiv.org/abs/1806.01261
@@ -93,14 +93,14 @@ def GraphNetwork(
     updated_edges = dict(updated_graph.edges)
     for edge_set_name, edge_fn in update_edge_fn.items():
       edge_set_key = graph.edge_key_by_name(edge_set_name)
-      updated_edges[edge_set_key] = _edge_update(updated_graph, edge_fn, edge_set_key)
+      updated_edges[edge_set_key] = _edge_update(updated_graph, edge_fn, edge_set_key, kwargs)
     updated_graph = updated_graph._replace(edges=updated_edges)
 
     # Node update.
     updated_nodes = dict(updated_graph.nodes)
     for node_set_key, node_fn in update_node_fn.items():
       updated_nodes[node_set_key] = _node_update(
-          updated_graph, node_fn, node_set_key, aggregate_edges_for_nodes_fn)
+          updated_graph, node_fn, node_set_key, aggregate_edges_for_nodes_fn, kwargs)
     updated_graph = updated_graph._replace(nodes=updated_nodes)
 
     # Global update.
@@ -108,7 +108,8 @@ def GraphNetwork(
       updated_context = _global_update(
           updated_graph, update_global_fn,
           aggregate_edges_for_globals_fn,
-          aggregate_nodes_for_globals_fn)
+          aggregate_nodes_for_globals_fn,
+          kwargs)
       updated_graph = updated_graph._replace(context=updated_context)
 
     return updated_graph
@@ -116,7 +117,8 @@ def GraphNetwork(
   return _apply_graph_net
 
 
-def _edge_update(graph: TypedGraph, edge_fn: jraph.GNUpdateEdgeFn, edge_set_key: EdgeSetKey) -> EdgeSet:
+def _edge_update(graph: TypedGraph, edge_fn: jraph.GNUpdateEdgeFn,
+  edge_set_key: EdgeSetKey, fn_kwargs: dict) -> EdgeSet:
   """Updates an edge set of a given key."""
 
   sender_nodes = graph.nodes[edge_set_key.node_sets[0]]
@@ -137,11 +139,11 @@ def _edge_update(graph: TypedGraph, edge_fn: jraph.GNUpdateEdgeFn, edge_set_key:
       graph.context.features)
   new_features = edge_fn(
       edge_set.features, sent_attributes, received_attributes,
-      global_features)
+      global_features, **fn_kwargs)
   return edge_set._replace(features=new_features)
 
-
-def _node_update(graph: TypedGraph, node_fn: GNUpdateNodeFn, node_set_key: str, aggregation_fn: Callable) -> NodeSet:
+def _node_update(graph: TypedGraph, node_fn: GNUpdateNodeFn,
+  node_set_key: str, aggregation_fn: Callable, fn_kwargs: dict) -> NodeSet:
   """Updates an edge set of a given key."""
   node_set = graph.nodes[node_set_key]
   sum_n_node = tree.tree_leaves(node_set.features)[0].shape[0]
@@ -169,11 +171,12 @@ def _node_update(graph: TypedGraph, node_fn: GNUpdateNodeFn, node_set_key: str, 
       lambda g: jnp.repeat(g, n_node, axis=0, total_repeat_length=sum_n_node),
       graph.context.features)
   new_features = node_fn(
-      node_set.features, sent_features, received_features, global_features)
+      node_set.features, sent_features, received_features, global_features, **fn_kwargs)
   return node_set._replace(features=new_features)
 
-
-def _global_update(graph: TypedGraph, global_fn: GNUpdateGlobalFn, edge_aggregation_fn: jraph.AggregateEdgesToGlobalsFn, node_aggregation_fn: jraph.AggregateNodesToGlobalsFn) -> Context:
+def _global_update(graph: TypedGraph, global_fn: GNUpdateGlobalFn,
+  edge_aggregation_fn: jraph.AggregateEdgesToGlobalsFn,
+  node_aggregation_fn: jraph.AggregateNodesToGlobalsFn, fn_kwargs: dict) -> Context:
   """Updates an edge set of a given key."""
   n_graph = graph.context.n_graph.shape[0]
   graph_idx = jnp.arange(n_graph)
@@ -197,7 +200,7 @@ def _global_update(graph: TypedGraph, global_fn: GNUpdateGlobalFn, edge_aggregat
         lambda n: node_aggregation_fn(n, node_gr_idx, n_graph),   # pylint: disable=cell-var-from-loop
         node_set.features)
 
-  new_features = global_fn(node_features, edge_features, graph.context.features)
+  new_features = global_fn(node_features, edge_features, graph.context.features, **fn_kwargs)
   return graph.context._replace(features=new_features)
 
 
@@ -279,26 +282,26 @@ def GraphMapFeatures(
     embed_global_fn: function used to embed the globals.
   """
 
-  def _embed(graph: TypedGraph) -> TypedGraph:
+  def _embed(graph: TypedGraph, **kwargs) -> TypedGraph:
 
     updated_edges = dict(graph.edges)
     if embed_edge_fn:
       for edge_set_name, embed_fn in embed_edge_fn.items():
         edge_set_key = graph.edge_key_by_name(edge_set_name)
         edge_set = graph.edges[edge_set_key]
-        updated_edges[edge_set_key] = edge_set._replace(features=embed_fn(edge_set.features))
+        updated_edges[edge_set_key] = edge_set._replace(features=embed_fn(edge_set.features, **kwargs))
 
     updated_nodes = dict(graph.nodes)
     if embed_node_fn:
       for node_set_key, embed_fn in embed_node_fn.items():
         node_set = graph.nodes[node_set_key]
         updated_nodes[node_set_key] = node_set._replace(
-          features=embed_fn(node_set.features))
+          features=embed_fn(node_set.features, **kwargs))
 
     updated_context = graph.context
     if embed_global_fn:
       updated_context = updated_context._replace(
-        features=embed_global_fn(updated_context.features))
+        features=embed_global_fn(updated_context.features, **kwargs))
 
     return graph._replace(edges=updated_edges, nodes=updated_nodes,
                           context=updated_context)

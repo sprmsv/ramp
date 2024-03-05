@@ -33,7 +33,7 @@ import jraph
 
 from graphneuralpdesolver.graph.typed_graph import TypedGraph
 from graphneuralpdesolver.graph.typed_graph_net import GraphMapFeatures, InteractionNetwork
-from graphneuralpdesolver.models.utils import MLP
+from graphneuralpdesolver.models.utils import AugmentedMLP
 
 
 class DeepTypedGraphNet(nn.Module):
@@ -109,6 +109,7 @@ class DeepTypedGraphNet(nn.Module):
   edge_output_size: Optional[Mapping[str, int]] = None
   include_sent_messages_in_node_update: bool = False
   use_layer_norm: bool = True
+  use_learned_correction: bool = False
   activation: str = 'relu'
   f32_aggregation: bool = False
   aggregate_edges_for_nodes_fn: str = 'segment_sum'
@@ -124,13 +125,14 @@ class DeepTypedGraphNet(nn.Module):
     # The embedder graph network independently embeds edge and node features.
     if self.embed_edges:
       embed_edge_fn = {
-        edge_set_name: MLP(
+        edge_set_name: AugmentedMLP(
           layer_sizes=(
             [self.mlp_hidden_size] * self.mlp_num_hidden_layers
             + [self.edge_latent_size[edge_set_name]]
           ),
           activation=self._activation,
           use_layer_norm=self.use_layer_norm,
+          use_learned_correction=self.use_learned_correction,
           name=f'encoder_edges_{edge_set_name}',
         )
         for edge_set_name in self.edge_latent_size.keys()
@@ -139,13 +141,14 @@ class DeepTypedGraphNet(nn.Module):
       embed_edge_fn = None
     if self.embed_nodes:
       embed_node_fn = {
-        node_set_name: MLP(
+        node_set_name: AugmentedMLP(
           layer_sizes=(
             [self.mlp_hidden_size] * self.mlp_num_hidden_layers
             + [self.node_latent_size[node_set_name]]
           ),
           activation=self._activation,
           use_layer_norm=self.use_layer_norm,
+          use_learned_correction=self.use_learned_correction,
           name=f'encoder_nodes_{node_set_name}',
         )
         for node_set_name in self.node_latent_size.keys()
@@ -182,25 +185,27 @@ class DeepTypedGraphNet(nn.Module):
     self._processor_networks = [
       InteractionNetwork(
         update_edge_fn={
-          edge_set_name: MLP(
+          edge_set_name: AugmentedMLP(
             layer_sizes=(
               [self.mlp_hidden_size] * self.mlp_num_hidden_layers
               + [self.edge_latent_size[edge_set_name]]
             ),
             activation=self._activation,
             use_layer_norm=self.use_layer_norm,
+            use_learned_correction=self.use_learned_correction,
             name=f'processor_{step_i}_edges_{edge_set_name}',
           )
           for edge_set_name in self.edge_latent_size.keys()
         },
         update_node_fn={
-          node_set_name: MLP(
+          node_set_name: AugmentedMLP(
             layer_sizes=(
               [self.mlp_hidden_size] * self.mlp_num_hidden_layers
               + [self.node_latent_size[node_set_name]]
             ),
             activation=self._activation,
             use_layer_norm=self.use_layer_norm,
+            use_learned_correction=self.use_learned_correction,
             name=f'processor_{step_i}_nodes_{node_set_name}',
           )
           for node_set_name in self.node_latent_size.keys()
@@ -214,25 +219,27 @@ class DeepTypedGraphNet(nn.Module):
     # The output MLPs converts edge/node latent features into the output sizes.
     output_kwargs = dict(
       embed_edge_fn={
-        edge_set_name: MLP(
+        edge_set_name: AugmentedMLP(
           layer_sizes=(
             [self.mlp_hidden_size] * self.mlp_num_hidden_layers
             + [self.edge_output_size[edge_set_name]]
           ),
           activation=self._activation,
           use_layer_norm=False,
+          use_learned_correction=False,
           name=f'decoder_edges_{edge_set_name}',
         )
         for edge_set_name in self.edge_output_size.keys()
       } if self.edge_output_size else None,
       embed_node_fn={
-        node_set_name: MLP(
+        node_set_name: AugmentedMLP(
           layer_sizes=(
             [self.mlp_hidden_size] * self.mlp_num_hidden_layers
             + [self.node_output_size[node_set_name]]
           ),
           activation=self._activation,
           use_layer_norm=False,
+          use_learned_correction=False,
           name=f'decoder_nodes_{node_set_name}',
         )
         for node_set_name in self.node_output_size.keys()
@@ -240,18 +247,18 @@ class DeepTypedGraphNet(nn.Module):
     )
     self._output_network = GraphMapFeatures(**output_kwargs)
 
-  def __call__(self, input_graph: TypedGraph) -> TypedGraph:
+  def __call__(self, input_graph: TypedGraph, correction: float) -> TypedGraph:
     """Forward pass of the learnable dynamics model."""
     # Embed input features (if applicable).
-    latent_graph_0 = self._embed(input_graph)
+    latent_graph_0 = self._embed(input_graph, c=correction)
 
     # Do `m` message passing steps in the latent graphs.
-    latent_graph_m = self._process(latent_graph_0)
+    latent_graph_m = self._process(latent_graph_0, c=correction)
 
     # Compute outputs from the last latent graph (if applicable).
-    return self._output(latent_graph_m)
+    return self._output(latent_graph_m, c=None)
 
-  def _embed(self, input_graph: TypedGraph) -> TypedGraph:
+  def _embed(self, input_graph: TypedGraph, **kwargs) -> TypedGraph:
     """Embeds the input graph features into a latent graph."""
 
     # Copy the context to all of the node types, if applicable.
@@ -274,10 +281,10 @@ class DeepTypedGraphNet(nn.Module):
           context=input_graph.context._replace(features=()))
 
     # Embeds the node and edge features.
-    latent_graph_0 = self._embedder_network(input_graph)
+    latent_graph_0 = self._embedder_network(input_graph, **kwargs)
     return latent_graph_0
 
-  def _process(self, latent_graph_0: TypedGraph) -> TypedGraph:
+  def _process(self, latent_graph_0: TypedGraph, **kwargs) -> TypedGraph:
     """Processes the latent graph with several steps of message passing."""
 
     # Do `num_message_passing_steps` with each of the `self._processor_networks`
@@ -286,15 +293,15 @@ class DeepTypedGraphNet(nn.Module):
     latent_graph = latent_graph_0
     for _ in range(self.num_processor_repetitions):
       for processor_network in self._processor_networks:
-        latent_graph = self._process_step(processor_network, latent_graph)
+        latent_graph = self._process_step(processor_network, latent_graph, **kwargs)
 
     return latent_graph
 
-  def _process_step(self, processor_network_k, latent_graph_prev_k: TypedGraph) -> TypedGraph:
+  def _process_step(self, processor_network_k, latent_graph_prev_k: TypedGraph, **kwargs) -> TypedGraph:
     """Single step of message passing with node/edge residual connections."""
 
     # One step of message passing.
-    latent_graph_k = processor_network_k(latent_graph_prev_k)
+    latent_graph_k = processor_network_k(latent_graph_prev_k, **kwargs)
 
     # Add residuals.
     nodes_with_residuals = {}
@@ -311,9 +318,9 @@ class DeepTypedGraphNet(nn.Module):
         nodes=nodes_with_residuals, edges=edges_with_residuals)
     return latent_graph_k
 
-  def _output(self, latent_graph: TypedGraph) -> TypedGraph:
+  def _output(self, latent_graph: TypedGraph, **kwargs) -> TypedGraph:
     """Produces the output from the latent graph."""
-    return self._output_network(latent_graph)
+    return self._output_network(latent_graph, **kwargs)
 
 def _get_activation_fn(name):
   """Return activation function corresponding to function_name."""
