@@ -323,7 +323,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       # Build the metrics object
       metrics = EvalMetrics(
         error_l1=[(p, errors) for p, errors in error_l1.items()],
-        error_l2=[(p, errors) for p, errors in error_l1.items()],
+        error_l2=[(p, errors) for p, errors in error_l2.items()],
       )
 
       return metrics
