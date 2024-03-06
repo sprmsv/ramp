@@ -191,7 +191,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
     return loss, grads
 
-  def get_loss_and_grads_subbatch(
+  def get_loss_and_grads_sub_batch(
     state: TrainState, key: flax.typing.PRNGKey,
     specs: Array, u_lag: Array, u_out: Array, dt: int,
   ) -> Tuple[Array, PyTreeDef]:
@@ -206,17 +206,28 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     u_lag = jnp.stack(jnp.split(u_lag, num_lead_times))
     u_out = jnp.stack(jnp.split(u_out, num_lead_times))
 
-    # Calculate loss and grads
-    loss, grads = jax.vmap(
-      fun=get_loss_and_grads,
-      in_axes=(None, 0, 0, 0, None)
-    )(state.params, specs, u_lag, u_out, dt)
+    def _update_state_on_mini_batch(i, carry):
+      _state, _loss_mean = carry
+      _loss, _grads = get_loss_and_grads(
+        params=state.params,
+        specs=specs[i],
+        u_lag=u_lag[i],
+        u_out=u_out[i],
+        dt=dt,
+      )
+      # Update the state by applying the gradients
+      _state = _state.apply_gradients(grads=_grads)
+      _loss_mean += _loss / num_lead_times
+      return _state, _loss_mean
 
-    # Aggregate loss and grads  # CHECK: mean or sum?
-    loss = jnp.mean(loss)
-    grads = jax.tree_util.tree_map(jnp.mean, grads)
+    state, loss = jax.lax.fori_loop(
+      lower=0,
+      upper=num_lead_times,
+      body_fun=_update_state_on_mini_batch,
+      init_val=(state, 0.)
+    )
 
-    return loss, grads
+    return state, loss
 
   @jax.jit
   def train_one_batch(
@@ -252,21 +263,30 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
         (batch_size * num_lead_times), -1)
 
     # Compute loss and gradient by mapping on the time axis
-    # Same u_lag and specs, vmap on dt
+    # Same u_lag and specs, loop over dt
     subkeys = jnp.stack(jax.random.split(key, num=FLAGS.direct_steps))
-    dt_batch = 1 + np.arange(FLAGS.direct_steps)  # -> [direct_steps,]
+    dt_batch = 1 + jnp.arange(FLAGS.direct_steps)  # -> [direct_steps,]
     u_out_batch = jnp.expand_dims(u_out_batch, axis=2).swapaxes(0, 1)  # -> [direct_steps, ...]
-    loss, grads = jax.vmap(
-      fun=get_loss_and_grads_subbatch,
-      in_axes=(None, 0, None, None, 0, 0),
-    )(state, subkeys, specs_batch, u_lag_batch, u_out_batch, dt_batch)
 
-    # Aggregate loss and grads  # CHECK: mean or sum?
-    loss = jnp.mean(loss)
-    grads = jax.tree_util.tree_map(jnp.mean, grads)
+    def update_state_on_sub_batch(i, carry):
+      _state, _loss_mean = carry
+      _state, _loss = get_loss_and_grads_sub_batch(
+        state=state,
+        key=subkeys[i],
+        specs=specs_batch,
+        u_lag=u_lag_batch,
+        u_out=u_out_batch[i],
+        dt=dt_batch[i],
+      )
+      _loss_mean += _loss / FLAGS.direct_steps
+      return _state, _loss_mean
 
-    # Update the state by applying the gradients
-    state = state.apply_gradients(grads=grads)
+    state, loss = jax.lax.fori_loop(
+      lower=0,
+      upper=FLAGS.direct_steps,
+      body_fun=update_state_on_sub_batch,
+      init_val=(state, 0.)
+    )
 
     return state, loss
 
@@ -329,6 +349,8 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   def evaluate(state: TrainState, dataset: Array,
         parts: Union[Sequence[int], int] = 1) -> EvalMetrics:
       """Evaluates the model on a dataset based on multiple trajectory lengths."""
+
+      # TODO: Evaluate in batches
 
       # Initialize the containers
       if isinstance(parts, int):
