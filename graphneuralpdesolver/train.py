@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from absl import app, flags, logging
 import jax
 import jax.numpy as jnp
+from jax.tree_util import PyTreeDef
 import numpy as np
 import optax
 import flax.linen as nn
@@ -137,33 +138,22 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   state = TrainState.create(apply_fn=model.apply, params=variables['params'], tx=tx)
 
   # Define the autoregressive predictor
-  predictor_full = AutoregressivePredictor(operator=model, full_rollout=True)
-  predictor_skip = AutoregressivePredictor(operator=model, full_rollout=False)
+  predictor = AutoregressivePredictor(operator=model, num_steps_direct=FLAGS.direct_steps)
 
   def compute_loss(params: flax.typing.Collection, specs: Array,
-                   u_inp_lagged: Array, dt: Array, u_out: Array, num_steps_autoreg: int) -> Array:
+                   u_inp_lagged: Array, dt: int, u_out: Array, num_steps_autoreg: int) -> Array:
     """Computes the prediction of the model and returns its loss."""
 
     variables = {'params': params}
     # Apply autoregressive steps
-    _, u_inp = predictor_skip(
+    u_inp = predictor.jump(
       variables=variables,
       specs=specs,
       u_inp=u_inp_lagged,
       num_steps=(num_steps_autoreg * FLAGS.direct_steps),
-      num_steps_direct=FLAGS.direct_steps,
     )
-    # Get rollouts using the input from above
-    rollout, u_next = predictor_full(
-      variables=variables,
-      specs=specs,
-      u_inp=u_inp,
-      num_steps=FLAGS.direct_steps,
-      num_steps_direct=FLAGS.direct_steps,
-    )
-    # Get the corresponding output prediction based on dt
-    rollout_extended = jnp.concatenate([rollout, u_next], axis=1)
-    u_out_pred = rollout_extended[np.arange(u_out.shape[0]), dt][:, None, :, :]
+    # Get the output
+    u_out_pred = model.apply(variables, specs=specs, u_inp=u_inp, dt=dt.reshape(1,))
 
     return criterion_loss(u_out_pred, u_out)
 
@@ -172,18 +162,17 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     """Apply the model to the lagged input to get a noisy input."""
 
     variables = {'params': params}
-    _, u_inp_noisy = predictor_skip(
+    u_inp_noisy = predictor.jump(
       variables=variables,
       specs=specs,
       u_inp=u_inp_lagged,
       num_steps=(num_steps_autoreg * FLAGS.direct_steps),
-      num_steps_direct=FLAGS.direct_steps,
     )
 
     return u_inp_noisy
 
   def get_loss_and_grads(params: flax.typing.Collection, specs: Array,
-                         u_lag: Array, u_out: Array, dt: Array) -> Tuple[Array, Any]:
+    u_lag: Array, u_out: Array, dt: int) -> Tuple[Array, PyTreeDef]:
     """
     Computes the loss and the gradients of the loss w.r.t the parameters.
     """
@@ -202,80 +191,84 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
     return loss, grads
 
+  def get_loss_and_grads_subbatch(
+    state: TrainState, key: flax.typing.PRNGKey,
+    specs: Array, u_lag: Array, u_out: Array, dt: int,
+  ) -> Tuple[Array, PyTreeDef]:
+    # NOTE: INPUT SHAPES [batch_size * num_lead_times, ...]
+
+    # Shuffle the input/outputs along the batch axis
+    specs, u_lag, u_out = shuffle_arrays(key, [specs, u_lag, u_out])
+
+    # Split into num_lead_times chunks and get loss and gradients
+    # -> [num_lead_times, batch_size, ...]
+    specs = jnp.stack(jnp.split(specs, num_lead_times))
+    u_lag = jnp.stack(jnp.split(u_lag, num_lead_times))
+    u_out = jnp.stack(jnp.split(u_out, num_lead_times))
+
+    # Calculate loss and grads
+    loss, grads = jax.vmap(
+      fun=get_loss_and_grads,
+      in_axes=(None, 0, 0, 0, None)
+    )(state.params, specs, u_lag, u_out, dt)
+
+    # Aggregate loss and grads  # CHECK: mean or sum?
+    loss = jnp.mean(loss)
+    grads = jax.tree_util.tree_map(jnp.mean, grads)
+
+    return loss, grads
+
   @jax.jit
   def train_one_batch(
     state: TrainState, batch: Tuple[Array, Array],
-    key: flax.typing.PRNGKey = None) -> Tuple[TrainState, Array]:
+    key: flax.typing.PRNGKey) -> Tuple[TrainState, Array]:
     """TODO: WRITE."""
 
     trajectory, specs = batch
 
     # Get input output pairs for all lead times
+    # -> [num_lead_times, batch_size, ...]
     u_lag_batch = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
           operand=trajectory,
           start_index=(lt-unroll_offset), slice_size=1, axis=1)
-      )(lead_times)
+    )(lead_times)
     u_out_batch = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
           operand=trajectory,
           start_index=(lt+1), slice_size=FLAGS.direct_steps, axis=1)
-      )(lead_times)
+    )(lead_times)
     specs_batch = (specs[None, :, :]
       .repeat(repeats=num_lead_times, axis=0)
     )
-    dt_batch = ((1 + jnp.arange(FLAGS.direct_steps))[None, None, :]
-      .repeat(repeats=num_lead_times, axis=0)
-      .repeat(repeats=batch_size, axis=1)
-    )
 
     # Concatenate lead times along the batch axis
+    # -> [batch_size * num_lead_times, ...]
     u_lag_batch = u_lag_batch.reshape(
         (batch_size * num_lead_times), 1, num_grid_points, -1)
     u_out_batch = u_out_batch.reshape(
         (batch_size * num_lead_times), FLAGS.direct_steps, num_grid_points, -1)
     specs_batch = specs_batch.reshape(
         (batch_size * num_lead_times), -1)
-    dt_batch = dt_batch.reshape(
-        (batch_size * num_lead_times), FLAGS.direct_steps)
-    # Concatenate the outputs along the batch axis
-    u_lag_batch = (u_lag_batch.repeat(repeats=FLAGS.direct_steps, axis=1)
-      .reshape((batch_size * num_lead_times * FLAGS.direct_steps), 1, num_grid_points, -1))
-    u_out_batch = (u_out_batch
-      .reshape((batch_size * num_lead_times * FLAGS.direct_steps), 1, num_grid_points, -1))
-    specs_batch = (specs_batch.repeat(repeats=FLAGS.direct_steps, axis=1)
-      .reshape((batch_size * num_lead_times * FLAGS.direct_steps), -1))
-    dt_batch = (dt_batch
-      .reshape((batch_size * num_lead_times * FLAGS.direct_steps)))
 
-    # Shuffle the input/outputs along the batch axis
-    if key is not None:
-      specs_batch, u_lag_batch, u_out_batch, dt_batch = shuffle_arrays(
-        key, [specs_batch, u_lag_batch, u_out_batch, dt_batch])
+    # Compute loss and gradient by mapping on the time axis
+    # Same u_lag and specs, vmap on dt
+    subkeys = jnp.stack(jax.random.split(key, num=FLAGS.direct_steps))
+    dt_batch = 1 + np.arange(FLAGS.direct_steps)  # -> [direct_steps,]
+    u_out_batch = jnp.expand_dims(u_out_batch, axis=2).swapaxes(0, 1)  # -> [direct_steps, ...]
+    loss, grads = jax.vmap(
+      fun=get_loss_and_grads_subbatch,
+      in_axes=(None, 0, None, None, 0, 0),
+    )(state, subkeys, specs_batch, u_lag_batch, u_out_batch, dt_batch)
 
-    # Split the inputs to avoid memory exhaustion
-    sub_batches = (
-      jnp.split(u_lag_batch, (num_lead_times * FLAGS.direct_steps)),
-      jnp.split(u_out_batch, (num_lead_times * FLAGS.direct_steps)),
-      jnp.split(specs_batch, (num_lead_times * FLAGS.direct_steps)),
-      jnp.split(dt_batch, (num_lead_times * FLAGS.direct_steps)),
-    )
+    # Aggregate loss and grads  # CHECK: mean or sum?
+    loss = jnp.mean(loss)
+    grads = jax.tree_util.tree_map(jnp.mean, grads)
 
-    # Calculate loss and grads and update state for each sub batch
-    loss_batch = 0.
-    for sub_batch in zip(*sub_batches):
-      u_lag_sub_batch, u_out_sub_batch, specs_sub_batch, dt_sub_batch = sub_batch
-      loss, grads = get_loss_and_grads(
-          params=state.params,
-          specs=specs_sub_batch,
-          u_lag=u_lag_sub_batch,
-          u_out=u_out_sub_batch,
-          dt=dt_sub_batch,
-      )
-      state = state.apply_gradients(grads=grads)
-      loss_batch += loss / (num_lead_times * FLAGS.direct_steps)
+    # Update the state by applying the gradients
+    state = state.apply_gradients(grads=grads)
 
-    return state, loss_batch
+    return state, loss
 
   def train_one_epoch(state: TrainState, key: flax.typing.PRNGKey) -> Tuple[TrainState, Array]:
     """Updates the state based on accumulated losses and gradients."""
@@ -322,12 +315,11 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     input, _ = normalize(input, stats=stats_input)
     # Get normalized predictions
     variables = {'params': state.params}
-    rollout, _ = predictor_full(
+    rollout, _ = predictor(
       variables=variables,
       specs=specs,
       u_inp=input,
       num_steps=num_steps,
-      num_steps_direct=FLAGS.direct_steps,
     )
     # Denormalize the predictions
     rollout = unnormalize(rollout, stats=stats_target)
