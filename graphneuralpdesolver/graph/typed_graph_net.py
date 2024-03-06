@@ -249,19 +249,21 @@ def InteractionNetwork(
   # An InteractionNetwork is a GraphNetwork without globals features,
   # so we implement the InteractionNetwork as a configured GraphNetwork.
 
+  # TODO: Consider using the global features instead of keyword arguments
+
   # An InteractionNetwork edge function does not have global feature inputs,
   # so we filter the passed global argument in the GraphNetwork.
   wrapped_update_edge_fn = tree.tree_map(
-    lambda fn: lambda e, s, r, g: fn(e, s, r), update_edge_fn)
+    lambda fn: lambda e, s, r, g, **kw: fn(e, s, r, **kw), update_edge_fn)
 
   # Similarly, we wrap the update_node_fn to ensure only the expected
   # arguments are passed to the Interaction net.
   if include_sent_messages_in_node_update:
     wrapped_update_node_fn = tree.tree_map(
-      lambda fn: lambda n, s, r, g: fn(n, s, r), update_node_fn)
+      lambda fn: lambda n, s, r, g, **kw: fn(n, s, r, **kw), update_node_fn)
   else:
     wrapped_update_node_fn = tree.tree_map(
-      lambda fn: lambda n, s, r, g: fn(n, r), update_node_fn)
+      lambda fn: lambda n, s, r, g, **kw: fn(n, r, **kw), update_node_fn)
   return GraphNetwork(
     update_edge_fn=wrapped_update_edge_fn,
     update_node_fn=wrapped_update_node_fn,

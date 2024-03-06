@@ -10,7 +10,7 @@ from graphneuralpdesolver.models.deep_typed_graph_net import DeepTypedGraphNet
 from graphneuralpdesolver.models.utils import grid_mesh_connectivity_fixed_dx
 
 
-class AbstractPDESolver(nn.Module):
+class AbstractOperator(nn.Module):
   def setup():
     raise NotImplementedError
 
@@ -25,8 +25,18 @@ class AbstractPDESolver(nn.Module):
     }
     return configs
 
+class DummyOperator(AbstractOperator):
+  c: float = 0.
 
-class GraphNeuralPDESolver(AbstractPDESolver):
+  def setup(self):
+    self.unused_net = nn.Dense(features=2)
+
+  def __call__(self, specs: jnp.ndarray, u_inp: jnp.ndarray, dt: float = None):
+    a = self.unused_net(u_inp)
+    dudt = self.c
+    return u_inp + dudt * dt
+
+class GraphNeuralPDESolver(AbstractOperator):
   """TODO: Add docstrings"""
 
   domain: Mapping[str, Mapping[str, Any]]

@@ -19,7 +19,7 @@ import orbax.checkpoint
 from graphneuralpdesolver.experiments import DIR_EXPERIMENTS
 from graphneuralpdesolver.autoregressive import AutoregressivePredictor
 from graphneuralpdesolver.dataset import read_datasets, shuffle_arrays, normalize, unnormalize
-from graphneuralpdesolver.models.graphneuralpdesolver import GraphNeuralPDESolver, AbstractPDESolver
+from graphneuralpdesolver.models.graphneuralpdesolver import GraphNeuralPDESolver, AbstractOperator, DummyOperator
 from graphneuralpdesolver.utils import disable_logging, Array
 from graphneuralpdesolver.metrics import mse, rel_l2_error, rel_l1_error
 
@@ -92,7 +92,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   num_times = dataset_trn['trajectories'].shape[1]
   num_grid_points = dataset_trn['trajectories'].shape[2]
   batch_size = FLAGS.batch_size
-  offset = FLAGS.unroll_steps
+  unroll_offset = FLAGS.unroll_steps * FLAGS.direct_steps
   assert num_samples_trn % batch_size == 0
 
   # Store the initial time
@@ -108,7 +108,8 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     subkey, key = jax.random.split(key)
     sample_input_u = dataset_trn['trajectories_nrm'][:batch_size, :1]
     sample_input_specs = dataset_trn['specs'][:batch_size]
-    variables = jax.jit(model.init)(subkey, specs=sample_input_specs, u_inp=sample_input_u)
+    sample_dt = jnp.array([1.])  # Single float dt for a batch
+    variables = jax.jit(model.init)(subkey, specs=sample_input_specs, u_inp=sample_input_u, dt=sample_dt)
 
   # Calculate the total number of parameters
   n_model_parameters = np.sum(
@@ -121,9 +122,9 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   logging.info(f'Total number of trainable paramters: {n_model_parameters}')
 
   # Define the permissible lead times and number of batches
-  lead_times = jnp.arange(offset+1, num_times)
+  lead_times = jnp.arange(unroll_offset, num_times - FLAGS.direct_steps)
   num_batches = num_samples_trn // batch_size
-  num_lead_times = num_times + offset - 1
+  num_lead_times = num_times - unroll_offset - FLAGS.direct_steps
 
   # Set up the optimization components
   criterion_loss = mse
@@ -136,54 +137,68 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   state = TrainState.create(apply_fn=model.apply, params=variables['params'], tx=tx)
 
   # Define the autoregressive predictor
-  predictor = AutoregressivePredictor(predictor=model)
+  predictor_full = AutoregressivePredictor(operator=model, full_rollout=True)
+  predictor_skip = AutoregressivePredictor(operator=model, full_rollout=False)
 
   def compute_loss(params: flax.typing.Collection, specs: Array,
-                   u_inp: Array, u_out: Array, num_steps: int) -> Array:
+                   u_inp_lagged: Array, dt: Array, u_out: Array, num_steps_autoreg: int) -> Array:
     """Computes the prediction of the model and returns its loss."""
 
     variables = {'params': params}
-    rollout = predictor(
-      variables=variables,
-      specs=specs,
-      u_inp=u_inp,
-      num_steps=num_steps,
-    )
-    u_out_pred = rollout[:, -1:]
-    return criterion_loss(u_out_pred, u_out)
-
-  def get_noisy_input(params: flax.typing.Collection, specs: Array,
-                      u_inp_lagged: Array, num_steps: int) -> Array:
-    """Apply the model to the lagged input to get a noisy input."""
-
-    variables = {'params': params}
-    rollout = predictor(
+    # Apply autoregressive steps
+    _, u_inp = predictor_skip(
       variables=variables,
       specs=specs,
       u_inp=u_inp_lagged,
-      num_steps=num_steps,
+      num_steps=(num_steps_autoreg * FLAGS.direct_steps),
+      num_steps_direct=FLAGS.direct_steps,
     )
-    u_inp_noisy = rollout[:, -1:]
+    # Get rollouts using the input from above
+    rollout, u_next = predictor_full(
+      variables=variables,
+      specs=specs,
+      u_inp=u_inp,
+      num_steps=FLAGS.direct_steps,
+      num_steps_direct=FLAGS.direct_steps,
+    )
+    # Get the corresponding output prediction based on dt
+    rollout_extended = jnp.concatenate([rollout, u_next], axis=1)
+    u_out_pred = rollout_extended[np.arange(u_out.shape[0]), dt][:, None, :, :]
+
+    return criterion_loss(u_out_pred, u_out)
+
+  def get_noisy_input(params: flax.typing.Collection, specs: Array,
+                      u_inp_lagged: Array, num_steps_autoreg: int) -> Array:
+    """Apply the model to the lagged input to get a noisy input."""
+
+    variables = {'params': params}
+    _, u_inp_noisy = predictor_skip(
+      variables=variables,
+      specs=specs,
+      u_inp=u_inp_lagged,
+      num_steps=(num_steps_autoreg * FLAGS.direct_steps),
+      num_steps_direct=FLAGS.direct_steps,
+    )
 
     return u_inp_noisy
 
   def get_loss_and_grads(params: flax.typing.Collection, specs: Array,
-                         u_lag: Array, u_out: Array) -> Tuple[Array, Any]:
+                         u_lag: Array, u_out: Array, dt: Array) -> Tuple[Array, Any]:
     """
     Computes the loss and the gradients of the loss w.r.t the parameters.
     """
 
     # Split the unrolling steps randomly to cut the gradients along the way
     # MODIFY: Change to JAX-generated random number (reproducability)
-    noise_steps = np.random.choice(FLAGS.unroll_steps + 1) if FLAGS.unroll_steps else 0
+    noise_steps = np.random.choice(FLAGS.unroll_steps+1)
     grads_steps = FLAGS.unroll_steps - noise_steps
 
     # Get noisy input
     u_inp = get_noisy_input(
-      params, specs, u_lag, num_steps=noise_steps)
+      params, specs, u_lag, num_steps_autoreg=noise_steps)
     # Use noisy input and compute gradients
     loss, grads = jax.value_and_grad(compute_loss)(
-      params, specs, u_inp, u_out, num_steps=(grads_steps + 1))
+      params, specs, u_inp, dt, u_out, num_steps_autoreg=grads_steps)
 
     return loss, grads
 
@@ -195,39 +210,55 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
     trajectory, specs = batch
 
-    # Get input and outputs for all lead times
+    # Get input output pairs for all lead times
     u_lag_batch = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
           operand=trajectory,
-          start_index=lt-offset-1,
-          slice_size=1,
-          axis=1,
-        )
+          start_index=(lt-unroll_offset), slice_size=1, axis=1)
       )(lead_times)
     u_out_batch = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
-          trajectory, start_index=lt, slice_size=1, axis=1)
+          operand=trajectory,
+          start_index=(lt+1), slice_size=FLAGS.direct_steps, axis=1)
       )(lead_times)
-    specs_batch = specs[None, :, :].repeat(repeats=num_lead_times, axis=1)
+    specs_batch = (specs[None, :, :]
+      .repeat(repeats=num_lead_times, axis=0)
+    )
+    dt_batch = ((1 + jnp.arange(FLAGS.direct_steps))[None, None, :]
+      .repeat(repeats=num_lead_times, axis=0)
+      .repeat(repeats=batch_size, axis=1)
+    )
 
     # Concatenate lead times along the batch axis
     u_lag_batch = u_lag_batch.reshape(
         (batch_size * num_lead_times), 1, num_grid_points, -1)
     u_out_batch = u_out_batch.reshape(
-        (batch_size * num_lead_times), 1, num_grid_points, -1)
+        (batch_size * num_lead_times), FLAGS.direct_steps, num_grid_points, -1)
     specs_batch = specs_batch.reshape(
         (batch_size * num_lead_times), -1)
+    dt_batch = dt_batch.reshape(
+        (batch_size * num_lead_times), FLAGS.direct_steps)
+    # Concatenate the outputs along the batch axis
+    u_lag_batch = (u_lag_batch.repeat(repeats=FLAGS.direct_steps, axis=1)
+      .reshape((batch_size * num_lead_times * FLAGS.direct_steps), 1, num_grid_points, -1))
+    u_out_batch = (u_out_batch
+      .reshape((batch_size * num_lead_times * FLAGS.direct_steps), 1, num_grid_points, -1))
+    specs_batch = (specs_batch.repeat(repeats=FLAGS.direct_steps, axis=1)
+      .reshape((batch_size * num_lead_times * FLAGS.direct_steps), -1))
+    dt_batch = (dt_batch
+      .reshape((batch_size * num_lead_times * FLAGS.direct_steps)))
 
     # Shuffle the input/outputs along the batch axis
     if key is not None:
-      specs_batch, u_lag_batch, u_out_batch = shuffle_arrays(
-        key, [specs_batch, u_lag_batch, u_out_batch])
+      specs_batch, u_lag_batch, u_out_batch, dt_batch = shuffle_arrays(
+        key, [specs_batch, u_lag_batch, u_out_batch, dt_batch])
     # Calculate loss and grads and update state
     loss, grads = get_loss_and_grads(
         params=state.params,
         specs=specs_batch,
         u_lag=u_lag_batch,
         u_out=u_out_batch,
+        dt=dt_batch,
     )
 
     state = state.apply_gradients(grads=grads)
@@ -279,16 +310,17 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     input, _ = normalize(input, stats=stats_input)
     # Get normalized predictions
     variables = {'params': state.params}
-    pred = predictor(
+    rollout, _ = predictor_full(
       variables=variables,
       specs=specs,
       u_inp=input,
       num_steps=num_steps,
+      num_steps_direct=FLAGS.direct_steps,
     )
     # Denormalize the predictions
-    pred = unnormalize(pred, stats=stats_target)
+    rollout = unnormalize(rollout, stats=stats_target)
 
-    return pred
+    return rollout
 
   def evaluate(state: TrainState, dataset: Array,
         parts: Union[Sequence[int], int] = 1) -> EvalMetrics:
@@ -304,7 +336,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
         for idx_sub_trajectory in np.split(np.arange(num_times), p):
           # Get the input/target time indices
           idx_input = idx_sub_trajectory[:1]
-          idx_target = idx_sub_trajectory[1:]
+          idx_target = idx_sub_trajectory[:]
           # Split the dataset along the time axis
           specs = dataset['specs']
           input = dataset['trajectories'][:, idx_input]
@@ -334,7 +366,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
   # Set the evaluation partitions
   eval_parts = [1, 4, 8, 16]
-  assert all([(num_times / p) >= 2 for p in eval_parts])
+  assert all([(num_times / p) >= FLAGS.direct_steps for p in eval_parts])
   # Evaluate before training
   metrics_trn = evaluate(state=state, dataset=dataset_trn, parts=eval_parts)
   metrics_val = evaluate(state=state, dataset=dataset_val, parts=eval_parts)
@@ -411,7 +443,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
   return state
 
-def get_model(model_configs: Mapping[str, Any]) -> AbstractPDESolver:
+def get_model(model_configs: Mapping[str, Any]) -> AbstractOperator:
   model = GraphNeuralPDESolver(
     **model_configs,
   )
