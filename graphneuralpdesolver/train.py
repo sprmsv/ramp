@@ -252,18 +252,30 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     if key is not None:
       specs_batch, u_lag_batch, u_out_batch, dt_batch = shuffle_arrays(
         key, [specs_batch, u_lag_batch, u_out_batch, dt_batch])
-    # Calculate loss and grads and update state
-    loss, grads = get_loss_and_grads(
-        params=state.params,
-        specs=specs_batch,
-        u_lag=u_lag_batch,
-        u_out=u_out_batch,
-        dt=dt_batch,
+
+    # Split the inputs to avoid memory exhaustion
+    sub_batches = (
+      jnp.split(u_lag_batch, (num_lead_times * FLAGS.direct_steps)),
+      jnp.split(u_out_batch, (num_lead_times * FLAGS.direct_steps)),
+      jnp.split(specs_batch, (num_lead_times * FLAGS.direct_steps)),
+      jnp.split(dt_batch, (num_lead_times * FLAGS.direct_steps)),
     )
 
-    state = state.apply_gradients(grads=grads)
+    # Calculate loss and grads and update state for each sub batch
+    loss_batch = 0.
+    for sub_batch in zip(*sub_batches):
+      u_lag_sub_batch, u_out_sub_batch, specs_sub_batch, dt_sub_batch = sub_batch
+      loss, grads = get_loss_and_grads(
+          params=state.params,
+          specs=specs_sub_batch,
+          u_lag=u_lag_sub_batch,
+          u_out=u_out_sub_batch,
+          dt=dt_sub_batch,
+      )
+      state = state.apply_gradients(grads=grads)
+      loss_batch += loss / (num_lead_times * FLAGS.direct_steps)
 
-    return state, loss
+    return state, loss_batch
 
   def train_one_epoch(state: TrainState, key: flax.typing.PRNGKey) -> Tuple[TrainState, Array]:
     """Updates the state based on accumulated losses and gradients."""
