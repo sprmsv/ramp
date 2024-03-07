@@ -131,7 +131,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   criterion_loss = mse
   lr = optax.cosine_decay_schedule(
     init_value=FLAGS.lr,
-    decay_steps=(FLAGS.epochs * num_batches),
+    decay_steps=(FLAGS.epochs * num_batches * FLAGS.direct_steps * num_lead_times),
     alpha=FLAGS.lr_decay,
   ) if FLAGS.lr_decay else FLAGS.lr
   tx = optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-8)
