@@ -109,8 +109,8 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     subkey, key = jax.random.split(key)
     sample_input_u = dataset_trn['trajectories_nrm'][:batch_size, :1]
     sample_input_specs = dataset_trn['specs'][:batch_size]
-    sample_dt = jnp.array([1.])  # Single float dt for a batch
-    variables = jax.jit(model.init)(subkey, specs=sample_input_specs, u_inp=sample_input_u, dt=sample_dt)
+    sample_ndt = jnp.array([1.])  # Single float nt for a batch
+    variables = jax.jit(model.init)(subkey, specs=sample_input_specs, u_inp=sample_input_u, ndt=sample_ndt)
 
   # Calculate the total number of parameters
   n_model_parameters = np.sum(
@@ -141,7 +141,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   predictor = AutoregressivePredictor(operator=model, num_steps_direct=FLAGS.direct_steps)
 
   def compute_loss(params: flax.typing.Collection, specs: Array,
-                   u_inp_lagged: Array, dt: int, u_out: Array, num_steps_autoreg: int) -> Array:
+                   u_inp_lagged: Array, ndt: int, u_out: Array, num_steps_autoreg: int) -> Array:
     """Computes the prediction of the model and returns its loss."""
 
     variables = {'params': params}
@@ -155,7 +155,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     # Get the output
     # NOTE: using checkpointed version to avoid memory exhaustion
     # TRY: Change it back to model.apply to get more performance, although it is only one step..
-    u_out_pred = predictor._apply_operator(variables, specs=specs, u_inp=u_inp, dt=dt.reshape(1,))
+    u_out_pred = predictor._apply_operator(variables, specs=specs, u_inp=u_inp, ndt=ndt.reshape(1,))
 
     return criterion_loss(u_out_pred, u_out)
 
@@ -174,7 +174,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     return u_inp_noisy
 
   def get_loss_and_grads(params: flax.typing.Collection, specs: Array,
-    u_lag: Array, u_out: Array, dt: int) -> Tuple[Array, PyTreeDef]:
+    u_lag: Array, u_out: Array, ndt: int) -> Tuple[Array, PyTreeDef]:
     """
     Computes the loss and the gradients of the loss w.r.t the parameters.
     """
@@ -189,13 +189,13 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       params, specs, u_lag, num_steps_autoreg=noise_steps)
     # Use noisy input and compute gradients
     loss, grads = jax.value_and_grad(compute_loss)(
-      params, specs, u_inp, dt, u_out, num_steps_autoreg=grads_steps)
+      params, specs, u_inp, ndt, u_out, num_steps_autoreg=grads_steps)
 
     return loss, grads
 
   def get_loss_and_grads_sub_batch(
     state: TrainState, key: flax.typing.PRNGKey,
-    specs: Array, u_lag: Array, u_out: Array, dt: int,
+    specs: Array, u_lag: Array, u_out: Array, ndt: int,
   ) -> Tuple[Array, PyTreeDef]:
     # NOTE: INPUT SHAPES [batch_size * num_lead_times, ...]
 
@@ -215,7 +215,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
         specs=specs[i],
         u_lag=u_lag[i],
         u_out=u_out[i],
-        dt=dt,
+        ndt=ndt,
       )
       # Update the state by applying the gradients
       _state = _state.apply_gradients(grads=_grads)
@@ -265,9 +265,9 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
         (batch_size * num_lead_times), -1)
 
     # Compute loss and gradient by mapping on the time axis
-    # Same u_lag and specs, loop over dt
+    # Same u_lag and specs, loop over ndt
     subkeys = jnp.stack(jax.random.split(key, num=FLAGS.direct_steps))
-    dt_batch = 1 + jnp.arange(FLAGS.direct_steps)  # -> [direct_steps,]
+    ndt_batch = 1 + jnp.arange(FLAGS.direct_steps)  # -> [direct_steps,]
     u_out_batch = jnp.expand_dims(u_out_batch, axis=2).swapaxes(0, 1)  # -> [direct_steps, ...]
 
     def update_state_on_sub_batch(i, carry):
@@ -278,7 +278,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
         specs=specs_batch,
         u_lag=u_lag_batch,
         u_out=u_out_batch[i],
-        dt=dt_batch[i],
+        ndt=ndt_batch[i],
       )
       _loss_mean += _loss / FLAGS.direct_steps
       return _state, _loss_mean
@@ -313,7 +313,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       loss_epoch += loss * batch_size / num_samples_trn
       time_batch = time() - begin_batch
 
-      if FLAGS.verbose and not (idx % ((num_batches // 5) + 1)):
+      if FLAGS.verbose:
         logging.info('\t'.join([
           f'\t',
           f'BTCH: {idx+1:04d}/{num_batches:04d}',

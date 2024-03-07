@@ -22,8 +22,8 @@ class AutoregressivePredictor:
 
     time_deltas = (1. + jnp.arange(self.num_steps_direct)).reshape(-1, 1)
 
-    def scan_fn_direct(u_inp, dt):
-      u_out = self._apply_operator(variables, specs=specs, u_inp=u_inp, dt=dt)
+    def scan_fn_direct(u_inp, ndt):
+      u_out = self._apply_operator(variables, specs=specs, u_inp=u_inp, ndt=ndt)
       return u_out, u_inp
 
     def scan_fn_autoregressive(u_inp, forcing):
@@ -43,10 +43,10 @@ class AutoregressivePredictor:
   def jump(self, variables: flax.typing.VariableDict,
     specs: Array, u_inp: Array, num_steps: int) -> Array:
 
-    dt = jnp.array(self.num_steps_direct).reshape(1,)
+    ndt = jnp.array(self.num_steps_direct).reshape(1,)
 
     def scan_fn(u_inp, forcing):
-      u_out = self._apply_operator(variables, specs=specs, u_inp=u_inp, dt=dt)
+      u_out = self._apply_operator(variables, specs=specs, u_inp=u_inp, ndt=ndt)
       u_inp_next = u_out
       rollout = None
       return u_inp_next, rollout
