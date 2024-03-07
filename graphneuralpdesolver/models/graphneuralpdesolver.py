@@ -281,7 +281,7 @@ class GraphNeuralPDESolver(AbstractOperator):
 
     # Interpret the output as the first-order derivative
     if self.residual_update:
-      du = output  # TRY: du = output * (delta_t * nt)
+      du = output  # TRY: du = output * (delta_t * ndt)
       u_out = u_inp + du
     else:
       u_out = output

@@ -211,7 +211,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     def _update_state_on_mini_batch(i, carry):
       _state, _loss_mean = carry
       _loss, _grads = get_loss_and_grads(
-        params=state.params,
+        params=_state.params,
         specs=specs[i],
         u_lag=u_lag[i],
         u_out=u_out[i],
@@ -273,7 +273,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     def update_state_on_sub_batch(i, carry):
       _state, _loss_mean = carry
       _state, _loss = get_loss_and_grads_sub_batch(
-        state=state,
+        state=_state,
         key=subkeys[i],
         specs=specs_batch,
         u_lag=u_lag_batch,
