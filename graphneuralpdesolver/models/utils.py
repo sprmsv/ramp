@@ -66,19 +66,18 @@ class LearnedCorrection(nn.Module):
   correction_size: int = 1
 
   def setup(self):
-    initializers = dict(
-      kernel_init=nn.initializers.constant(1.),
-      bias_init=nn.initializers.constant(0.),
-    )
+    # TRY: Add a small noise to the initialized weights
+    # TRY: Add activation functions
+    # TRY: ADD bias to the first layer
     self.mlp_scale = nn.Sequential(
       layers=[
-        nn.Dense(self.latent_size, **initializers),
-        nn.Dense(self.correction_size, **initializers)
+        nn.Dense(self.latent_size, kernel_init=nn.initializers.constant(0.), use_bias=False),
+        nn.Dense(self.correction_size, kernel_init=nn.initializers.constant(0.), bias_init=nn.initializers.constant(0.))
       ])
     self.mlp_bias = nn.Sequential(
       layers=[
-        nn.Dense(self.latent_size, **initializers),
-        nn.Dense(self.correction_size, **initializers),
+        nn.Dense(self.latent_size, kernel_init=nn.initializers.constant(0.), use_bias=False),
+        nn.Dense(self.correction_size, kernel_init=nn.initializers.constant(0.), bias_init=nn.initializers.constant(1.))
       ])
 
   def __call__(self, c, x):

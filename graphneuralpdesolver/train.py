@@ -153,7 +153,9 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       num_steps=(num_steps_autoreg * FLAGS.direct_steps),
     )
     # Get the output
-    u_out_pred = model.apply(variables, specs=specs, u_inp=u_inp, dt=dt.reshape(1,))
+    # NOTE: using checkpointed version to avoid memory exhaustion
+    # TRY: Change it back to model.apply to get more performance, although it is only one step..
+    u_out_pred = predictor._apply_operator(variables, specs=specs, u_inp=u_inp, dt=dt.reshape(1,))
 
     return criterion_loss(u_out_pred, u_out)
 
@@ -311,7 +313,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       loss_epoch += loss * batch_size / num_samples_trn
       time_batch = time() - begin_batch
 
-      if FLAGS.verbose and not (idx % (num_batches // 5)):
+      if FLAGS.verbose and not (idx % ((num_batches // 5) + 1)):
         logging.info('\t'.join([
           f'\t',
           f'BTCH: {idx+1:04d}/{num_batches:04d}',

@@ -233,7 +233,7 @@ class GraphNeuralPDESolver(AbstractOperator):
 
     return graph
 
-  def __call__(self, specs: jnp.ndarray, u_inp: jnp.ndarray, dt: float = None):
+  def __call__(self, specs: jnp.ndarray, u_inp: jnp.ndarray, nt: float = None):
     assert u_inp.ndim == 4  # [batch_size, 1, num_grid_nodes, num_inputs]
     batch_size = u_inp.shape[0]
     assert u_inp.shape[2] == self.x.shape[0] == self._num_grid_nodes
@@ -243,9 +243,9 @@ class GraphNeuralPDESolver(AbstractOperator):
     assert specs.shape[0] == batch_size
 
     if self.time_conditioned:
-      assert dt is not None
+      assert nt is not None
     else:
-      assert dt is None
+      assert nt is None
 
     # Prepare the grid node features
     # u -> [num_grid_nodes, batch_size, 1 * num_inputs]
@@ -263,15 +263,15 @@ class GraphNeuralPDESolver(AbstractOperator):
 
     # Transfer data for the grid to the mesh
     # [num_mesh_nodes, batch_size, latent_size], [num_grid_nodes, batch_size, latent_size]
-    (latent_mesh_nodes, latent_grid_nodes) = self._run_grid2mesh_gnn(grid_node_features, dt)
+    (latent_mesh_nodes, latent_grid_nodes) = self._run_grid2mesh_gnn(grid_node_features, nt)
 
     # Run message passing in the multimesh.
     # [num_mesh_nodes, batch_size, latent_size]
-    updated_latent_mesh_nodes = self._run_mesh_gnn(latent_mesh_nodes, dt)
+    updated_latent_mesh_nodes = self._run_mesh_gnn(latent_mesh_nodes, nt)
 
     # Transfer data frome the mesh to the grid.
     # [num_grid_nodes, batch_size, 1 * num_outputs]
-    output_grid_nodes = self._run_mesh2grid_gnn(updated_latent_mesh_nodes, latent_grid_nodes, dt)
+    output_grid_nodes = self._run_mesh2grid_gnn(updated_latent_mesh_nodes, latent_grid_nodes, nt)
 
     # Reshape the output to [batch_size, 1, num_grid_nodes, num_outputs]
     output = (output_grid_nodes
@@ -281,7 +281,7 @@ class GraphNeuralPDESolver(AbstractOperator):
 
     # Interpret the output as the first-order derivative
     if self.residual_update:
-      du = output * dt  # TRY: du = output
+      du = output  # TRY: du = output * (delta_t * nt)
       u_out = u_inp + du
     else:
       u_out = output
