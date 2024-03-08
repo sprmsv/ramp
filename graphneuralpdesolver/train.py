@@ -20,7 +20,7 @@ import orbax.checkpoint
 from graphneuralpdesolver.experiments import DIR_EXPERIMENTS
 from graphneuralpdesolver.autoregressive import AutoregressivePredictor
 from graphneuralpdesolver.dataset import read_datasets, shuffle_arrays, normalize, unnormalize
-from graphneuralpdesolver.models.graphneuralpdesolver import GraphNeuralPDESolver, AbstractOperator, DummyOperator
+from graphneuralpdesolver.models.graphneuralpdesolver import GraphNeuralPDESolver, AbstractOperator, ToyOperator
 from graphneuralpdesolver.utils import disable_logging, Array
 from graphneuralpdesolver.metrics import mse, rel_l2_error, rel_l1_error
 
@@ -66,6 +66,9 @@ flags.DEFINE_bool(name='verbose', default=False, required=False,
 )
 flags.DEFINE_bool(name='debug', default=False, required=False,
   help='If passed, the code is launched only for debugging purposes.'
+)
+flags.DEFINE_bool(name='toy', default=False, required=False,
+  help='If passed, a toy dataset and model is used.'
 )
 
 PDETYPE = {
@@ -150,7 +153,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       variables=variables,
       specs=specs,
       u_inp=u_inp_lagged,
-      num_steps=(num_steps_autoreg * FLAGS.direct_steps),
+      num_jumps=num_steps_autoreg,
     )
     # Get the output
     # NOTE: using checkpointed version to avoid memory exhaustion
@@ -168,7 +171,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       variables=variables,
       specs=specs,
       u_inp=u_inp_lagged,
-      num_steps=(num_steps_autoreg * FLAGS.direct_steps),
+      num_jumps=num_steps_autoreg,
     )
 
     return u_inp_noisy
@@ -341,7 +344,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       variables=variables,
       specs=specs,
       u_inp=input,
-      num_steps=num_steps,
+      num_jumps=(num_steps // FLAGS.direct_steps),
     )
     # Denormalize the predictions
     rollout = unnormalize(rollout, stats=stats_target)
@@ -471,7 +474,11 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
   return state
 
-def get_model(model_configs: Mapping[str, Any]) -> AbstractOperator:
+def get_model(model_configs: Mapping[str, Any], toy: bool = False) -> AbstractOperator:
+
+  if toy:
+    return ToyOperator(c=100.)
+
   model = GraphNeuralPDESolver(
     **model_configs,
   )
@@ -496,7 +503,8 @@ def main(argv):
   experiment = FLAGS.experiment
   datasets = read_datasets(
     dir=FLAGS.datadir, pde_type=PDETYPE[experiment],
-    experiment=experiment, nx=FLAGS.resolution, downsample_x=True)
+    experiment=experiment, nx=FLAGS.resolution, downsample_x=True,
+    toy=FLAGS.toy)
   assert np.all(datasets['test']['dt'] == datasets['valid']['dt'])
   assert np.all(datasets['test']['dt'] == datasets['train']['dt'])
   assert np.all(datasets['test']['x'] == datasets['valid']['x'])
@@ -511,12 +519,9 @@ def main(argv):
       'range': datasets['test']['range_x']
     }
   }
-  datasets = jax.tree_map(jax.device_put, datasets)
-  for space_dim in domain.keys():
-    if 'grid' in domain[space_dim]:
-      domain[space_dim]['grid'] = jax.device_put(domain[space_dim]['grid'])
 
-  # Check the array devices
+  # Put the datasets in device memory
+  datasets = jax.tree_map(jax.device_put, datasets)
   assert jax.devices()[0] in datasets['train']['trajectories'].devices()
   assert jax.devices()[0] in datasets['train']['specs'].devices()
   assert jax.devices()[0] in datasets['valid']['trajectories'].devices()
@@ -543,10 +548,11 @@ def main(argv):
       latent_size=(2 if FLAGS.debug else FLAGS.latent_size),
       time_conditioned=True,
     )
-  model = get_model(model_kwargs)
+  model = get_model(model_kwargs, toy=FLAGS.toy)
 
   # Store the configurations
   DIR.mkdir()
+  logging.info(f'Experiment stored in {DIR.relative_to(DIR_EXPERIMENTS).as_posix()}')
   flags = {f: FLAGS.get_flag_value(f, default=None) for f in FLAGS}
   with open(DIR / 'configs.json', 'w') as f:
     json.dump(fp=f,

@@ -25,16 +25,19 @@ class AbstractOperator(nn.Module):
     }
     return configs
 
-class DummyOperator(AbstractOperator):
-  c: float = 0.
+class ToyOperator(AbstractOperator):
+  c: float = 1.
 
   def setup(self):
-    self.unused_net = nn.Dense(features=2)
+    self.correction_net = nn.Sequential([
+      nn.Dense(features=64),
+      nn.Dense(features=1),
+    ])
 
-  def __call__(self, specs: jnp.ndarray, u_inp: jnp.ndarray, ndt: float = None):
-    a = self.unused_net(u_inp)
-    dudt = self.c
-    return u_inp + dudt * ndt
+  def __call__(self, specs: jnp.ndarray, u_inp: jnp.ndarray, ndt: float = 1.):
+    corr = self.correction_net(jnp.array([ndt]))
+    dudt = self.c * corr
+    return u_inp + dudt
 
 class GraphNeuralPDESolver(AbstractOperator):
   """TODO: Add docstrings"""

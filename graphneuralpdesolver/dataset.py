@@ -19,6 +19,7 @@ NT_SUPER_RESOLUTION = 256
 def read_datasets(dir: Union[Path, str], pde_type: str, experiment: str, nx: int,
                   downsample_x: bool = True,
                   modes: Sequence[str] = ['train', 'valid', 'test'],
+                  toy: bool = False,
                 ) -> dict[str, dict[str, Any]]:
   """Reads a dataset from its source file and prepares the shapes and specifications."""
 
@@ -39,6 +40,23 @@ def read_datasets(dir: Union[Path, str], pde_type: str, experiment: str, nx: int
       dataset['trajectories'] = downsample(dataset['trajectories'], ratio=ratio, axis=2)
       dataset['x'] = downsample(dataset['x'], ratio=ratio, axis=0)
       dataset['dx'] = dataset['dx'] * ratio
+
+  if toy:
+    for mode in modes:
+      _shape = (
+        datasets[mode]['trajectories'].shape[0],
+        1,
+        datasets[mode]['trajectories'].shape[2],
+        datasets[mode]['trajectories'].shape[3],
+      )
+      datasets[mode]['trajectories'] = np.concatenate([
+        np.ones(shape=_shape) + (i * 4.)
+        for i in range(datasets[mode]['trajectories'].shape[1])
+      ], axis=1)
+      datasets[mode]['trajectories'] += np.random.normal(
+        size=datasets[mode]['trajectories'].shape,
+        scale=.1,
+      )
 
   return datasets
 
