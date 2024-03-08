@@ -67,9 +67,6 @@ flags.DEFINE_bool(name='verbose', default=False, required=False,
 flags.DEFINE_bool(name='debug', default=False, required=False,
   help='If passed, the code is launched only for debugging purposes.'
 )
-flags.DEFINE_bool(name='toy', default=False, required=False,
-  help='If passed, a toy dataset and model is used.'
-)
 
 PDETYPE = {
   'E1': 'CE',
@@ -474,10 +471,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
   return state
 
-def get_model(model_configs: Mapping[str, Any], toy: bool = False) -> AbstractOperator:
-
-  if toy:
-    return ToyOperator(c=100.)
+def get_model(model_configs: Mapping[str, Any]) -> AbstractOperator:
 
   model = GraphNeuralPDESolver(
     **model_configs,
@@ -503,8 +497,7 @@ def main(argv):
   experiment = FLAGS.experiment
   datasets = read_datasets(
     dir=FLAGS.datadir, pde_type=PDETYPE[experiment],
-    experiment=experiment, nx=FLAGS.resolution, downsample_x=True,
-    toy=FLAGS.toy)
+    experiment=experiment, nx=FLAGS.resolution, downsample_x=True)
   assert np.all(datasets['test']['dt'] == datasets['valid']['dt'])
   assert np.all(datasets['test']['dt'] == datasets['train']['dt'])
   assert np.all(datasets['test']['x'] == datasets['valid']['x'])
@@ -548,7 +541,7 @@ def main(argv):
       latent_size=(2 if FLAGS.debug else FLAGS.latent_size),
       time_conditioned=True,
     )
-  model = get_model(model_kwargs, toy=FLAGS.toy)
+  model = get_model(model_kwargs)
 
   # Store the configurations
   DIR.mkdir()

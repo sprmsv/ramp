@@ -68,15 +68,15 @@ class LearnedCorrection(nn.Module):
   def setup(self):
     self.mlp_scale = nn.Sequential(
       layers=[
-        nn.Dense(self.latent_size, use_bias=False),
+        nn.Dense(self.latent_size),
         nn.sigmoid,
-        nn.Dense(self.correction_size, bias_init=nn.initializers.constant(1.)),
+        nn.Dense(self.correction_size)
       ])
     self.mlp_bias = nn.Sequential(
       layers=[
-        nn.Dense(self.latent_size, use_bias=False),
+        nn.Dense(self.latent_size),
         nn.sigmoid,
-        nn.Dense(self.correction_size),
+        nn.Dense(self.correction_size)
       ])
 
   def __call__(self, c, x):
