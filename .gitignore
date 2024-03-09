@@ -168,3 +168,4 @@ venv*/
 .DS_Store
 *.job
 slurm-*.out
+out/*

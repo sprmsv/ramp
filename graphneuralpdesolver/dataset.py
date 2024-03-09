@@ -16,6 +16,75 @@ from graphneuralpdesolver.utils import Array
 NX_SUPER_RESOLUTION = 256
 NT_SUPER_RESOLUTION = 256
 
+class Dataset:
+
+  def __init__(self, dir: str, n_train: int, n_valid: int, n_test: int):
+    self.reader = h5py.File(dir, 'r')
+    self.length = len([k for k in self.reader.keys() if 'sample' in k])
+
+    # Split the dataset
+    assert (n_train+n_valid+n_test) < self.length
+    self.nums = {'train': n_train, 'valid': n_valid, 'test': n_test}
+    random_permutation = np.random.permutation(self.length)  # TODO: Do it with jax for reproducibility
+    self.idx_modes = {
+      'train': random_permutation[:n_train],
+      'valid': random_permutation[n_train:(n_train+n_valid)],
+      'test': random_permutation[(n_train+n_valid):(n_train+n_valid+n_test)],
+    }
+
+    # Compute mean
+    _sum = np.zeros_like(self._fetch(0))
+    for idx in range(n_train):
+      _sum += self.train(idx)
+    self.mean = _sum / n_train
+
+    # Compute std
+    _sum = np.zeros_like(self._fetch(0))
+    for idx in range(n_train):
+      _sum += np.power(self.train(idx) - self.mean, 2)
+    self.std_train = np.sqrt(_sum / n_train)
+
+  def _fetch(self, idx):
+    traj = self.reader[f'sample_{str(idx)}'][:]
+    traj = traj[None, ...]
+    traj = np.moveaxis(traj, source=(2, 3, 4), destination=(4, 2, 3))
+
+    return traj
+
+  def _fetch_mode(self, idx, mode):
+    assert idx < len(self.idx_modes[mode])
+    _idx = self.idx_modes[mode][idx]
+    return self._fetch(_idx)
+
+  def train(self, idx):
+    return self._fetch_mode(idx, 'train')
+
+  def valid(self, idx):
+    return self._fetch_mode(idx, 'valid')
+
+  def test(self, idx):
+    return self._fetch_mode(idx, 'test')
+
+  def batches(self, mode: str, batch_size: int):
+    assert batch_size > 0
+    assert batch_size <= self.nums[mode]
+    _idx_next = 0
+    for _ in range(self.nums[mode] // batch_size):
+      batch = np.concatenate(
+        [self._fetch_mode(_idx, mode) for _idx in range(_idx_next, _idx_next+batch_size)],
+      )
+      _idx_next += batch_size
+      yield batch
+    rem = (self.nums[mode] % batch_size)
+    if rem:
+      batch = np.concatenate(
+        [self._fetch_mode(_idx, mode) for _idx in range(_idx_next, _idx_next+rem)],
+      )
+      yield batch
+
+  def __len__(self):
+    return self.length
+
 def read_datasets(dir: Union[Path, str], pde_type: str, experiment: str, nx: int,
                   downsample_x: bool = True,
                   modes: Sequence[str] = ['train', 'valid', 'test'],
