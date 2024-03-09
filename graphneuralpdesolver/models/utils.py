@@ -76,7 +76,7 @@ class LearnedCorrection(nn.Module):
       layers=[
         nn.Dense(self.latent_size),
         nn.sigmoid,
-        nn.Dense(self.correction_size)
+        nn.Dense(self.correction_size, bias_init=nn.initializers.constant(1.))
       ])
 
   def __call__(self, c, x):

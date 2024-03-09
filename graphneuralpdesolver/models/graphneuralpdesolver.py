@@ -255,10 +255,10 @@ class GraphNeuralPDESolver(AbstractOperator):
     grid_node_features = jnp.moveaxis(
       u_inp, source=(0, 1, 2), destination=(1, 2, 0)
     ).reshape(self._num_grid_nodes, batch_size, -1)
-    # Concatente with equation specifications (parameters, BCs, etc.)
-    # CHECK: time is also encoded in Brandstetter
+    # Concatente with equation specifications (ndt, parameters, BCs, etc.)
     grid_node_features = jnp.concatenate(axis=-1,
       arrays=[
+        jnp.tile(ndt, reps=(self._num_grid_nodes, batch_size, 1)),
         jnp.repeat(specs[None, :, :], repeats=self._num_grid_nodes, axis=0),
         grid_node_features,
       ],
@@ -284,7 +284,7 @@ class GraphNeuralPDESolver(AbstractOperator):
 
     # Interpret the output as the first-order derivative
     if self.residual_update:
-      du = output  # TRY: du = output * (delta_t * ndt)
+      du = output  # TRY: du = output * ndt
       u_out = u_inp + du
     else:
       u_out = output
@@ -304,7 +304,7 @@ class GraphNeuralPDESolver(AbstractOperator):
       features=jnp.concatenate([
         grid_node_features,
         _add_batch_second_axis(
-          grid_nodes.features.astype(grid_node_features.dtype),bsz)
+          grid_nodes.features.astype(grid_node_features.dtype), bsz)
       ], axis=-1)
     )
     # To make sure capacity of the embedded is identical for the grid nodes and

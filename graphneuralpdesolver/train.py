@@ -406,8 +406,8 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     f'TIME: {time_tot_pre : 06.1f}s',
     f'LR: {state.opt_state.hyperparams["learning_rate"].item() : .2e}',
     f'RMSE: {0. : .2e}',
-    f'L2/{eval_parts[0]}: {metrics_val.error_l2[0][1][0] * 100 : .2f}%',
-    f'L2/{eval_parts[1]}: {metrics_val.error_l2[1][1][0] * 100 : .2f}%',
+    f'L2/{eval_parts[0]}: {np.mean(metrics_val.error_l2[0][1]) * 100 : .2f}%',
+    f'L2/{eval_parts[1]}: {np.mean(metrics_val.error_l2[1][1]) * 100 : .2f}%',
   ]))
 
   # Set up the checkpoint manager
@@ -417,7 +417,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     checkpointer_options = orbax.checkpoint.CheckpointManagerOptions(
       max_to_keep=1,
       keep_period=None,
-      best_fn=(lambda metrics: metrics['loss']),
+      best_fn=(lambda metrics: np.mean(metrics['valid']['l2'][1][1]).item()),
       best_mode='min',
       create=True,)
     checkpointer_save_args = orbax_utils.save_args_from_target(target={'state': state})
@@ -443,8 +443,8 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       f'TIME: {time_tot : 06.1f}s',
       f'LR: {state.opt_state.hyperparams["learning_rate"].item() : .2e}',
       f'RMSE: {np.sqrt(loss).item() : .2e}',
-      f'L2/{eval_parts[0]}: {metrics_val.error_l2[0][1][0] * 100 : .2f}%',
-      f'L2/{eval_parts[1]}: {metrics_val.error_l2[1][1][0] * 100 : .2f}%',
+      f'L2/{eval_parts[0]}: {np.mean(metrics_val.error_l2[0][1]) * 100 : .2f}%',
+      f'L2/{eval_parts[1]}: {np.mean(metrics_val.error_l2[1][1]) * 100 : .2f}%',
     ]))
 
     with disable_logging(level=logging.FATAL):
