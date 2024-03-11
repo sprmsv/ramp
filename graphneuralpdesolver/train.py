@@ -19,7 +19,7 @@ import orbax.checkpoint
 
 from graphneuralpdesolver.experiments import DIR_EXPERIMENTS
 from graphneuralpdesolver.autoregressive import AutoregressivePredictor
-from graphneuralpdesolver.dataset import read_datasets, shuffle_arrays, normalize, unnormalize
+from graphneuralpdesolver.dataset import read_datasets, shuffle_arrays, normalize, unnormalize, Dataset
 from graphneuralpdesolver.models.graphneuralpdesolver import GraphNeuralPDESolver, AbstractOperator, ToyOperator
 from graphneuralpdesolver.utils import disable_logging, Array
 from graphneuralpdesolver.metrics import mse, rel_l2_error, rel_l1_error
@@ -75,12 +75,17 @@ PDETYPE = {
   'WE1': 'WE',
   'WE2': 'WE',
   'WE3': 'WE',
+  'KF': 'KF',
+  'RP': 'AD',
+  'MSWG': 'AD',
 }
 
 @dataclass
 class EvalMetrics:
-  error_l1: Sequence[Tuple[int, Sequence[float]]] = None
-  error_l2: Sequence[Tuple[int, Sequence[float]]] = None
+  error_autoreg_l1: Sequence[Tuple[int, Sequence[float]]] = None
+  error_autoreg_l2: Sequence[Tuple[int, Sequence[float]]] = None
+  error_direct_l1: float = None
+  error_direct_l2: float = None
 
 DIR = DIR_EXPERIMENTS / datetime.now().strftime('%Y%m%d-%H%M%S.%f')
 
@@ -348,7 +353,80 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
     return rollout
 
-  def evaluate(state: TrainState, dataset: Array,
+  def evaluate_direct_prediction(
+      state: TrainState, dataset: Mapping[str, Array]) -> Tuple[Array, Array]:
+
+    trajs = dataset['trajectories']
+    specs = dataset['specs']
+    lead_times = jnp.arange(num_times - FLAGS.direct_steps)
+    num_lead_times = num_times - FLAGS.direct_steps
+
+    # Get input output pairs for all lead times
+    # -> [num_lead_times, batch_size, ...]
+    u_inp = jax.vmap(
+        lambda lt: jax.lax.dynamic_slice_in_dim(
+          operand=trajs,
+          start_index=(lt), slice_size=1, axis=1)
+    )(lead_times)
+    u_lab = jax.vmap(
+        lambda lt: jax.lax.dynamic_slice_in_dim(
+          operand=trajs,
+          start_index=(lt+1), slice_size=FLAGS.direct_steps, axis=1)
+    )(lead_times)
+    specs = (jnp.array(specs[None, :, :])
+      .repeat(repeats=num_lead_times, axis=0)
+    )
+    mean_inp = jax.vmap(
+        lambda lt: jax.lax.dynamic_slice_in_dim(
+          operand=stats_trn[0],
+          start_index=(lt), slice_size=1, axis=1)
+    )(lead_times)
+    std_inp = jax.vmap(
+        lambda lt: jax.lax.dynamic_slice_in_dim(
+          operand=stats_trn[1],
+          start_index=(lt), slice_size=1, axis=1)
+    )(lead_times)
+    mean_lab = jax.vmap(
+        lambda lt: jax.lax.dynamic_slice_in_dim(
+          operand=stats_trn[0],
+          start_index=(lt+1), slice_size=FLAGS.direct_steps, axis=1)
+    )(lead_times)
+    std_lab = jax.vmap(
+        lambda lt: jax.lax.dynamic_slice_in_dim(
+          operand=stats_trn[1],
+          start_index=(lt+1), slice_size=FLAGS.direct_steps, axis=1)
+    )(lead_times)
+
+    def get_direct_errors(lt, carry):
+      err_l1_mean, err_l2_mean = carry
+      def get_direct_prediction(ndt, forcing):
+        u_inp_nrm, _ = normalize(u_inp[lt], (mean_inp[lt], std_inp[lt]))
+        u_prd_nrm = model.apply(
+          variables={'params': state.params},
+          u_inp=u_inp_nrm,
+          specs=specs[lt],
+          ndt=jnp.array(ndt, dtype=jnp.float32).reshape(1,),
+        )
+        u_prd = unnormalize(u_prd_nrm, (mean_lab[lt][:, ndt-1], std_lab[lt][:, ndt-1]))
+        return (ndt+1), u_prd
+      _, u_prd = jax.lax.scan(f=get_direct_prediction,
+        init=1, xs=None, length=FLAGS.direct_steps,
+      )
+      u_prd = u_prd.squeeze(axis=2).swapaxes(0, 1)
+      err_l1_mean += jnp.sqrt(jnp.sum(jnp.power(rel_l1_error(u_prd, u_lab[lt]), 2))) / num_lead_times
+      err_l2_mean += jnp.sqrt(jnp.sum(jnp.power(rel_l2_error(u_prd, u_lab[lt]), 2))) / num_lead_times
+
+      return err_l1_mean, err_l2_mean
+
+    err_l1_mean, err_l2_mean = jax.lax.fori_loop(body_fun=get_direct_errors,
+      lower=0,
+      upper=num_lead_times,
+      init_val=(jnp.zeros(shape=(1,)), jnp.zeros(shape=(1,)))
+      )
+
+    return err_l1_mean, err_l2_mean
+
+  def evaluate(state: TrainState, dataset: Mapping[str, Array],
         parts: Union[Sequence[int], int] = 1) -> EvalMetrics:
       """Evaluates the model on a dataset based on multiple trajectory lengths."""
 
@@ -360,6 +438,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       error_l1 = {p: [] for p in parts}
       error_l2 = {p: [] for p in parts}
 
+      # Evaluate autoregressive prediction
       for p in parts:
         for idx_sub_trajectory in np.split(np.arange(num_times), p):
           # Get the input/target time indices
@@ -381,13 +460,18 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
           # Compute and store metrics
           error_l1_per_var = rel_l1_error(pred, target)
           error_l2_per_var = rel_l2_error(pred, target)
-          error_l1[p].append(jnp.sqrt(jnp.mean(jnp.power(error_l1_per_var, 2))).item())
-          error_l2[p].append(jnp.sqrt(jnp.mean(jnp.power(error_l2_per_var, 2))).item())
+          error_l1[p].append(jnp.sqrt(jnp.sum(jnp.power(error_l1_per_var, 2))).item())
+          error_l2[p].append(jnp.sqrt(jnp.sum(jnp.power(error_l2_per_var, 2))).item())
+
+      # Evaluate direct prediction
+      error_direct_l1, error_direct_l2 = evaluate_direct_prediction(state=state, dataset=dataset)
 
       # Build the metrics object
       metrics = EvalMetrics(
-        error_l1=[(p, errors) for p, errors in error_l1.items()],
-        error_l2=[(p, errors) for p, errors in error_l2.items()],
+        error_autoreg_l1=[(p, errors) for p, errors in error_l1.items()],
+        error_autoreg_l2=[(p, errors) for p, errors in error_l2.items()],
+        error_direct_l1=error_direct_l1.item(),
+        error_direct_l2=error_direct_l2.item(),
       )
 
       return metrics
@@ -406,8 +490,8 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     f'TIME: {time_tot_pre : 06.1f}s',
     f'LR: {state.opt_state.hyperparams["learning_rate"].item() : .2e}',
     f'RMSE: {0. : .2e}',
-    f'L2/{eval_parts[0]}: {np.mean(metrics_val.error_l2[0][1]) * 100 : .2f}%',
-    f'L2/{eval_parts[1]}: {np.mean(metrics_val.error_l2[1][1]) * 100 : .2f}%',
+    f'L2-AR: {np.mean(metrics_val.error_autoreg_l2[0][1]) * 100 : .2f}%',
+    f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
   ]))
 
   # Set up the checkpoint manager
@@ -417,7 +501,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     checkpointer_options = orbax.checkpoint.CheckpointManagerOptions(
       max_to_keep=1,
       keep_period=None,
-      best_fn=(lambda metrics: np.mean(metrics['valid']['l2'][1][1]).item()),
+      # best_fn=(lambda metrics: np.mean(metrics['valid']['autoreg']['l2'][1][1]).item()),
       best_mode='min',
       create=True,)
     checkpointer_save_args = orbax_utils.save_args_from_target(target={'state': state})
@@ -443,20 +527,32 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       f'TIME: {time_tot : 06.1f}s',
       f'LR: {state.opt_state.hyperparams["learning_rate"].item() : .2e}',
       f'RMSE: {np.sqrt(loss).item() : .2e}',
-      f'L2/{eval_parts[0]}: {np.mean(metrics_val.error_l2[0][1]) * 100 : .2f}%',
-      f'L2/{eval_parts[1]}: {np.mean(metrics_val.error_l2[1][1]) * 100 : .2f}%',
+      f'L2-AR: {np.mean(metrics_val.error_autoreg_l2[0][1]) * 100 : .2f}%',
+      f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
     ]))
 
     with disable_logging(level=logging.FATAL):
       checkpoint_metrics = {
         'loss': loss.item(),
         'train': {
-          'l1': metrics_trn.error_l1,
-          'l2': metrics_trn.error_l2
+          'autoreg': {
+            'l1': metrics_trn.error_autoreg_l1,
+            'l2': metrics_trn.error_autoreg_l2,
+          },
+          'direct': {
+            'l1': metrics_trn.error_direct_l1,
+            'l2': metrics_trn.error_direct_l2,
+          },
         },
         'valid': {
-          'l1': metrics_val.error_l1,
-          'l2': metrics_val.error_l2
+          'autoreg': {
+            'l1': metrics_val.error_autoreg_l1,
+            'l2': metrics_val.error_autoreg_l2,
+          },
+          'direct': {
+            'l1': metrics_val.error_direct_l1,
+            'l2': metrics_val.error_direct_l2,
+          },
         },
       }
       # Store the state and the metrics

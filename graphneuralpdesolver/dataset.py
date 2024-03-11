@@ -115,10 +115,12 @@ def _read_dataset_attributes(h5group: h5py.Group, nx: int, nt: int) -> dict[str,
   """Prepares the shapes and puts together the specifications of a dataset."""
 
   resolution = f'pde_{nt}-{nx}'
+  trajectories = h5group[resolution][:]
+  if trajectories.ndim == 3:
+    trajectories = trajectories[:, None]
   dataset = dict(
-    # TODO: Different for different pdes
-    specs = np.stack([h5group['alpha'][:], h5group['beta'][:], h5group['gamma'][:]], axis=-1),
-    trajectories = h5group[resolution][:][..., None],
+    specs = np.stack([h5group[k][:] for k in h5group.keys() if 'pde' not in k], axis=-1),
+    trajectories = np.moveaxis(trajectories, (1, 2, 3), (3, 1, 2)),
     x = h5group[resolution].attrs['x'],
     # dx = h5group[resolution].attrs['dx'].item(),
     tmin = h5group[resolution].attrs['tmin'].item(),

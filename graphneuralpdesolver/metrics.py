@@ -12,7 +12,7 @@ def rel_l2_error(predictions: Array, labels: Array) -> Array:
     sum_err_per_var_squared = jnp.sum(jnp.power(predictions - labels, 2), axis=(1, 2))
     sum_lab_per_var_squared = jnp.sum(jnp.power(labels, 2), axis=(1, 2))
     rel_l2_err_per_var = jnp.sqrt(sum_err_per_var_squared / sum_lab_per_var_squared)
-    mean_rel_l2_err_per_var = jnp.mean(rel_l2_err_per_var, axis=0)
+    mean_rel_l2_err_per_var = jnp.median(rel_l2_err_per_var, axis=0)
 
     return mean_rel_l2_err_per_var
 
@@ -26,7 +26,7 @@ def rel_l1_error(predictions: Array, labels: Array) -> Array:
     sum_err_per_var_abs = jnp.sum(jnp.abs(predictions - labels), axis=(1, 2))
     sum_lab_per_var_abs = jnp.sum(jnp.abs(labels), axis=(1, 2))
     rel_l1_err_per_var = (sum_err_per_var_abs / sum_lab_per_var_abs)
-    mean_rel_l2_err_per_var = jnp.mean(rel_l1_err_per_var, axis=0)
+    mean_rel_l2_err_per_var = jnp.median(rel_l1_err_per_var, axis=0)
 
     return mean_rel_l2_err_per_var
 

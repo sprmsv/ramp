@@ -47,9 +47,9 @@ class GraphNeuralPDESolver(AbstractOperator):
   latent_size: int = 128
   num_mlp_hidden_layers: int = 2  # TRY: 1, 2, 3
   num_message_passing_steps: int = 6  # TRY: tune
-  num_gridmesh_cover: int = 4  # TRY: tune
-  num_gridmesh_overlap: int = 2  # TRY: tune
-  num_multimesh_levels: int = 5  # TRY: tune
+  num_gridmesh_cover: int = 8  # TRY: tune
+  num_gridmesh_overlap: int = 4  # TRY: tune
+  num_multimesh_levels: int = 4  # TRY: tune
   residual_update: bool = True
   time_conditioned: bool = False
 
@@ -210,13 +210,13 @@ class GraphNeuralPDESolver(AbstractOperator):
   def _init_mesh2grid_graph(self) -> TypedGraph:
     """Build Mesh2Grid graph."""
 
-    # CHECK: Try other features
+    # TRY: Other features
     grid_node_feats = jnp.stack([jnp.abs(self.zeta_grid), jnp.sin(jnp.pi * jnp.abs(self.zeta_grid))], axis=-1)
     mesh_node_feats = jnp.stack([jnp.abs(self.zeta_mesh), jnp.sin(jnp.pi * jnp.abs(self.zeta_mesh))], axis=-1)
     grid_node_set = NodeSet(n_node=jnp.array([self.zeta_grid.shape[0]]), features=grid_node_feats)
     mesh_node_set = NodeSet(n_node=jnp.array([self.zeta_mesh.shape[0]]), features=mesh_node_feats)
 
-    # CHECK: Try other features
+    # TRY: Other features
     zij = jnp.array([
       jnp.abs(self.zeta_grid[r]) - jnp.abs(self.zeta_mesh[s])
       for r, s in zip(self.indices_grid, self.indices_mesh)
