@@ -70,6 +70,8 @@ class GraphNeuralPDESolver(AbstractOperator):
         x=self.x, n_cover=self.num_gridmesh_cover, n_overlap=self.num_gridmesh_overlap,
         dx=self.dx, minx=self.range_x[0], maxx=self.range_x[1],
       )
+    self.phi_grid = jnp.pi * (self.zeta_grid + 1)  # [0, 2pi]
+    self.phi_mesh = jnp.pi * (self.zeta_mesh + 1)  # [0, 2pi]
     self._num_grid_nodes = self.zeta_grid.shape[0]
     self._num_mesh_nodes = self.zeta_mesh.shape[0]
     self._grid2mesh_graph = self._init_grid2mesh_graph()
@@ -137,18 +139,29 @@ class GraphNeuralPDESolver(AbstractOperator):
   def _init_grid2mesh_graph(self) -> TypedGraph:
     """Build Grid2Mesh graph."""
 
-    # CHECK: Try other features
-    grid_node_feats = jnp.stack([jnp.abs(self.zeta_grid), jnp.sin(jnp.pi * jnp.abs(self.zeta_grid))], axis=-1)
-    mesh_node_feats = jnp.stack([jnp.abs(self.zeta_mesh), jnp.sin(jnp.pi * jnp.abs(self.zeta_mesh))], axis=-1)
+    # TODO: Avoid code repetition for building the features
+
+    # TRY: Other features (zeta, abs(zeta), phi, etc.)
+    grid_node_feats = jnp.stack([jnp.sin(self.phi_grid), jnp.cos(self.phi_grid)], axis=-1)
+    mesh_node_feats = jnp.stack([jnp.sin(self.phi_mesh), jnp.cos(self.phi_mesh)], axis=-1)
     grid_node_set = NodeSet(n_node=jnp.array([self.zeta_grid.shape[0]]), features=grid_node_feats)
     mesh_node_set = NodeSet(n_node=jnp.array([self.zeta_mesh.shape[0]]), features=mesh_node_feats)
 
-    # CHECK: Try other features
-    zij = jnp.array([
+    # TRY: Other features
+    sin_phi_ij = jnp.array([
+      jnp.sin(self.phi_mesh[r]) - jnp.sin(self.phi_grid[s])
+      for s, r in zip(self.indices_grid, self.indices_mesh)
+    ])
+    cos_phi_ij = jnp.array([
+      jnp.cos(self.phi_mesh[r]) - jnp.cos(self.phi_grid[s])
+      for s, r in zip(self.indices_grid, self.indices_mesh)
+    ])
+    abs_z_ij = jnp.array([
       jnp.abs(self.zeta_mesh[r]) - jnp.abs(self.zeta_grid[s])
       for s, r in zip(self.indices_grid, self.indices_mesh)
     ])
-    edge_feats = jnp.stack([zij], axis=-1)
+    edge_feats = jnp.stack([sin_phi_ij, cos_phi_ij, abs_z_ij], axis=-1)
+    edge_feats = edge_feats / jnp.max(edge_feats, axis=0, keepdims=True)  # Normalize edge features
     edge_set = EdgeSet(
       n_edge=jnp.array([self.indices_grid.shape[0]]),
       indices=EdgesIndices(senders=self.indices_grid, receivers=self.indices_mesh),
@@ -178,25 +191,32 @@ class GraphNeuralPDESolver(AbstractOperator):
     edge_feats = []
     for edges in multimesh_edges:
       for e in edges:
-        # CHECK: Try other features
+        # TRY: Other features
         senders.append(e[0])
         receivers.append(e[1])
-        edge_feats.append([jnp.abs(self.zeta_mesh[e[1]]) - jnp.abs(self.zeta_mesh[e[0]])])
+        sin_phi_ij = jnp.sin(self.phi_mesh[e[1]]) - jnp.sin(self.phi_mesh[e[0]])
+        cos_phi_ij = jnp.cos(self.phi_mesh[e[1]]) - jnp.cos(self.phi_mesh[e[0]])
+        abs_z_ij = jnp.abs(self.zeta_mesh[e[1]]) - jnp.abs(self.zeta_mesh[e[0]])
+        edge_feats.append([sin_phi_ij, cos_phi_ij, abs_z_ij])
         senders.append(e[1])
         receivers.append(e[0])
-        edge_feats.append([jnp.abs(self.zeta_mesh[e[0]]) - jnp.abs(self.zeta_mesh[e[1]])])
+        sin_phi_ij = jnp.sin(self.phi_mesh[e[0]]) - jnp.sin(self.phi_mesh[e[1]])
+        cos_phi_ij = jnp.cos(self.phi_mesh[e[0]]) - jnp.cos(self.phi_mesh[e[1]])
+        abs_z_ij = jnp.abs(self.zeta_mesh[e[0]]) - jnp.abs(self.zeta_mesh[e[1]])
+        edge_feats.append([sin_phi_ij, cos_phi_ij, abs_z_ij])
 
     senders = jnp.array(senders)
     receivers = jnp.array(receivers)
     edge_feats = jnp.array(edge_feats)
+    edge_feats = edge_feats / jnp.max(edge_feats, axis=0, keepdims=True)  # Normalize edge features
     edge_set = EdgeSet(
       n_edge=jnp.array([senders.shape[0]]),
       indices=EdgesIndices(senders=senders, receivers=receivers),
       features=edge_feats,
     )
 
-    # CHECK: Try other features
-    mesh_node_feats = jnp.stack([jnp.abs(self.zeta_mesh), jnp.sin(jnp.pi * jnp.abs(self.zeta_mesh))], axis=-1)
+    # TRY: Other features
+    mesh_node_feats = jnp.stack([jnp.sin(self.phi_mesh), jnp.cos(self.phi_mesh)], axis=-1)
     mesh_node_set = NodeSet(n_node=jnp.array([self.zeta_mesh.shape[0]]), features=mesh_node_feats)
 
     graph = TypedGraph(
@@ -211,17 +231,26 @@ class GraphNeuralPDESolver(AbstractOperator):
     """Build Mesh2Grid graph."""
 
     # TRY: Other features
-    grid_node_feats = jnp.stack([jnp.abs(self.zeta_grid), jnp.sin(jnp.pi * jnp.abs(self.zeta_grid))], axis=-1)
-    mesh_node_feats = jnp.stack([jnp.abs(self.zeta_mesh), jnp.sin(jnp.pi * jnp.abs(self.zeta_mesh))], axis=-1)
+    grid_node_feats = jnp.stack([jnp.sin(self.phi_grid), jnp.cos(self.phi_grid)], axis=-1)
+    mesh_node_feats = jnp.stack([jnp.sin(self.phi_mesh), jnp.cos(self.phi_mesh)], axis=-1)
     grid_node_set = NodeSet(n_node=jnp.array([self.zeta_grid.shape[0]]), features=grid_node_feats)
     mesh_node_set = NodeSet(n_node=jnp.array([self.zeta_mesh.shape[0]]), features=mesh_node_feats)
 
     # TRY: Other features
-    zij = jnp.array([
-      jnp.abs(self.zeta_grid[r]) - jnp.abs(self.zeta_mesh[s])
+    sin_phi_ij = jnp.array([
+      jnp.sin(self.phi_mesh[r]) - jnp.sin(self.phi_grid[s])
       for r, s in zip(self.indices_grid, self.indices_mesh)
     ])
-    edge_feats = jnp.stack([zij], axis=-1)
+    cos_phi_ij = jnp.array([
+      jnp.cos(self.phi_mesh[r]) - jnp.cos(self.phi_grid[s])
+      for r, s in zip(self.indices_grid, self.indices_mesh)
+    ])
+    abs_z_ij = jnp.array([
+      jnp.abs(self.zeta_mesh[r]) - jnp.abs(self.zeta_grid[s])
+      for r, s in zip(self.indices_grid, self.indices_mesh)
+    ])
+    edge_feats = jnp.stack([sin_phi_ij, cos_phi_ij, abs_z_ij], axis=-1)
+    edge_feats = edge_feats / jnp.max(edge_feats, axis=0, keepdims=True)  # Normalize edge features
     edge_set = EdgeSet(
       n_edge=jnp.array([self.indices_mesh.shape[0]]),
       indices=EdgesIndices(senders=self.indices_mesh, receivers=self.indices_grid),

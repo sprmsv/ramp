@@ -143,22 +143,13 @@ def shuffle_arrays(key: flax.typing.PRNGKey, arrays: Sequence[Array]) -> Sequenc
 
   return [arr[permutation] for arr in arrays]
 
-def normalize(trajectories: Array, stats: Tuple[Array, Array] = None):
-  if stats:
-    mean, std = stats
-  else:
-    mean = np.mean(trajectories, axis=0)[None, :]
-    std = np.std(trajectories, axis=0)[None, :]
+def normalize(arr: Array, mean: Array, std: Array):
+  arr = (arr - mean) / std
+  return arr
 
-  trajectories = (trajectories - mean) / std
-
-  return trajectories, (mean, std)
-
-def unnormalize(trajectories: Array, stats: Tuple[Array, Array]):
-  mean, std = stats
-  trajectories = std * trajectories + mean
-
-  return trajectories
+def unnormalize(arr: Array, mean: Array, std: Array):
+  arr = std * arr + mean
+  return arr
 
 def downsample_convolution(trajectories: Array, ratio: int) -> Array:
   trj_padded = np.concatenate([trajectories[:, :, -(ratio//2+1):-1], trajectories, trajectories[:, :, :(ratio//2)]], axis=2)

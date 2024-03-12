@@ -4,7 +4,69 @@ import flax.typing
 
 from graphneuralpdesolver.utils import Array
 from graphneuralpdesolver.models.graphneuralpdesolver import AbstractOperator
+from graphneuralpdesolver.dataset import normalize, unnormalize
 
+
+class OperatorNormalizer:
+
+  def __init__(self, operator: AbstractOperator, stats_trj, stats_res):
+    self._apply_operator = operator.apply
+    self._stats_trj_mean, self._stats_trj_std = stats_trj
+    self._stats_res_mean, self._stats_res_std = stats_res
+
+  def apply(self, variables, specs: jnp.ndarray, u_inp: jnp.ndarray, ndt: int):
+    # ndt >= 1
+    # ndt_inp >= 0
+    # TODO: START FROM ZERO
+
+    # Get normalized predicted residuals
+    u_inp_nrm = normalize(
+      u_inp,
+      mean=self._stats_trj_mean,
+      std=self._stats_trj_std
+    )
+    # TODO: Normalize specifications as well
+    r_prd_nrm = self._apply_operator(
+      variables,
+      specs=specs,
+      u_inp=u_inp_nrm,
+      ndt=jnp.array(ndt).astype(jnp.float32).reshape(1,),
+    )
+
+    # Get predicted output
+    r_prd = unnormalize(
+      r_prd_nrm,
+      mean=self._stats_res_mean[(ndt-1)],
+      std=self._stats_res_std[(ndt-1)],
+    )
+    u_prd = u_inp + r_prd
+
+    return u_prd
+
+  def get_loss_inputs(self, variables, specs: jnp.ndarray, u_inp: jnp.ndarray, u_tgt: jnp.ndarray, ndt: int):
+    # ndt >= 1
+    # ndt_inp >= 0
+    # TODO: START FROM ZERO
+
+    # Get normalized predicted residuals
+    u_inp_nrm = normalize(
+      u_inp, mean=self._stats_trj_mean, std=self._stats_trj_std)
+    r_prd_nrm = self._apply_operator(
+      variables,
+      specs=specs,
+      u_inp=u_inp_nrm,
+      ndt=jnp.array([1], dtype=jnp.float32),
+    )
+
+    # Get normalized target residuals
+    r_tgt = u_tgt - u_inp
+    r_tgt_nrm = normalize(
+      r_tgt,
+      mean=self._stats_res_mean[(ndt-1)],
+      std=self._stats_res_std[(ndt-1)],
+    )
+
+    return (r_prd_nrm, r_tgt_nrm)
 
 class AutoregressivePredictor:
 

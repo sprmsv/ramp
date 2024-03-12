@@ -105,17 +105,35 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   time_int_pre = time()
 
   # Normalize the train dataset
-  dataset_trn['trajectories_nrm'], stats_trn = normalize(dataset_trn['trajectories'])
+  stats_axis = (0,)
+  stats_trj_mean = jnp.mean(
+    dataset_trn['trajectories'], axis=stats_axis, keepdims=True)
+  stats_trj_std = jnp.std(
+    dataset_trn['trajectories'], axis=stats_axis, keepdims=True)
+  # stats_res_mean = jnp.stack([
+  #   jnp.mean(dataset_trn['trajectories'][:, (ndt+1):] - dataset_trn['trajectories'][:, :-(ndt+1)],
+  #     axis=stats_axis, keepdims=True)
+  #   for ndt in range(FLAGS.direct_steps)
+  # ])
+  # stats_res_std = jnp.stack([
+  #   jnp.std(dataset_trn['trajectories'][:, (ndt+1):] - dataset_trn['trajectories'][:, :-(ndt+1)],
+  #     axis=stats_axis, keepdims=True)
+  #   for ndt in range(FLAGS.direct_steps)
+  # ])
+  dataset_trn['trajectories_nrm'] = normalize(
+    dataset_trn['trajectories'], mean=stats_trj_mean, std=stats_trj_std)
 
   # Initialzize the model or use the loaded parameters
   if params:
     variables = {'params': params}
   else:
     subkey, key = jax.random.split(key)
-    sample_input_u = dataset_trn['trajectories_nrm'][:batch_size, :1]
-    sample_input_specs = dataset_trn['specs'][:batch_size]
-    sample_ndt = jnp.array([1.])  # Single float nt for a batch
-    variables = jax.jit(model.init)(subkey, specs=sample_input_specs, u_inp=sample_input_u, ndt=sample_ndt)
+    model_init_kwargs = dict(
+      specs = dataset_trn['specs'][:batch_size],
+      u_inp = dataset_trn['trajectories'][:batch_size, :1],
+      ndt = jnp.array([1.]),  # Single float ndt for a batch
+    )
+    variables = jax.jit(model.init)(subkey, **model_init_kwargs)
 
   # Calculate the total number of parameters
   n_model_parameters = np.sum(
@@ -339,7 +357,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     """
 
     # Normalize the input
-    input, _ = normalize(input, stats=stats_input)
+    input = normalize(input, mean=stats_input[0], std=stats_input[1])
     # Get normalized predictions
     variables = {'params': state.params}
     rollout, _ = predictor(
@@ -349,10 +367,11 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       num_jumps=(num_steps // FLAGS.direct_steps),
     )
     # Denormalize the predictions
-    rollout = unnormalize(rollout, stats=stats_target)
+    rollout = unnormalize(rollout, mean=stats_target[0], std=stats_target[1])
 
     return rollout
 
+  @jax.jit
   def evaluate_direct_prediction(
       state: TrainState, dataset: Mapping[str, Array]) -> Tuple[Array, Array]:
 
@@ -378,36 +397,36 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     )
     mean_inp = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=stats_trn[0],
+          operand=stats_trj_mean,
           start_index=(lt), slice_size=1, axis=1)
     )(lead_times)
     std_inp = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=stats_trn[1],
+          operand=stats_trj_std,
           start_index=(lt), slice_size=1, axis=1)
     )(lead_times)
     mean_lab = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=stats_trn[0],
+          operand=stats_trj_mean,
           start_index=(lt+1), slice_size=FLAGS.direct_steps, axis=1)
     )(lead_times)
     std_lab = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=stats_trn[1],
+          operand=stats_trj_std,
           start_index=(lt+1), slice_size=FLAGS.direct_steps, axis=1)
     )(lead_times)
 
     def get_direct_errors(lt, carry):
       err_l1_mean, err_l2_mean = carry
       def get_direct_prediction(ndt, forcing):
-        u_inp_nrm, _ = normalize(u_inp[lt], (mean_inp[lt], std_inp[lt]))
+        u_inp_nrm, _ = normalize(u_inp[lt], mean=mean_inp[lt], std=std_inp[lt])
         u_prd_nrm = model.apply(
           variables={'params': state.params},
           u_inp=u_inp_nrm,
           specs=specs[lt],
           ndt=jnp.array(ndt, dtype=jnp.float32).reshape(1,),
         )
-        u_prd = unnormalize(u_prd_nrm, (mean_lab[lt][:, ndt-1], std_lab[lt][:, ndt-1]))
+        u_prd = unnormalize(u_prd_nrm, mean=mean_lab[lt][:, ndt-1], std=std_lab[lt][:, ndt-1])
         return (ndt+1), u_prd
       _, u_prd = jax.lax.scan(f=get_direct_prediction,
         init=1, xs=None, length=FLAGS.direct_steps,
@@ -454,8 +473,8 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
             specs=specs,
             input=input,
             num_steps=target.shape[1],
-            stats_input=tuple([s[:, idx_input] for s in stats_trn]),
-            stats_target=tuple([s[:, idx_target] for s in stats_trn]),
+            stats_input=(stats_trj_mean[:, idx_input], stats_trj_std[:, idx_input]),
+            stats_target=(stats_trj_mean[:, idx_target], stats_trj_std[:, idx_target]),
           )
           # Compute and store metrics
           error_l1_per_var = rel_l1_error(pred, target)
