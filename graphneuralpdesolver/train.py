@@ -164,7 +164,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   predictor = AutoregressivePredictor(operator=model, num_steps_direct=FLAGS.direct_steps)
 
   def compute_loss(params: flax.typing.Collection, specs: Array,
-                   u_inp_lagged: Array, ndt: int, u_out: Array, num_steps_autoreg: int) -> Array:
+                   u_lag: Array, ndt: int, u_tgt: Array, num_steps_autoreg: int) -> Array:
     """Computes the prediction of the model and returns its loss."""
 
     variables = {'params': params}
@@ -172,32 +172,32 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     u_inp = predictor.jump(
       variables=variables,
       specs=specs,
-      u_inp=u_inp_lagged,
+      u_inp=u_lag,
       num_jumps=num_steps_autoreg,
     )
     # Get the output
     # NOTE: using checkpointed version to avoid memory exhaustion
     # TRY: Change it back to model.apply to get more performance, although it is only one step..
-    u_out_pred = predictor._apply_operator(variables, specs=specs, u_inp=u_inp, ndt=ndt.reshape(1,))
+    u_prd = predictor._apply_operator(variables, specs=specs, u_inp=u_inp, ndt=ndt.reshape(1,))
 
-    return criterion_loss(u_out_pred, u_out)
+    return criterion_loss(u_prd, u_tgt)
 
   def get_noisy_input(params: flax.typing.Collection, specs: Array,
-                      u_inp_lagged: Array, num_steps_autoreg: int) -> Array:
+                      u_lag: Array, num_steps_autoreg: int) -> Array:
     """Apply the model to the lagged input to get a noisy input."""
 
     variables = {'params': params}
     u_inp_noisy = predictor.jump(
       variables=variables,
       specs=specs,
-      u_inp=u_inp_lagged,
+      u_inp=u_lag,
       num_jumps=num_steps_autoreg,
     )
 
     return u_inp_noisy
 
   def get_loss_and_grads(params: flax.typing.Collection, specs: Array,
-    u_lag: Array, u_out: Array, ndt: int) -> Tuple[Array, PyTreeDef]:
+    u_lag: Array, u_tgt: Array, ndt: int) -> Tuple[Array, PyTreeDef]:
     """
     Computes the loss and the gradients of the loss w.r.t the parameters.
     """
@@ -212,24 +212,24 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       params, specs, u_lag, num_steps_autoreg=noise_steps)
     # Use noisy input and compute gradients
     loss, grads = jax.value_and_grad(compute_loss)(
-      params, specs, u_inp, ndt, u_out, num_steps_autoreg=grads_steps)
+      params, specs, u_inp, ndt, u_tgt, num_steps_autoreg=grads_steps)
 
     return loss, grads
 
   def get_loss_and_grads_sub_batch(
     state: TrainState, key: flax.typing.PRNGKey,
-    specs: Array, u_lag: Array, u_out: Array, ndt: int,
+    specs: Array, u_lag: Array, u_tgt: Array, ndt: int,
   ) -> Tuple[Array, PyTreeDef]:
     # NOTE: INPUT SHAPES [batch_size * num_lead_times, ...]
 
     # Shuffle the input/outputs along the batch axis
-    specs, u_lag, u_out = shuffle_arrays(key, [specs, u_lag, u_out])
+    specs, u_lag, u_tgt = shuffle_arrays(key, [specs, u_lag, u_tgt])
 
     # Split into num_lead_times chunks and get loss and gradients
     # -> [num_lead_times, batch_size, ...]
     specs = jnp.stack(jnp.split(specs, num_lead_times))
     u_lag = jnp.stack(jnp.split(u_lag, num_lead_times))
-    u_out = jnp.stack(jnp.split(u_out, num_lead_times))
+    u_tgt = jnp.stack(jnp.split(u_tgt, num_lead_times))
 
     def _update_state_on_mini_batch(i, carry):
       _state, _loss_mean = carry
@@ -237,7 +237,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
         params=_state.params,
         specs=specs[i],
         u_lag=u_lag[i],
-        u_out=u_out[i],
+        u_tgt=u_tgt[i],
         ndt=ndt,
       )
       # Update the state by applying the gradients
@@ -269,7 +269,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
           operand=trajectory,
           start_index=(lt-unroll_offset), slice_size=1, axis=1)
     )(lead_times)
-    u_out_batch = jax.vmap(
+    u_tgt_batch = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
           operand=trajectory,
           start_index=(lt+1), slice_size=FLAGS.direct_steps, axis=1)
@@ -282,7 +282,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     # -> [batch_size * num_lead_times, ...]
     u_lag_batch = u_lag_batch.reshape(
         (batch_size * num_lead_times), 1, num_grid_points, -1)
-    u_out_batch = u_out_batch.reshape(
+    u_tgt_batch = u_tgt_batch.reshape(
         (batch_size * num_lead_times), FLAGS.direct_steps, num_grid_points, -1)
     specs_batch = specs_batch.reshape(
         (batch_size * num_lead_times), -1)
@@ -291,7 +291,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     # Same u_lag and specs, loop over ndt
     subkeys = jnp.stack(jax.random.split(key, num=FLAGS.direct_steps))
     ndt_batch = 1 + jnp.arange(FLAGS.direct_steps)  # -> [direct_steps,]
-    u_out_batch = jnp.expand_dims(u_out_batch, axis=2).swapaxes(0, 1)  # -> [direct_steps, ...]
+    u_tgt_batch = jnp.expand_dims(u_tgt_batch, axis=2).swapaxes(0, 1)  # -> [direct_steps, ...]
 
     def update_state_on_sub_batch(i, carry):
       _state, _loss_mean = carry
@@ -300,7 +300,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
         key=subkeys[i],
         specs=specs_batch,
         u_lag=u_lag_batch,
-        u_out=u_out_batch[i],
+        u_tgt=u_tgt_batch[i],
         ndt=ndt_batch[i],
       )
       _loss_mean += _loss / FLAGS.direct_steps
@@ -348,8 +348,8 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
   @functools.partial(jax.jit, static_argnames=('num_steps',))
   def predict_trajectory(
-      state: TrainState, specs: Array, input: Array, num_steps: int,
-      stats_input: Tuple[Array, Array], stats_target: Tuple[Array, Array],
+      state: TrainState, specs: Array, u_inp: Array, num_steps: int,
+      stats_inp: Tuple[Array, Array], stats_tgt: Tuple[Array, Array],
     ) -> Array:
     """
     Normalizes the input and predicts the trajectories autoregressively.
@@ -357,17 +357,17 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     """
 
     # Normalize the input
-    input = normalize(input, mean=stats_input[0], std=stats_input[1])
+    u_inp = normalize(u_inp, mean=stats_inp[0], std=stats_inp[1])
     # Get normalized predictions
     variables = {'params': state.params}
     rollout, _ = predictor(
       variables=variables,
       specs=specs,
-      u_inp=input,
+      u_inp=u_inp,
       num_jumps=(num_steps // FLAGS.direct_steps),
     )
     # Denormalize the predictions
-    rollout = unnormalize(rollout, mean=stats_target[0], std=stats_target[1])
+    rollout = unnormalize(rollout, mean=stats_tgt[0], std=stats_tgt[1])
 
     return rollout
 
@@ -387,7 +387,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
           operand=trajs,
           start_index=(lt), slice_size=1, axis=1)
     )(lead_times)
-    u_lab = jax.vmap(
+    u_tgt = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
           operand=trajs,
           start_index=(lt+1), slice_size=FLAGS.direct_steps, axis=1)
@@ -405,12 +405,12 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
           operand=stats_trj_std,
           start_index=(lt), slice_size=1, axis=1)
     )(lead_times)
-    mean_lab = jax.vmap(
+    mean_tgt = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
           operand=stats_trj_mean,
           start_index=(lt+1), slice_size=FLAGS.direct_steps, axis=1)
     )(lead_times)
-    std_lab = jax.vmap(
+    std_tgt = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
           operand=stats_trj_std,
           start_index=(lt+1), slice_size=FLAGS.direct_steps, axis=1)
@@ -419,21 +419,21 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     def get_direct_errors(lt, carry):
       err_l1_mean, err_l2_mean = carry
       def get_direct_prediction(ndt, forcing):
-        u_inp_nrm, _ = normalize(u_inp[lt], mean=mean_inp[lt], std=std_inp[lt])
+        u_inp_nrm = normalize(u_inp[lt], mean=mean_inp[lt], std=std_inp[lt])
         u_prd_nrm = model.apply(
           variables={'params': state.params},
           u_inp=u_inp_nrm,
           specs=specs[lt],
           ndt=jnp.array(ndt, dtype=jnp.float32).reshape(1,),
         )
-        u_prd = unnormalize(u_prd_nrm, mean=mean_lab[lt][:, ndt-1], std=std_lab[lt][:, ndt-1])
+        u_prd = unnormalize(u_prd_nrm, mean=mean_tgt[lt][:, ndt-1], std=std_tgt[lt][:, ndt-1])
         return (ndt+1), u_prd
       _, u_prd = jax.lax.scan(f=get_direct_prediction,
         init=1, xs=None, length=FLAGS.direct_steps,
       )
       u_prd = u_prd.squeeze(axis=2).swapaxes(0, 1)
-      err_l1_mean += jnp.sqrt(jnp.sum(jnp.power(rel_l1_error(u_prd, u_lab[lt]), 2))) / num_lead_times
-      err_l2_mean += jnp.sqrt(jnp.sum(jnp.power(rel_l2_error(u_prd, u_lab[lt]), 2))) / num_lead_times
+      err_l1_mean += jnp.sqrt(jnp.sum(jnp.power(rel_l1_error(u_prd, u_tgt[lt]), 2))) / num_lead_times
+      err_l2_mean += jnp.sqrt(jnp.sum(jnp.power(rel_l2_error(u_prd, u_tgt[lt]), 2))) / num_lead_times
 
       return err_l1_mean, err_l2_mean
 
@@ -461,24 +461,24 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
       for p in parts:
         for idx_sub_trajectory in np.split(np.arange(num_times), p):
           # Get the input/target time indices
-          idx_input = idx_sub_trajectory[:1]
-          idx_target = idx_sub_trajectory[:]
+          idx_inp = idx_sub_trajectory[:1]
+          idx_tgt = idx_sub_trajectory[:]
           # Split the dataset along the time axis
           specs = dataset['specs']
-          input = dataset['trajectories'][:, idx_input]
-          target = dataset['trajectories'][:, idx_target]
+          u_inp = dataset['trajectories'][:, idx_inp]
+          u_tgt = dataset['trajectories'][:, idx_tgt]
           # Get predictions and target
           pred = predict_trajectory(
             state=state,
             specs=specs,
-            input=input,
-            num_steps=target.shape[1],
-            stats_input=(stats_trj_mean[:, idx_input], stats_trj_std[:, idx_input]),
-            stats_target=(stats_trj_mean[:, idx_target], stats_trj_std[:, idx_target]),
+            u_inp=u_inp,
+            num_steps=u_tgt.shape[1],
+            stats_inp=(stats_trj_mean[:, idx_inp], stats_trj_std[:, idx_inp]),
+            stats_tgt=(stats_trj_mean[:, idx_tgt], stats_trj_std[:, idx_tgt]),
           )
           # Compute and store metrics
-          error_l1_per_var = rel_l1_error(pred, target)
-          error_l2_per_var = rel_l2_error(pred, target)
+          error_l1_per_var = rel_l1_error(pred, u_tgt)
+          error_l2_per_var = rel_l2_error(pred, u_tgt)
           error_l1[p].append(jnp.sqrt(jnp.sum(jnp.power(error_l1_per_var, 2))).item())
           error_l2[p].append(jnp.sqrt(jnp.sum(jnp.power(error_l2_per_var, 2))).item())
 
