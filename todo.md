@@ -5,6 +5,7 @@
     - Create new errors plots (with L1)
     - Add your notes
 
+- Change the pmap strategy
 - Use pmap for evaluation too
 - Use different overlap_factor for mesh2grid
 

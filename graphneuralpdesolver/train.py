@@ -242,12 +242,17 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
       _loss_mean += _loss / num_lead_times
       return _state, _loss_mean
 
-    state, loss = jax.lax.fori_loop(
-      lower=0,
-      upper=num_lead_times,
-      body_fun=_update_state_on_mini_batch,
-      init_val=(state, 0.)
-    )
+    # FIXME: Go back to fori_loop and change pmap strategy
+    carry = (state, 0.)
+    for i in range(num_lead_times):
+      carry = _update_state_on_mini_batch(i, carry)
+    state, loss = carry
+    # state, loss = jax.lax.fori_loop(
+    #   lower=0,
+    #   upper=num_lead_times,
+    #   body_fun=_update_state_on_mini_batch,
+    #   init_val=(state, 0.)
+    # )
 
     return state, loss
 
@@ -304,12 +309,17 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
       _loss_mean += _loss / FLAGS.direct_steps
       return _state, _loss_mean
 
-    state, loss = jax.lax.fori_loop(
-      lower=0,
-      upper=FLAGS.direct_steps,
-      body_fun=update_state_on_sub_batch,
-      init_val=(state, 0.)
-    )
+    # FIXME: Go back to fori_loop and change pmap strategy
+    carry = (state, 0.)
+    for i in range(FLAGS.direct_steps):
+      carry = update_state_on_sub_batch(i, carry)
+    state, loss = carry
+    # state, loss = jax.lax.fori_loop(
+    #   lower=0,
+    #   upper=FLAGS.direct_steps,
+    #   body_fun=update_state_on_sub_batch,
+    #   init_val=(state, 0.)
+    # )
 
     return state, loss
 
@@ -675,9 +685,9 @@ def main(argv):
     model_kwargs = dict(
       num_outputs=dataset.sample[0].shape[-1],
       num_grid_nodes=dataset.sample[0].shape[2:4],
-      num_mesh_nodes=(4, 4),  # TRY: tune  # TMP
+      num_mesh_nodes=(32, 32),  # TRY: tune
       overlap_factor=1.0,  # TRY: tune
-      num_multimesh_levels=1,  # TRY: tune  # TMP
+      num_multimesh_levels=4,  # TRY: tune
       latent_size=FLAGS.latent_size,  # TRY: tune
       num_mlp_hidden_layers=2,  # TRY: 1, 2, 3
       num_message_passing_steps=6,  # TRY: tune
