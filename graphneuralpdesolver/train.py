@@ -84,6 +84,8 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
   # Samples
   sample_traj, sample_spec = dataset.sample
   _use_specs = (sample_spec is not None)
+  sample_traj = jax.device_put(jnp.array(sample_traj))
+  sample_spec = jax.device_put(jnp.array(sample_spec)) if _use_specs else None
 
   # Set constants
   num_samples_trn = dataset.nums['train']
@@ -98,8 +100,8 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
 
   # Set the normalization statistics
   # TRY: Get statistics along the time axis
-  stats_trj_mean = dataset.mean_trn
-  stats_trj_std = dataset.mean_trn
+  stats_trj_mean = jax.device_put(jnp.array(dataset.mean_trn))
+  stats_trj_std = jax.device_put(jnp.array(dataset.std_trn))
 
   # Initialzize the model or use the loaded parameters
   if params:

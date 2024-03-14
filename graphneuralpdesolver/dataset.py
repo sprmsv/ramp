@@ -44,7 +44,7 @@ class Dataset:
     _sum = np.zeros_like(self.sample[0])
     for idx in range(n_train):
       _sum += np.power(self.train(idx)[0] - self.mean_trn, 2)
-    self.std_train = np.sqrt(_sum / n_train)
+    self.std_trn = np.sqrt(_sum / n_train)
 
   def _fetch(self, idx):
     traj = self.reader[f'sample_{str(idx)}'][:]
