@@ -47,10 +47,10 @@ class GraphNeuralPDESolver(AbstractOperator):
   num_grid_nodes: Sequence[int]
   num_mesh_nodes: Sequence[int]
   latent_size: int = 128
-  num_mlp_hidden_layers: int = 2  # TRY: 1, 2, 3
-  num_message_passing_steps: int = 6  # TRY: tune
+  num_mlp_hidden_layers: int = 2
+  num_message_passing_steps: int = 6
   overlap_factor: float = 1.
-  num_multimesh_levels: int = 4  # TRY: tune
+  num_multimesh_levels: int = 1
   residual_update: bool = True
   time_conditioned: bool = True
 

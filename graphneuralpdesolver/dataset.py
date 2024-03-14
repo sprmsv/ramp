@@ -34,20 +34,16 @@ class Dataset:
       'test': random_permutation[(n_train+n_valid):(n_train+n_valid+n_test)],
     }
 
-    # Compute mean  # TMP
-    # _sum = np.zeros_like(self.sample[0])
-    # for idx in range(n_train):
-    #   _sum += self.train(idx)[0]
-    # self.mean_trn = _sum / n_train
+    # Compute mean
     _sum = np.zeros_like(self.sample[0])
+    for idx in range(n_train):
+      _sum += self.train(idx)[0]
     self.mean_trn = _sum / n_train
 
-    # Compute std  # TMP
-    # _sum = np.zeros_like(self.sample[0])
-    # for idx in range(n_train):
-    #   _sum += np.power(self.train(idx)[0] - self.mean_trn, 2)
-    # self.std_train = np.sqrt(_sum / n_train)
-    _sum = np.ones_like(self.sample[0])
+    # Compute std
+    _sum = np.zeros_like(self.sample[0])
+    for idx in range(n_train):
+      _sum += np.power(self.train(idx)[0] - self.mean_trn, 2)
     self.std_train = np.sqrt(_sum / n_train)
 
   def _fetch(self, idx):
@@ -77,7 +73,7 @@ class Dataset:
     assert batch_size <= self.nums[mode]
     _idx_next = 0
     _idx_mode_permuted = jnp.arange(self.nums[mode])
-    if key:
+    if key is not None:
       _idx_mode_permuted = jax.random.permutation(key, np.arange(self.nums[mode]))
     for _ in range(self.nums[mode] // batch_size):
       trajs_batch = np.concatenate([

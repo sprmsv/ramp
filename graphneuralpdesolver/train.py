@@ -217,11 +217,14 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     # NOTE: INPUT SHAPES [batch_size * num_lead_times, ...]
 
     # Shuffle the input/outputs along the batch axis
-    specs, u_lag, u_tgt = shuffle_arrays(key, [specs, u_lag, u_tgt])
+    if _use_specs:
+      specs, u_lag, u_tgt = shuffle_arrays(key, [specs, u_lag, u_tgt])
+    else:
+      u_lag, u_tgt = shuffle_arrays(key, [u_lag, u_tgt])
 
     # Split into num_lead_times chunks and get loss and gradients
     # -> [num_lead_times, batch_size, ...]
-    specs = jnp.stack(jnp.split(specs, num_lead_times))
+    specs = jnp.stack(jnp.split(specs, num_lead_times)) if _use_specs else None
     u_lag = jnp.stack(jnp.split(u_lag, num_lead_times))
     u_tgt = jnp.stack(jnp.split(u_tgt, num_lead_times))
 
@@ -229,7 +232,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
       _state, _loss_mean = carry
       _loss, _grads = get_loss_and_grads(
         params=_state.params,
-        specs=specs[i],
+        specs=(specs[i] if _use_specs else None),
         u_lag=u_lag[i],
         u_tgt=u_tgt[i],
         ndt=ndt,
@@ -272,7 +275,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     )(lead_times)
     specs_batch = (specs[None, :, :]
       .repeat(repeats=num_lead_times, axis=0)
-    )
+    ) if _use_specs else None
 
     # Concatenate lead times along the batch axis
     # -> [batch_size * num_lead_times, ...]
@@ -281,7 +284,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     u_tgt_batch = u_tgt_batch.reshape(
         (batch_size * num_lead_times), FLAGS.direct_steps, *num_grid_points, -1)
     specs_batch = specs_batch.reshape(
-        (batch_size * num_lead_times), -1)
+        (batch_size * num_lead_times), -1) if _use_specs else None
 
     # Compute loss and gradient by mapping on the time axis
     # Same u_lag and specs, loop over ndt
@@ -294,7 +297,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
       _state, _loss = get_loss_and_grads_sub_batch(
         state=_state,
         key=subkeys[i],
-        specs=specs_batch,
+        specs=(specs_batch if _use_specs else None),
         u_lag=u_lag_batch,
         u_tgt=u_tgt_batch[i],
         ndt=ndt_batch[i],
@@ -649,9 +652,9 @@ def main(argv):
   experiment = FLAGS.experiment
   dataset = Dataset(
     dir='/'.join([FLAGS.datadir, (experiment + '.nc')]),
-    n_train=(2**14),
-    n_valid=32,  # TMP
-    n_test=1024,
+    n_train=(32 if FLAGS.debug else 2**14),
+    n_valid=(32 if FLAGS.debug else 1024),
+    n_test=(32 if FLAGS.debug else 1024),
   )
 
   # Read the checkpoint
@@ -672,9 +675,12 @@ def main(argv):
     model_kwargs = dict(
       num_outputs=dataset.sample[0].shape[-1],
       num_grid_nodes=dataset.sample[0].shape[2:4],
-      num_mesh_nodes=(8, 8),  # TMP
-      overlap_factor=1.0,
-      num_multimesh_levels=2,  # TMP
+      num_mesh_nodes=(32, 32),  # TRY: tune
+      overlap_factor=1.0,  # TRY: tune
+      num_multimesh_levels=3,  # TRY: tune
+      latent_size=128,  # TRY: tune
+      num_mlp_hidden_layers=2,  # TRY: 1, 2, 3
+      num_message_passing_steps=6,  # TRY: tune
     )
   model = get_model(model_kwargs)
 
