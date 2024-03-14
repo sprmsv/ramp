@@ -5,10 +5,8 @@
     - Create new errors plots (with L1)
     - Add your notes
 
-- Switch to 2D
-    - Use the 2D dataset.. (FINISH)
-    - Consider parallel computing with pmap
-    - Solve the overlap issue
+- Consider parallel computing with pmap
+- Use different overlap_factor for mesh2grid
 
 - Adopt the 1D datasets to the new structure
 
@@ -24,14 +22,13 @@ REASONS FOR LONG TRAINING TIMES + Memory consumption COMPARED TO CNOs:
     4. Many lead times in training, we solve and evaluate for all times, not only the final time
 
 AUTOREGRESSIVE TRAINING:
-    1. Reduce 256 to less?
-    2. Time conditioning results and method
     3. LSTM/Transformer idea (highlight the difference with Equer)
     4. Without time-bundling and LSTM/Transformer, we are not treating the input as a sequence, we are ignoring the history of the sequence !!
 
 PROPER NORMALIZATION:
     - Normalizing the structural node and edge features
 
+SEGMENT MEAN INSTEAD OF SUM + screenshots
 
 # 1D datasets from Equer and Welling
 

@@ -34,16 +34,21 @@ class Dataset:
       'test': random_permutation[(n_train+n_valid):(n_train+n_valid+n_test)],
     }
 
-    # Compute mean
-    _sum = np.zeros_like(self.sample)
-    for idx in range(n_train):
-      _sum += self.train(idx)
+    # Compute mean  # TMP
+    # _sum = np.zeros_like(self.sample[0])
+    # for idx in range(n_train):
+    #   _sum += self.train(idx)[0]
+    # self.mean_trn = _sum / n_train
+    _sum = np.zeros_like(self.sample[0])
     self.mean_trn = _sum / n_train
 
-    # Compute std
-    _sum = np.zeros_like(self.sample)
-    for idx in range(n_train):
-      _sum += np.power(self.train(idx) - self.mean_trn, 2)
+    # Compute std  # TMP
+    # _sum = np.zeros_like(self.sample[0])
+    # for idx in range(n_train):
+    #   _sum += np.power(self.train(idx)[0] - self.mean_trn, 2)
+    # self.std_train = np.sqrt(_sum / n_train)
+    _sum = np.ones_like(self.sample[0])
+    self.std_train = np.sqrt(_sum / n_train)
 
   def _fetch(self, idx):
     traj = self.reader[f'sample_{str(idx)}'][:]

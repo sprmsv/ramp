@@ -95,6 +95,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
 
   # Samples
   sample_traj, sample_spec = dataset.sample
+  _use_specs = (sample_spec is not None)
 
   # Set constants
   num_samples_trn = dataset.nums['train']
@@ -119,7 +120,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
   else:
     subkey, key = jax.random.split(key)
     model_init_kwargs = dict(
-      u_inp=jnp.ones_like(sample_traj).repeat(batch_size, axis=0),
+      u_inp=jnp.ones(shape=(batch_size, 1, *num_grid_points, num_vars)),
       ndt=1.,
       specs=(
         jnp.ones_like(sample_spec).repeat(batch_size, axis=0)
@@ -319,8 +320,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     for idx, batch in enumerate(batches):
       begin_batch = time()
       batch = jax.tree_map(jax.device_put, batch)  # Transfer to device memory
-      assert jax.devices()[0] in batch[0].devices()  # TMP
-      assert jax.devices()[0] in batch[1].devices()  # TMP
+      assert jax.devices()[0] in batch[0].devices()  # FIXME: REMOVE
       subkey, key = jax.random.split(key)
       state, loss = train_one_batch(state, batch, subkey)
       loss_epoch += loss * batch_size / num_samples_trn
@@ -350,7 +350,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     u_inp = normalize(u_inp, mean=stats_inp[0], std=stats_inp[1])
     # Get normalized predictions
     variables = {'params': state.params}
-    rollout, _ = predictor.urnoll(
+    rollout, _ = predictor.unroll(
       variables=variables,
       specs=specs,
       u_inp=u_inp,
@@ -386,7 +386,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     )(lead_times)
     specs = (jnp.array(specs[None, :, :])
       .repeat(repeats=num_lead_times, axis=0)
-    )
+    ) if _use_specs else None
     mean_inp = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
           operand=stats_trj_mean,
@@ -415,7 +415,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
         u_prd_nrm = model.apply(
           variables={'params': state.params},
           u_inp=u_inp_nrm,
-          specs=specs[lt],
+          specs=(specs[lt] if _use_specs else None),
           ndt=ndt,
         )
         u_prd = unnormalize(u_prd_nrm, mean=mean_tgt[lt][:, ndt-1], std=std_tgt[lt][:, ndt-1])
@@ -435,7 +435,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
       body_fun=get_direct_errors,
       lower=0,
       upper=num_lead_times,
-      init_val=(jnp.zeros(shape=(1,)), jnp.zeros(shape=(1,)))
+      init_val=(jnp.zeros(shape=(batch_size,)), jnp.zeros(shape=(batch_size,)))
     )
 
     return err_l1_mean, err_l2_mean
@@ -458,8 +458,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
         # Unwrap the batch
         batch = jax.tree_map(jax.device_put, batch)  # Transfer to device memory
         trajs, specs = batch
-        assert jax.devices()[0] in trajs.devices()  # TMP
-        assert jax.devices()[0] in specs.devices()  # TMP
+        assert jax.devices()[0] in trajs.devices()  # FIXME: REMOVE
 
         # Evaluate direct prediction
         _error_dr_l1_batch, _error_dr_l2_batch = evaluate_direct_prediction(
@@ -514,7 +513,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
       return metrics
 
   # Set the evaluation partitions
-  autoreg_evaluation_parts = [1, 2, 5]  # FIXME: Get as an input
+  autoreg_evaluation_parts = [1, 2, 5]  # FIXME: Get as input
   assert all([(num_times // p) >= FLAGS.direct_steps for p in autoreg_evaluation_parts])
   # Evaluate before training
   metrics_trn = evaluate(
@@ -649,7 +648,7 @@ def main(argv):
   # Read the dataset
   experiment = FLAGS.experiment
   dataset = Dataset(
-    dir=(FLAGS.datadir + experiment + '.nc'),
+    dir='/'.join([FLAGS.datadir, (experiment + '.nc')]),
     n_train=(2**14),
     n_valid=32,  # TMP
     n_test=1024,
@@ -673,9 +672,9 @@ def main(argv):
     model_kwargs = dict(
       num_outputs=dataset.sample[0].shape[-1],
       num_grid_nodes=dataset.sample[0].shape[2:4],
-      num_mesh_nodes=(4, 4),  # TMP
+      num_mesh_nodes=(8, 8),  # TMP
       overlap_factor=1.0,
-      num_multimesh_levels=3,  # TMP
+      num_multimesh_levels=2,  # TMP
     )
   model = get_model(model_kwargs)
 
