@@ -52,6 +52,8 @@ class Dataset:
     traj = np.moveaxis(traj, source=(2, 3, 4), destination=(4, 2, 3))
     spec = None
 
+    traj = traj[..., ::8, ::8, :]  # TMP
+
     return traj, spec
 
   def _fetch_mode(self, idx, mode):

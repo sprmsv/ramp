@@ -5,8 +5,12 @@
     - Create new errors plots (with L1)
     - Add your notes
 
-- Consider parallel computing with pmap
+- Use pmap for evaluation too
 - Use different overlap_factor for mesh2grid
+
+- Do something for the long compilation time..
+    - Check this post: https://github.com/google/jax/issues/10596
+    - It is some latent features.. but why are they being constant folded?
 
 - Adopt the 1D datasets to the new structure
 

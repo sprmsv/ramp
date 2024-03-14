@@ -68,18 +68,6 @@ flags.DEFINE_bool(name='debug', default=False, required=False,
   help='If passed, the code is launched only for debugging purposes.'
 )
 
-PDETYPE = {
-  'E1': 'CE',
-  'E2': 'CE',
-  'E3': 'CE',
-  'WE1': 'WE',
-  'WE2': 'WE',
-  'WE3': 'WE',
-  'KF': 'KF',
-  'RP': 'AD',
-  'MSWG': 'AD',
-}
-
 @dataclass
 class EvalMetrics:
   error_autoreg_l1: Sequence[Tuple[int, Sequence[float]]] = None
@@ -90,7 +78,7 @@ class EvalMetrics:
 DIR = DIR_EXPERIMENTS / datetime.now().strftime('%Y%m%d-%H%M%S.%f')
 
 def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: int,
-  params: flax.typing.Collection = None) -> TrainState:
+  num_local_devices: int = 1, params: flax.typing.Collection = None) -> TrainState:
   """Trains a model and returns the state."""
 
   # Samples
@@ -102,9 +90,8 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
   num_times = sample_traj.shape[1]
   num_grid_points = sample_traj.shape[2:4]
   num_vars = sample_traj.shape[-1]
-  batch_size = FLAGS.batch_size
   unroll_offset = FLAGS.unroll_steps * FLAGS.direct_steps
-  assert num_samples_trn % batch_size == 0
+  assert num_samples_trn % FLAGS.batch_size == 0
 
   # Store the initial time
   time_int_pre = time()
@@ -120,10 +107,10 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
   else:
     subkey, key = jax.random.split(key)
     model_init_kwargs = dict(
-      u_inp=jnp.ones(shape=(batch_size, 1, *num_grid_points, num_vars)),
+      u_inp=jnp.ones(shape=(FLAGS.batch_size, 1, *num_grid_points, num_vars)),
       ndt=1.,
       specs=(
-        jnp.ones_like(sample_spec).repeat(batch_size, axis=0)
+        jnp.ones_like(sample_spec).repeat(FLAGS.batch_size, axis=0)
         if sample_spec is not None else None
       ),
     )
@@ -140,7 +127,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
   logging.info(f'Total number of trainable paramters: {n_model_parameters}')
 
   # Define the permissible lead times and number of batches
-  num_batches = num_samples_trn // batch_size
+  num_batches = num_samples_trn // FLAGS.batch_size
   lead_times = jnp.arange(unroll_offset, num_times - FLAGS.direct_steps)
   num_lead_times = num_times - unroll_offset - FLAGS.direct_steps
 
@@ -196,6 +183,8 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     Computes the loss and the gradients of the loss w.r.t the parameters.
     """
 
+    print(u_lag.shape)
+
     # Split the unrolling steps randomly to cut the gradients along the way
     # MODIFY: Change to JAX-generated random number (reproducability)
     noise_steps = np.random.choice(FLAGS.unroll_steps+1)
@@ -209,6 +198,8 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
       params, specs, u_inp, ndt, u_tgt, num_steps_autoreg=grads_steps)
 
     return loss, grads
+
+  _get_loss_and_grads = jax.pmap(get_loss_and_grads, static_broadcasted_argnums=(0, 4))
 
   def get_loss_and_grads_sub_batch(
     state: TrainState, key: flax.typing.PRNGKey,
@@ -228,15 +219,27 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     u_lag = jnp.stack(jnp.split(u_lag, num_lead_times))
     u_tgt = jnp.stack(jnp.split(u_tgt, num_lead_times))
 
+    # Split between devices
+    # -> [num_lead_times, device_count, batch_size/device_count, ...]
+    specs = jnp.concatenate(jnp.split(jnp.expand_dims(
+      specs, axis=1), num_local_devices, axis=2), axis=1) if _use_specs else None
+    u_lag = jnp.concatenate(jnp.split(jnp.expand_dims(
+      u_lag, axis=1), num_local_devices, axis=2), axis=1)
+    u_tgt = jnp.concatenate(jnp.split(jnp.expand_dims(
+      u_tgt, axis=1), num_local_devices, axis=2), axis=1)
+
     def _update_state_on_mini_batch(i, carry):
       _state, _loss_mean = carry
-      _loss, _grads = get_loss_and_grads(
-        params=_state.params,
-        specs=(specs[i] if _use_specs else None),
-        u_lag=u_lag[i],
-        u_tgt=u_tgt[i],
-        ndt=ndt,
+      _loss, _grads = _get_loss_and_grads(
+        _state.params,
+        (specs[i] if _use_specs else None),
+        u_lag[i],
+        u_tgt[i],
+        ndt,
       )
+      # Aggregate loss and gradients
+      _grads = jax.tree_map(jnp.sum, _grads)
+      _loss = jnp.sum(_loss)
       # Update the state by applying the gradients
       _state = _state.apply_gradients(grads=_grads)
       _loss_mean += _loss / num_lead_times
@@ -280,11 +283,11 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     # Concatenate lead times along the batch axis
     # -> [batch_size * num_lead_times, ...]
     u_lag_batch = u_lag_batch.reshape(
-        (batch_size * num_lead_times), 1, *num_grid_points, -1)
+        (FLAGS.batch_size * num_lead_times), 1, *num_grid_points, -1)
     u_tgt_batch = u_tgt_batch.reshape(
-        (batch_size * num_lead_times), FLAGS.direct_steps, *num_grid_points, -1)
+        (FLAGS.batch_size * num_lead_times), FLAGS.direct_steps, *num_grid_points, -1)
     specs_batch = specs_batch.reshape(
-        (batch_size * num_lead_times), -1) if _use_specs else None
+        (FLAGS.batch_size * num_lead_times), -1) if _use_specs else None
 
     # Compute loss and gradient by mapping on the time axis
     # Same u_lag and specs, loop over ndt
@@ -326,7 +329,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
       assert jax.devices()[0] in batch[0].devices()  # FIXME: REMOVE
       subkey, key = jax.random.split(key)
       state, loss = train_one_batch(state, batch, subkey)
-      loss_epoch += loss * batch_size / num_samples_trn
+      loss_epoch += loss * FLAGS.batch_size / num_samples_trn
       time_batch = time() - begin_batch
 
       if FLAGS.verbose:
@@ -438,7 +441,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
       body_fun=get_direct_errors,
       lower=0,
       upper=num_lead_times,
-      init_val=(jnp.zeros(shape=(batch_size,)), jnp.zeros(shape=(batch_size,)))
+      init_val=(jnp.zeros(shape=(FLAGS.batch_size,)), jnp.zeros(shape=(FLAGS.batch_size,)))
     )
 
     return err_l1_mean, err_l2_mean
@@ -643,6 +646,7 @@ def main(argv):
     process_index = jax.process_index()
     process_count = jax.process_count()
     local_devices = jax.local_devices()
+    num_local_devices = jax.local_device_count()
   logging.info('JAX host: %d / %d', process_index, process_count)
   logging.info('JAX local devices: %r', local_devices)
   # We only support single-host training.
@@ -675,10 +679,10 @@ def main(argv):
     model_kwargs = dict(
       num_outputs=dataset.sample[0].shape[-1],
       num_grid_nodes=dataset.sample[0].shape[2:4],
-      num_mesh_nodes=(32, 32),  # TRY: tune
+      num_mesh_nodes=(4, 4),  # TRY: tune  # TMP
       overlap_factor=1.0,  # TRY: tune
-      num_multimesh_levels=3,  # TRY: tune
-      latent_size=128,  # TRY: tune
+      num_multimesh_levels=1,  # TRY: tune  # TMP
+      latent_size=FLAGS.latent_size,  # TRY: tune
       num_mlp_hidden_layers=2,  # TRY: 1, 2, 3
       num_message_passing_steps=6,  # TRY: tune
     )
@@ -701,6 +705,7 @@ def main(argv):
     dataset=dataset,
     epochs=FLAGS.epochs,
     key=key,
+    num_local_devices=num_local_devices,
     params=(state['params'] if state else None),
   )
 
