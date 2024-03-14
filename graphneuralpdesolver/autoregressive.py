@@ -30,7 +30,7 @@ class OperatorNormalizer:
       variables,
       specs=specs,
       u_inp=u_inp_nrm,
-      ndt=jnp.array(ndt).astype(jnp.float32).reshape(1,),
+      ndt=ndt,
     )
 
     # Get predicted output
@@ -55,7 +55,7 @@ class OperatorNormalizer:
       variables,
       specs=specs,
       u_inp=u_inp_nrm,
-      ndt=jnp.array([1], dtype=jnp.float32),
+      ndt=ndt,
     )
 
     # Get normalized target residuals
@@ -75,33 +75,57 @@ class AutoregressivePredictor:
     self._apply_operator = jax.checkpoint(operator.apply)
     self.num_steps_direct = num_steps_direct
 
-  def __call__(self, variables: flax.typing.VariableDict,
-    specs: Array, u_inp: Array, num_jumps: int) -> Array:
+  def unroll(self, variables: flax.typing.VariableDict,
+    specs: Array, u_inp: Array, num_steps: int) -> Array:
 
     batch_size = u_inp.shape[0]
-    num_grid_nodes = u_inp.shape[2]
-    num_outputs = u_inp.shape[3]
+    num_grid_nodes = u_inp.shape[2:4]
+    num_outputs = u_inp.shape[-1]
 
-    time_deltas = (1. + jnp.arange(self.num_steps_direct)).reshape(-1, 1)
-
-    def scan_fn_direct(u_inp, ndt):
-      u_out = self._apply_operator(variables, specs=specs, u_inp=u_inp, ndt=ndt)
+    def scan_fn_direct(u_inp, _ndt):
+      u_out = self._apply_operator(variables, specs=specs, u_inp=u_inp, ndt=_ndt)
       return u_inp, u_out
 
     def scan_fn_autoregressive(u_inp, forcing):
       _, u_out = jax.lax.scan(f=scan_fn_direct,
-        init=u_inp, xs=time_deltas, length=self.num_steps_direct)
+        init=u_inp, xs=forcing, length=forcing.shape[0])
       u_out = jnp.squeeze(u_out, axis=2).swapaxes(0, 1)
       u_next = u_out[:, -1:]
       return u_next, u_out
 
-    forcings = None
-    u_next, rollout = jax.lax.scan(f=scan_fn_autoregressive,
-      init=u_inp, xs=forcings, length=num_jumps)
-    rollout = rollout.swapaxes(0, 1)
-    rollout = rollout.reshape(
-      batch_size, (num_jumps*self.num_steps_direct), num_grid_nodes, num_outputs)
-    rollout = jnp.concatenate([u_inp, rollout[:, :-1]], axis=1)
+    # Get full sets of direct predictions
+    num_jumps = num_steps // self.num_steps_direct
+    ndt_tiled = 1 + jnp.tile(
+      jnp.arange(self.num_steps_direct), reps=(num_jumps, 1)
+    ).reshape(num_jumps, self.num_steps_direct, 1)
+    u_next, rollout_full = jax.lax.scan(
+      f=scan_fn_autoregressive,
+      init=u_inp,
+      xs=ndt_tiled,
+      length=num_jumps
+    )
+    rollout_full = rollout_full.swapaxes(0, 1)
+    rollout_full = rollout_full.reshape(
+      batch_size, (num_jumps*self.num_steps_direct), *num_grid_nodes, num_outputs)
+    rollout = jnp.concatenate([u_inp, rollout_full], axis=1)
+
+    # Get the last set of direct predictions partially (if necessary)
+    num_steps_rem = num_steps % self.num_steps_direct
+    if num_steps_rem:
+      ndt_tiled = 1 + jnp.arange(num_steps_rem).reshape(1, num_steps_rem, 1)
+      u_next, rollout_part = jax.lax.scan(
+        f=scan_fn_autoregressive,
+        init=u_next,
+        xs=ndt_tiled,
+        length=1
+      )
+      rollout_part = rollout_part.swapaxes(0, 1)
+      rollout_part = rollout_part.reshape(
+        batch_size, num_steps_rem, *num_grid_nodes, num_outputs)
+      rollout = jnp.concatenate([rollout, rollout_part], axis=1)
+
+    # Exclude the last timestep because it is returned separately
+    rollout = rollout[:, :-1]
 
     return rollout, u_next
 
@@ -109,10 +133,9 @@ class AutoregressivePredictor:
     specs: Array, u_inp: Array, num_jumps: int) -> Array:
     """Takes num_jumps large steps, each of length num_steps_direct."""
 
-    ndt = jnp.array(self.num_steps_direct).reshape(1,)
-
     def scan_fn(u_inp, forcing):
-      u_out = self._apply_operator(variables, specs=specs, u_inp=u_inp, ndt=ndt)
+      u_out = self._apply_operator(
+        variables, specs=specs, u_inp=u_inp, ndt=self.num_steps_direct)
       u_inp_next = u_out
       rollout = None
       return u_inp_next, rollout

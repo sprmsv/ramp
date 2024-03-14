@@ -221,8 +221,7 @@ def InteractionNetwork(
     update_edge_fn: Mapping[str, jraph.InteractionUpdateEdgeFn],
     update_node_fn: Mapping[str, Union[InteractionUpdateNodeFn,
                                        InteractionUpdateNodeFnNoSentEdges]],
-    aggregate_edges_for_nodes_fn: jraph.AggregateEdgesToNodesFn = jraph
-    .segment_sum,
+    aggregate_edges_for_nodes_fn: jraph.AggregateEdgesToNodesFn = jraph.segment_sum,
     include_sent_messages_in_node_update: bool = False
   ):
   """Returns a method that applies a configured InteractionNetwork.

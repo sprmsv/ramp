@@ -8,6 +8,7 @@ from typing import Any, Union, Sequence, Tuple
 import numpy as np
 import jax
 import jax.lax
+import jax.numpy as jnp
 import flax.typing
 
 from graphneuralpdesolver.utils import Array
@@ -21,6 +22,7 @@ class Dataset:
   def __init__(self, dir: str, n_train: int, n_valid: int, n_test: int):
     self.reader = h5py.File(dir, 'r')
     self.length = len([k for k in self.reader.keys() if 'sample' in k])
+    self.sample = self._fetch(0)
 
     # Split the dataset
     assert (n_train+n_valid+n_test) < self.length
@@ -33,23 +35,23 @@ class Dataset:
     }
 
     # Compute mean
-    _sum = np.zeros_like(self._fetch(0))
+    _sum = np.zeros_like(self.sample)
     for idx in range(n_train):
       _sum += self.train(idx)
-    self.mean = _sum / n_train
+    self.mean_trn = _sum / n_train
 
     # Compute std
-    _sum = np.zeros_like(self._fetch(0))
+    _sum = np.zeros_like(self.sample)
     for idx in range(n_train):
-      _sum += np.power(self.train(idx) - self.mean, 2)
-    self.std_train = np.sqrt(_sum / n_train)
+      _sum += np.power(self.train(idx) - self.mean_trn, 2)
 
   def _fetch(self, idx):
     traj = self.reader[f'sample_{str(idx)}'][:]
     traj = traj[None, ...]
     traj = np.moveaxis(traj, source=(2, 3, 4), destination=(4, 2, 3))
+    spec = None
 
-    return traj
+    return traj, spec
 
   def _fetch_mode(self, idx, mode):
     assert idx < len(self.idx_modes[mode])
@@ -65,26 +67,34 @@ class Dataset:
   def test(self, idx):
     return self._fetch_mode(idx, 'test')
 
-  def batches(self, mode: str, batch_size: int):
+  def batches(self, mode: str, batch_size: int, key: flax.typing.PRNGKey = None):
     assert batch_size > 0
     assert batch_size <= self.nums[mode]
     _idx_next = 0
+    _idx_mode_permuted = jnp.arange(self.nums[mode])
+    if key:
+      _idx_mode_permuted = jax.random.permutation(key, np.arange(self.nums[mode]))
     for _ in range(self.nums[mode] // batch_size):
-      batch = np.concatenate(
-        [self._fetch_mode(_idx, mode) for _idx in range(_idx_next, _idx_next+batch_size)],
-      )
+      trajs_batch = np.concatenate([
+        self._fetch_mode(_idx_mode_permuted[_idx], mode)[0]
+        for _idx in range(_idx_next, _idx_next+batch_size)
+      ])
+      specs_batch = None
       _idx_next += batch_size
-      yield batch
+      yield trajs_batch, specs_batch
     rem = (self.nums[mode] % batch_size)
     if rem:
-      batch = np.concatenate(
-        [self._fetch_mode(_idx, mode) for _idx in range(_idx_next, _idx_next+rem)],
-      )
-      yield batch
+      trajs_batch = np.concatenate([
+        self._fetch_mode(_idx_mode_permuted[_idx], mode)[0]
+        for _idx in range(_idx_next, _idx_next+rem)
+      ])
+      specs_batch = None
+      yield trajs_batch, specs_batch
 
   def __len__(self):
     return self.length
 
+# NOTE: 1D
 def read_datasets(dir: Union[Path, str], pde_type: str, experiment: str, nx: int,
                   downsample_x: bool = True,
                   modes: Sequence[str] = ['train', 'valid', 'test'],
@@ -111,6 +121,7 @@ def read_datasets(dir: Union[Path, str], pde_type: str, experiment: str, nx: int
 
   return datasets
 
+# NOTE: 1D
 def _read_dataset_attributes(h5group: h5py.Group, nx: int, nt: int) -> dict[str, Any]:
   """Prepares the shapes and puts together the specifications of a dataset."""
 
@@ -130,7 +141,7 @@ def _read_dataset_attributes(h5group: h5py.Group, nx: int, nt: int) -> dict[str,
     # nt = h5group[resolution].attrs['nt'].item(),
   )
   dataset['dx'] = (dataset['x'][1] - dataset['x'][0]).item()  # CHECK: Why is it different from data['dx']?
-  dataset['range_x'] = (0., 16.)
+  dataset['range_x'] = (np.min(dataset['x']), np.max(dataset['x']))
 
   return dataset
 
@@ -144,6 +155,7 @@ def shuffle_arrays(key: flax.typing.PRNGKey, arrays: Sequence[Array]) -> Sequenc
   return [arr[permutation] for arr in arrays]
 
 def normalize(arr: Array, mean: Array, std: Array):
+  std = jnp.where(std == 0., 1., std)
   arr = (arr - mean) / std
   return arr
 
@@ -151,6 +163,7 @@ def unnormalize(arr: Array, mean: Array, std: Array):
   arr = std * arr + mean
   return arr
 
+# NOTE: 1D
 def downsample_convolution(trajectories: Array, ratio: int) -> Array:
   trj_padded = np.concatenate([trajectories[:, :, -(ratio//2+1):-1], trajectories, trajectories[:, :, :(ratio//2)]], axis=2)
   kernel = np.array([1/(ratio+1)]*(ratio+1)).reshape(1, 1, ratio+1, 1)
@@ -165,6 +178,7 @@ def downsample_convolution(trajectories: Array, ratio: int) -> Array:
 
   return trj_downsampled
 
+# NOTE: 1D
 def downsample(arr: Array, ratio: int, axis: int = 0) -> Array:
   slc = [slice(None)] * len(arr.shape)
   slc[axis] = slice(None, None, ratio)

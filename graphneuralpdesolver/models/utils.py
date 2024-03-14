@@ -85,6 +85,8 @@ class LearnedCorrection(nn.Module):
 
     return x * scale + bias
 
+
+# FIXME: Remove, not used anymore
 @functools.partial(jax.jit, static_argnums=(1, 2, 3, 4, 5))
 def grid_mesh_connectivity_fixed_dx(
     x: jnp.ndarray, n_cover: int, n_overlap: int,

@@ -1,7 +1,7 @@
 from datetime import datetime
 import functools
 from time import time
-from typing import Tuple, Any, Mapping, Sequence, Union
+from typing import Tuple, Any, Mapping, Sequence, Union, Iterable, Generator
 import json
 from dataclasses import dataclass
 
@@ -89,14 +89,18 @@ class EvalMetrics:
 
 DIR = DIR_EXPERIMENTS / datetime.now().strftime('%Y%m%d-%H%M%S.%f')
 
-def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[str, Array],
-          epochs: int, key: flax.typing.PRNGKey, params: flax.typing.Collection = None) -> TrainState:
+def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: int,
+  params: flax.typing.Collection = None) -> TrainState:
   """Trains a model and returns the state."""
 
+  # Samples
+  sample_traj, sample_spec = dataset.sample
+
   # Set constants
-  num_samples_trn = dataset_trn['trajectories'].shape[0]
-  num_times = dataset_trn['trajectories'].shape[1]
-  num_grid_points = dataset_trn['trajectories'].shape[2]
+  num_samples_trn = dataset.nums['train']
+  num_times = sample_traj.shape[1]
+  num_grid_points = sample_traj.shape[2:4]
+  num_vars = sample_traj.shape[-1]
   batch_size = FLAGS.batch_size
   unroll_offset = FLAGS.unroll_steps * FLAGS.direct_steps
   assert num_samples_trn % batch_size == 0
@@ -104,24 +108,10 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   # Store the initial time
   time_int_pre = time()
 
-  # Normalize the train dataset
-  stats_axis = (0,)
-  stats_trj_mean = jnp.mean(
-    dataset_trn['trajectories'], axis=stats_axis, keepdims=True)
-  stats_trj_std = jnp.std(
-    dataset_trn['trajectories'], axis=stats_axis, keepdims=True)
-  # stats_res_mean = jnp.stack([
-  #   jnp.mean(dataset_trn['trajectories'][:, (ndt+1):] - dataset_trn['trajectories'][:, :-(ndt+1)],
-  #     axis=stats_axis, keepdims=True)
-  #   for ndt in range(FLAGS.direct_steps)
-  # ])
-  # stats_res_std = jnp.stack([
-  #   jnp.std(dataset_trn['trajectories'][:, (ndt+1):] - dataset_trn['trajectories'][:, :-(ndt+1)],
-  #     axis=stats_axis, keepdims=True)
-  #   for ndt in range(FLAGS.direct_steps)
-  # ])
-  dataset_trn['trajectories_nrm'] = normalize(
-    dataset_trn['trajectories'], mean=stats_trj_mean, std=stats_trj_std)
+  # Set the normalization statistics
+  # TRY: Get statistics along the time axis
+  stats_trj_mean = dataset.mean_trn
+  stats_trj_std = dataset.mean_trn
 
   # Initialzize the model or use the loaded parameters
   if params:
@@ -129,9 +119,12 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   else:
     subkey, key = jax.random.split(key)
     model_init_kwargs = dict(
-      specs = dataset_trn['specs'][:batch_size],
-      u_inp = dataset_trn['trajectories'][:batch_size, :1],
-      ndt = jnp.array([1.]),  # Single float ndt for a batch
+      u_inp=jnp.ones_like(sample_traj).repeat(batch_size, axis=0),
+      ndt=1.,
+      specs=(
+        jnp.ones_like(sample_spec).repeat(batch_size, axis=0)
+        if sample_spec is not None else None
+      ),
     )
     variables = jax.jit(model.init)(subkey, **model_init_kwargs)
 
@@ -146,8 +139,8 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
   logging.info(f'Total number of trainable paramters: {n_model_parameters}')
 
   # Define the permissible lead times and number of batches
-  lead_times = jnp.arange(unroll_offset, num_times - FLAGS.direct_steps)
   num_batches = num_samples_trn // batch_size
+  lead_times = jnp.arange(unroll_offset, num_times - FLAGS.direct_steps)
   num_lead_times = num_times - unroll_offset - FLAGS.direct_steps
 
   # Set up the optimization components
@@ -178,7 +171,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     # Get the output
     # NOTE: using checkpointed version to avoid memory exhaustion
     # TRY: Change it back to model.apply to get more performance, although it is only one step..
-    u_prd = predictor._apply_operator(variables, specs=specs, u_inp=u_inp, ndt=ndt.reshape(1,))
+    u_prd = predictor._apply_operator(variables, specs=specs, u_inp=u_inp, ndt=ndt)
 
     return criterion_loss(u_prd, u_tgt)
 
@@ -260,18 +253,20 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     key: flax.typing.PRNGKey) -> Tuple[TrainState, Array]:
     """TODO: WRITE."""
 
-    trajectory, specs = batch
+    # Unwrap the batch and normalize
+    trajs, specs = batch
+    trajs = normalize(trajs, mean=stats_trj_mean, std=stats_trj_std)
 
     # Get input output pairs for all lead times
     # -> [num_lead_times, batch_size, ...]
     u_lag_batch = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=trajectory,
+          operand=trajs,
           start_index=(lt-unroll_offset), slice_size=1, axis=1)
     )(lead_times)
     u_tgt_batch = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=trajectory,
+          operand=trajs,
           start_index=(lt+1), slice_size=FLAGS.direct_steps, axis=1)
     )(lead_times)
     specs_batch = (specs[None, :, :]
@@ -281,9 +276,9 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     # Concatenate lead times along the batch axis
     # -> [batch_size * num_lead_times, ...]
     u_lag_batch = u_lag_batch.reshape(
-        (batch_size * num_lead_times), 1, num_grid_points, -1)
+        (batch_size * num_lead_times), 1, *num_grid_points, -1)
     u_tgt_batch = u_tgt_batch.reshape(
-        (batch_size * num_lead_times), FLAGS.direct_steps, num_grid_points, -1)
+        (batch_size * num_lead_times), FLAGS.direct_steps, *num_grid_points, -1)
     specs_batch = specs_batch.reshape(
         (batch_size * num_lead_times), -1)
 
@@ -315,22 +310,17 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
     return state, loss
 
-  def train_one_epoch(state: TrainState, key: flax.typing.PRNGKey) -> Tuple[TrainState, Array]:
+  def train_one_epoch(state: TrainState, batches: Iterable[Tuple[Array, Array]],
+    key: flax.typing.PRNGKey) -> Tuple[TrainState, Array]:
     """Updates the state based on accumulated losses and gradients."""
-
-    # Shuffle and split to batches
-    subkey, key = jax.random.split(key)
-    trajectories, specs = shuffle_arrays(
-      subkey, [dataset_trn['trajectories_nrm'], dataset_trn['specs']])
-    batches = (
-      jnp.split(trajectories, num_batches),
-      jnp.split(specs, num_batches)
-    )
 
     # Loop over the batches
     loss_epoch = 0.
-    for idx, batch in enumerate(zip(*batches)):
+    for idx, batch in enumerate(batches):
       begin_batch = time()
+      batch = jax.tree_map(jax.device_put, batch)  # Transfer to device memory
+      assert jax.devices()[0] in batch[0].devices()  # TMP
+      assert jax.devices()[0] in batch[1].devices()  # TMP
       subkey, key = jax.random.split(key)
       state, loss = train_one_batch(state, batch, subkey)
       loss_epoch += loss * batch_size / num_samples_trn
@@ -341,7 +331,7 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
           f'\t',
           f'BTCH: {idx+1:04d}/{num_batches:04d}',
           f'TIME: {time_batch:06.1f}s',
-          f'LOSS: {loss:.2e}',
+          f'RMSE: {np.sqrt(loss).item() : .2e}',
         ]))
 
     return state, loss_epoch
@@ -360,11 +350,11 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     u_inp = normalize(u_inp, mean=stats_inp[0], std=stats_inp[1])
     # Get normalized predictions
     variables = {'params': state.params}
-    rollout, _ = predictor(
+    rollout, _ = predictor.urnoll(
       variables=variables,
       specs=specs,
       u_inp=u_inp,
-      num_jumps=(num_steps // FLAGS.direct_steps),
+      num_steps=num_steps,
     )
     # Denormalize the predictions
     rollout = unnormalize(rollout, mean=stats_tgt[0], std=stats_tgt[1])
@@ -373,10 +363,12 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
 
   @jax.jit
   def evaluate_direct_prediction(
-      state: TrainState, dataset: Mapping[str, Array]) -> Tuple[Array, Array]:
+      state: TrainState, batch: Tuple[Array, Array]) -> Tuple[Array, Array]:
 
-    trajs = dataset['trajectories']
-    specs = dataset['specs']
+    # Unwrap the batch
+    trajs, specs = batch
+
+    # Set lead times
     lead_times = jnp.arange(num_times - FLAGS.direct_steps)
     num_lead_times = num_times - FLAGS.direct_steps
 
@@ -424,83 +416,117 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
           variables={'params': state.params},
           u_inp=u_inp_nrm,
           specs=specs[lt],
-          ndt=jnp.array(ndt, dtype=jnp.float32).reshape(1,),
+          ndt=ndt,
         )
         u_prd = unnormalize(u_prd_nrm, mean=mean_tgt[lt][:, ndt-1], std=std_tgt[lt][:, ndt-1])
         return (ndt+1), u_prd
-      _, u_prd = jax.lax.scan(f=get_direct_prediction,
+      _, u_prd = jax.lax.scan(
+        f=get_direct_prediction,
         init=1, xs=None, length=FLAGS.direct_steps,
       )
       u_prd = u_prd.squeeze(axis=2).swapaxes(0, 1)
-      err_l1_mean += jnp.sqrt(jnp.sum(jnp.power(rel_l1_error(u_prd, u_tgt[lt]), 2))) / num_lead_times
-      err_l2_mean += jnp.sqrt(jnp.sum(jnp.power(rel_l2_error(u_prd, u_tgt[lt]), 2))) / num_lead_times
+      err_l1_mean += jnp.sqrt(jnp.sum(jnp.power(rel_l1_error(u_prd, u_tgt[lt]), 2), axis=1)) / num_lead_times
+      err_l2_mean += jnp.sqrt(jnp.sum(jnp.power(rel_l2_error(u_prd, u_tgt[lt]), 2), axis=1)) / num_lead_times
 
       return err_l1_mean, err_l2_mean
 
-    err_l1_mean, err_l2_mean = jax.lax.fori_loop(body_fun=get_direct_errors,
+    # Get mean errors per each sample in the batch
+    err_l1_mean, err_l2_mean = jax.lax.fori_loop(
+      body_fun=get_direct_errors,
       lower=0,
       upper=num_lead_times,
       init_val=(jnp.zeros(shape=(1,)), jnp.zeros(shape=(1,)))
-      )
+    )
 
     return err_l1_mean, err_l2_mean
 
-  def evaluate(state: TrainState, dataset: Mapping[str, Array],
+  def evaluate(state: TrainState, batches: Iterable[Tuple[Array, Array]],
         parts: Union[Sequence[int], int] = 1) -> EvalMetrics:
       """Evaluates the model on a dataset based on multiple trajectory lengths."""
-
-      # TODO: Evaluate in batches
 
       # Initialize the containers
       if isinstance(parts, int):
         parts = [parts]
-      error_l1 = {p: [] for p in parts}
-      error_l2 = {p: [] for p in parts}
+      error_ar_l1_per_var = {p: [] for p in parts}
+      error_ar_l2_per_var = {p: [] for p in parts}
+      error_ar_l1 = {p: [] for p in parts}
+      error_ar_l2 = {p: [] for p in parts}
+      error_dr_l1 = []
+      error_dr_l2 = []
 
-      # Evaluate autoregressive prediction
+      for batch in batches:
+        # Unwrap the batch
+        batch = jax.tree_map(jax.device_put, batch)  # Transfer to device memory
+        trajs, specs = batch
+        assert jax.devices()[0] in trajs.devices()  # TMP
+        assert jax.devices()[0] in specs.devices()  # TMP
+
+        # Evaluate direct prediction
+        _error_dr_l1_batch, _error_dr_l2_batch = evaluate_direct_prediction(
+          state=state,
+          batch=batch,
+        )
+        error_dr_l1.append(_error_dr_l1_batch)
+        error_dr_l2.append(_error_dr_l2_batch)
+
+        # Evaluate autoregressive prediction
+        for p in parts:
+          # Get a dividable full trajectory
+          traj_length = num_times - (num_times % p)
+          # Loop over sub-trajectories
+          for idx_sub_trajectory in np.split(np.arange(traj_length), p):
+            # Get the input/target time indices
+            idx_inp = idx_sub_trajectory[:1]
+            idx_tgt = idx_sub_trajectory[:]
+            # Split the dataset along the time axis
+            u_inp = trajs[:, idx_inp]
+            u_tgt = trajs[:, idx_tgt]
+            # Get predictions and target
+            pred = predict_trajectory(
+              state=state,
+              specs=specs,
+              u_inp=u_inp,
+              num_steps=u_tgt.shape[1],
+              stats_inp=(stats_trj_mean[:, idx_inp], stats_trj_std[:, idx_inp]),
+              stats_tgt=(stats_trj_mean[:, idx_tgt], stats_trj_std[:, idx_tgt]),
+            )
+            # Compute and store metrics
+            error_ar_l1_per_var[p].append(rel_l1_error(pred, u_tgt))
+            error_ar_l2_per_var[p].append(rel_l2_error(pred, u_tgt))
+
+      # Aggregate over the batch dimension and compute norm per variable
+      error_dr_l1 = jnp.median(jnp.concatenate(error_dr_l1), axis=0).item()
+      error_dr_l2 = jnp.median(jnp.concatenate(error_dr_l2), axis=0).item()
       for p in parts:
-        for idx_sub_trajectory in np.split(np.arange(num_times), p):
-          # Get the input/target time indices
-          idx_inp = idx_sub_trajectory[:1]
-          idx_tgt = idx_sub_trajectory[:]
-          # Split the dataset along the time axis
-          specs = dataset['specs']
-          u_inp = dataset['trajectories'][:, idx_inp]
-          u_tgt = dataset['trajectories'][:, idx_tgt]
-          # Get predictions and target
-          pred = predict_trajectory(
-            state=state,
-            specs=specs,
-            u_inp=u_inp,
-            num_steps=u_tgt.shape[1],
-            stats_inp=(stats_trj_mean[:, idx_inp], stats_trj_std[:, idx_inp]),
-            stats_tgt=(stats_trj_mean[:, idx_tgt], stats_trj_std[:, idx_tgt]),
-          )
-          # Compute and store metrics
-          error_l1_per_var = rel_l1_error(pred, u_tgt)
-          error_l2_per_var = rel_l2_error(pred, u_tgt)
-          error_l1[p].append(jnp.sqrt(jnp.sum(jnp.power(error_l1_per_var, 2))).item())
-          error_l2[p].append(jnp.sqrt(jnp.sum(jnp.power(error_l2_per_var, 2))).item())
-
-      # Evaluate direct prediction
-      error_direct_l1, error_direct_l2 = evaluate_direct_prediction(state=state, dataset=dataset)
+        error_l1_per_var_agg = jnp.median(jnp.concatenate(error_ar_l1_per_var[p]), axis=0)
+        error_l2_per_var_agg = jnp.median(jnp.concatenate(error_ar_l2_per_var[p]), axis=0)
+        error_ar_l1[p] = jnp.sqrt(jnp.sum(jnp.power(error_l1_per_var_agg[p], 2))).item()
+        error_ar_l2[p] = jnp.sqrt(jnp.sum(jnp.power(error_l2_per_var_agg[p], 2))).item()
 
       # Build the metrics object
       metrics = EvalMetrics(
-        error_autoreg_l1=[(p, errors) for p, errors in error_l1.items()],
-        error_autoreg_l2=[(p, errors) for p, errors in error_l2.items()],
-        error_direct_l1=error_direct_l1.item(),
-        error_direct_l2=error_direct_l2.item(),
+        error_autoreg_l1=[(p, errors) for p, errors in error_ar_l1.items()],
+        error_autoreg_l2=[(p, errors) for p, errors in error_ar_l2.items()],
+        error_direct_l1=error_dr_l1,
+        error_direct_l2=error_dr_l2,
       )
 
       return metrics
 
   # Set the evaluation partitions
-  eval_parts = [1, 4, 8, 16]
-  assert all([(num_times / p) >= FLAGS.direct_steps for p in eval_parts])
+  autoreg_evaluation_parts = [1, 2, 5]  # FIXME: Get as an input
+  assert all([(num_times // p) >= FLAGS.direct_steps for p in autoreg_evaluation_parts])
   # Evaluate before training
-  metrics_trn = evaluate(state=state, dataset=dataset_trn, parts=eval_parts)
-  metrics_val = evaluate(state=state, dataset=dataset_val, parts=eval_parts)
+  metrics_trn = evaluate(
+    state=state,
+    batches=dataset.batches(mode='train', batch_size=FLAGS.batch_size),
+    parts=autoreg_evaluation_parts,
+  )
+  metrics_val = evaluate(
+    state=state,
+    batches=dataset.batches(mode='valid', batch_size=FLAGS.batch_size),
+    parts=autoreg_evaluation_parts,
+  )
 
   # Report the initial evaluations
   time_tot_pre = time() - time_int_pre
@@ -532,12 +558,24 @@ def train(model: nn.Module, dataset_trn: Mapping[str, Array], dataset_val: dict[
     time_int = time()
 
     # Train one epoch
-    subkey, key = jax.random.split(key)
-    state, loss = train_one_epoch(state, key=subkey)
+    subkey_0, subkey_1, key = jax.random.split(key, num=3)
+    state, loss = train_one_epoch(
+      state=state,
+      batches=dataset.batches(mode='train', batch_size=FLAGS.batch_size, key=subkey_0),
+      key=subkey_1
+    )
 
     # Evaluate
-    metrics_trn = evaluate(state=state, dataset=dataset_trn, parts=eval_parts)
-    metrics_val = evaluate(state=state, dataset=dataset_val, parts=eval_parts)
+    metrics_trn = evaluate(
+      state=state,
+      batches=dataset.batches(mode='train', batch_size=FLAGS.batch_size),
+      parts=autoreg_evaluation_parts,
+    )
+    metrics_val = evaluate(
+      state=state,
+      batches=dataset.batches(mode='valid', batch_size=FLAGS.batch_size),
+      parts=autoreg_evaluation_parts,
+    )
 
     # Log the results
     time_tot = time() - time_int
@@ -608,32 +646,14 @@ def main(argv):
   # We only support single-host training.
   assert process_count == 1
 
-  # Read the datasets
+  # Read the dataset
   experiment = FLAGS.experiment
-  datasets = read_datasets(
-    dir=FLAGS.datadir, pde_type=PDETYPE[experiment],
-    experiment=experiment, nx=FLAGS.resolution, downsample_x=True)
-  assert np.all(datasets['test']['dt'] == datasets['valid']['dt'])
-  assert np.all(datasets['test']['dt'] == datasets['train']['dt'])
-  assert np.all(datasets['test']['x'] == datasets['valid']['x'])
-  assert np.all(datasets['test']['x'] == datasets['train']['x'])
-  domain = {
-    't': {
-      'delta': datasets['test']['dt'],
-      'range': (datasets['test']['tmin'], datasets['test']['tmax']),
-    },
-    'x': {
-      'delta': datasets['test']['dx'],
-      'range': datasets['test']['range_x']
-    }
-  }
-
-  # Put the datasets in device memory
-  datasets = jax.tree_map(jax.device_put, datasets)
-  assert jax.devices()[0] in datasets['train']['trajectories'].devices()
-  assert jax.devices()[0] in datasets['train']['specs'].devices()
-  assert jax.devices()[0] in datasets['valid']['trajectories'].devices()
-  assert jax.devices()[0] in datasets['valid']['specs'].devices()
+  dataset = Dataset(
+    dir=(FLAGS.datadir + experiment + '.nc'),
+    n_train=(2**14),
+    n_valid=32,  # TMP
+    n_test=1024,
+  )
 
   # Read the checkpoint
   if FLAGS.params:
@@ -651,10 +671,11 @@ def main(argv):
   # Get the model
   if not model_kwargs:
     model_kwargs = dict(
-      domain=domain,
-      num_outputs=datasets['valid']['trajectories'].shape[3],
-      latent_size=(2 if FLAGS.debug else FLAGS.latent_size),
-      time_conditioned=True,
+      num_outputs=dataset.sample[0].shape[-1],
+      num_grid_nodes=dataset.sample[0].shape[2:4],
+      num_mesh_nodes=(4, 4),  # TMP
+      overlap_factor=1.0,
+      num_multimesh_levels=3,  # TMP
     )
   model = get_model(model_kwargs)
 
@@ -672,8 +693,7 @@ def main(argv):
   key = jax.random.PRNGKey(SEED)
   state = train(
     model=model,
-    dataset_trn=(datasets['valid'] if FLAGS.debug else datasets['train']),
-    dataset_val=datasets['valid'],
+    dataset=dataset,
     epochs=FLAGS.epochs,
     key=key,
     params=(state['params'] if state else None),

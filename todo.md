@@ -1,15 +1,16 @@
 # PRIORITY
 
-- Check the 1D experiments and prepare results
+- Report
+    - Check 600 and 601 + update report (change commit + dataset std)
+    - Create new errors plots (with L1)
+    - Add your notes
 
-- Use the 2D dataset..
+- Switch to 2D
+    - Use the 2D dataset.. (FINISH)
+    - Consider parallel computing with pmap
+    - Solve the overlap issue
+
 - Adopt the 1D datasets to the new structure
-- Implement the new idea for grid-mesh connectivity in 2D
-- Consider parallel computing with pmap
-
-
-- Autoregressive noise is STILL killing me for long rollouts
-- MAKE SURE YOU'RE DOING UNROLL_STEPS CORRECTLY !!
 
 - Rethink the architecture: encoded coordinates, mean squared relative error, etc.
     - Decrease the latent_size of the grid nodes!! 128 is an overkill for only the coordinates and the solution.. also saves memory
@@ -29,9 +30,6 @@ AUTOREGRESSIVE TRAINING:
     4. Without time-bundling and LSTM/Transformer, we are not treating the input as a sequence, we are ignoring the history of the sequence !!
 
 PROPER NORMALIZATION:
-    - Very poor predictions for small inputs even though I normalize them
-    - Normalizing the residuals instead of output (same as GraphCast)
-        - The output of the network is residuals
     - Normalizing the structural node and edge features
 
 
@@ -48,6 +46,8 @@ PROPER NORMALIZATION:
 
 # LATER
 
+- Rethink the normalization
+    - Try normalizing the residuals again, but think it through
 - Normalize the inputs and residuals based on the time index
     -> Different statistics per timestep
     -> Imagine an explosion, the statistics are very different across time
