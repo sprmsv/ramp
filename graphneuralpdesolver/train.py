@@ -177,13 +177,12 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
 
     return u_inp_noisy
 
+  @functools.partial(jax.pmap, in_axes=(None, 0, 0, 0, None))
   def get_loss_and_grads(params: flax.typing.Collection, specs: Array,
     u_lag: Array, u_tgt: Array, ndt: int) -> Tuple[Array, PyTreeDef]:
     """
     Computes the loss and the gradients of the loss w.r.t the parameters.
     """
-
-    print(u_lag.shape)
 
     # Split the unrolling steps randomly to cut the gradients along the way
     # MODIFY: Change to JAX-generated random number (reproducability)
@@ -198,8 +197,6 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
       params, specs, u_inp, ndt, u_tgt, num_steps_autoreg=grads_steps)
 
     return loss, grads
-
-  _get_loss_and_grads = jax.pmap(get_loss_and_grads, static_broadcasted_argnums=(0, 4))
 
   def get_loss_and_grads_sub_batch(
     state: TrainState, key: flax.typing.PRNGKey,
@@ -230,7 +227,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
 
     def _update_state_on_mini_batch(i, carry):
       _state, _loss_mean = carry
-      _loss, _grads = _get_loss_and_grads(
+      _loss, _grads = get_loss_and_grads(
         _state.params,
         (specs[i] if _use_specs else None),
         u_lag[i],
@@ -254,7 +251,6 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
 
     return state, loss
 
-  @jax.jit
   def train_one_batch(
     state: TrainState, batch: Tuple[Array, Array],
     key: flax.typing.PRNGKey) -> Tuple[TrainState, Array]:
