@@ -147,7 +147,7 @@ def _read_dataset_attributes(h5group: h5py.Group, nx: int, nt: int) -> dict[str,
   return dataset
 
 def shuffle_arrays(key: flax.typing.PRNGKey, arrays: Sequence[Array]) -> Sequence[Array]:
-  """Shuffles a set of arrays with the same random permutation."""
+  """Shuffles a set of arrays with the same random permutation along the first axis."""
 
   size = arrays[0].shape[0]
   assert all([arr.shape[0] == size for arr in arrays])

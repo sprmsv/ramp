@@ -1,13 +1,10 @@
 # PRIORITY
 
-- Report
-    - Check 600 and 601 + update report (change commit + dataset std)
-    - Create new errors plots (with L1)
-    - Add your notes
-
 - Change the pmap strategy
-- Use pmap for evaluation too
+    - use lax.pmean to aggregate the gradients and losses inside a pmap
+    - Update the state for a WHOLE batch
 - Use different overlap_factor for mesh2grid
+- Tune learning rate and run experiments..
 
 - Do something for the long compilation time..
     - Check this post: https://github.com/google/jax/issues/10596
@@ -20,22 +17,11 @@
 - Rethink the architecture: encoded coordinates, mean squared relative error, etc.
     - Decrease the latent_size of the grid nodes!! 128 is an overkill for only the coordinates and the solution.. also saves memory
 
-# NEXT MEETING
-
 REASONS FOR LONG TRAINING TIMES + Memory consumption COMPARED TO CNOs:
     1. Many more computations per network parameter.
     2. Many more representations per network parameter -> excessive memory
     3. Rollouts in training (applying the model multiple times)
     4. Many lead times in training, we solve and evaluate for all times, not only the final time
-
-AUTOREGRESSIVE TRAINING:
-    3. LSTM/Transformer idea (highlight the difference with Equer)
-    4. Without time-bundling and LSTM/Transformer, we are not treating the input as a sequence, we are ignoring the history of the sequence !!
-
-PROPER NORMALIZATION:
-    - Normalizing the structural node and edge features
-
-SEGMENT MEAN INSTEAD OF SUM + screenshots
 
 # 1D datasets from Equer and Welling
 
