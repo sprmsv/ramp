@@ -26,6 +26,7 @@ from graphneuralpdesolver.metrics import mse, rel_l2_error, rel_l1_error
 
 
 SEED = 43
+NUM_DEVICES = jax.local_device_count()
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string(name='datadir', default=None, required=True,
@@ -78,7 +79,7 @@ class EvalMetrics:
 DIR = DIR_EXPERIMENTS / datetime.now().strftime('%Y%m%d-%H%M%S.%f')
 
 def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: int,
-  num_local_devices: int = 1, params: flax.typing.Collection = None) -> TrainState:
+  params: flax.typing.Collection = None) -> TrainState:
   """Trains a model and returns the state."""
 
   # Samples
@@ -94,6 +95,9 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
   num_vars = sample_traj.shape[-1]
   unroll_offset = FLAGS.unroll_steps * FLAGS.direct_steps
   assert num_samples_trn % FLAGS.batch_size == 0
+  num_batches = num_samples_trn // FLAGS.batch_size
+  assert FLAGS.batch_size % NUM_DEVICES == 0
+  batch_size_per_device = FLAGS.batch_size // NUM_DEVICES
 
   # Store the initial time
   time_int_pre = time()
@@ -129,7 +133,6 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
   logging.info(f'Total number of trainable paramters: {n_model_parameters}')
 
   # Define the permissible lead times and number of batches
-  num_batches = num_samples_trn // FLAGS.batch_size
   lead_times = jnp.arange(unroll_offset, num_times - FLAGS.direct_steps)
   num_lead_times = num_times - unroll_offset - FLAGS.direct_steps
 
@@ -221,11 +224,11 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     # Split between devices
     # -> [num_lead_times, device_count, batch_size/device_count, ...]
     specs = jnp.concatenate(jnp.split(jnp.expand_dims(
-      specs, axis=1), num_local_devices, axis=2), axis=1) if _use_specs else None
+      specs, axis=1), NUM_DEVICES, axis=2), axis=1) if _use_specs else None
     u_lag = jnp.concatenate(jnp.split(jnp.expand_dims(
-      u_lag, axis=1), num_local_devices, axis=2), axis=1)
+      u_lag, axis=1), NUM_DEVICES, axis=2), axis=1)
     u_tgt = jnp.concatenate(jnp.split(jnp.expand_dims(
-      u_tgt, axis=1), num_local_devices, axis=2), axis=1)
+      u_tgt, axis=1), NUM_DEVICES, axis=2), axis=1)
 
     # Loop over lead_times and apply gradients for each lead_time
     def _update_state_on_mini_batch(i, carry):
@@ -390,14 +393,14 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
   def evaluate_direct_prediction(
       state: TrainState, trajs: Array, specs: Array) -> Tuple[Array, Array]:
 
-    # Inputs are of shape [bsz, ...]
+    # Inputs are of shape [batch_size_per_device, ...]
 
     # Set lead times
     lead_times = jnp.arange(num_times - FLAGS.direct_steps)
     num_lead_times = num_times - FLAGS.direct_steps
 
     # Get input output pairs for all lead times
-    # -> [num_lead_times, bsz, ...]
+    # -> [num_lead_times, batch_size_per_device, ...]
     u_inp = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
           operand=trajs,
@@ -459,8 +462,10 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
       body_fun=get_direct_errors,
       lower=0,
       upper=num_lead_times,
-      # FIXME: Use two batch_size variables  # TMP
-      init_val=(jnp.zeros(shape=(FLAGS.batch_size // num_local_devices,)), jnp.zeros(shape=(FLAGS.batch_size // num_local_devices,)))
+      init_val=(
+        jnp.zeros(shape=(batch_size_per_device,)),
+        jnp.zeros(shape=(batch_size_per_device,)),
+      )
     )
 
     return err_l1_mean, err_l2_mean
@@ -485,11 +490,11 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
         trajs, specs = batch
 
         # Split the batch between devices
-        # -> [num_local_devices, batch_size/num_local_devices, ...]
+        # -> [NUM_DEVICES, batch_size_per_device, ...]
         trajs = jnp.concatenate(jnp.split(jnp.expand_dims(
-          trajs, axis=0), num_local_devices, axis=1), axis=0)
+          trajs, axis=0), NUM_DEVICES, axis=1), axis=0)
         specs = jnp.concatenate(jnp.split(jnp.expand_dims(
-          specs, axis=0), num_local_devices, axis=1), axis=0) if _use_specs else None
+          specs, axis=0), NUM_DEVICES, axis=1), axis=0) if _use_specs else None
 
         # Evaluate direct prediction
         _error_dr_l1_batch, _error_dr_l2_batch = evaluate_direct_prediction(
@@ -675,7 +680,6 @@ def main(argv):
     process_index = jax.process_index()
     process_count = jax.process_count()
     local_devices = jax.local_devices()
-    num_local_devices = jax.local_device_count()
   logging.info('JAX host: %d / %d', process_index, process_count)
   logging.info('JAX local devices: %r', local_devices)
   # We only support single-host training.
@@ -742,7 +746,6 @@ def main(argv):
     dataset=dataset,
     epochs=FLAGS.epochs,
     key=key,
-    num_local_devices=num_local_devices,
     params=(state['params'] if state else None),
   )
 
