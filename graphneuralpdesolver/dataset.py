@@ -19,7 +19,7 @@ NT_SUPER_RESOLUTION = 256
 
 class Dataset:
 
-  def __init__(self, dir: str, n_train: int, n_valid: int, n_test: int):
+  def __init__(self, dir: str, n_train: int, n_valid: int, n_test: int, key: flax.typing.PRNGKey):
     self.reader = h5py.File(dir, 'r')
     self.length = len([k for k in self.reader.keys() if 'sample' in k])
     self.sample = self._fetch(0)
@@ -27,7 +27,7 @@ class Dataset:
     # Split the dataset
     assert (n_train+n_valid+n_test) < self.length
     self.nums = {'train': n_train, 'valid': n_valid, 'test': n_test}
-    random_permutation = np.random.permutation(self.length)  # TODO: Do it with jax for reproducibility
+    random_permutation = jax.random.permutation(key, self.length)
     self.idx_modes = {
       'train': random_permutation[:n_train],
       'valid': random_permutation[n_train:(n_train+n_valid)],

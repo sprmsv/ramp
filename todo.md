@@ -1,8 +1,5 @@
 # PRIORITY
 
-- Change the pmap strategy
-    - use lax.pmean to aggregate the gradients and losses inside a pmap
-    - Update the state for a WHOLE batch
 - Use different overlap_factor for mesh2grid
 - Tune learning rate and run experiments..
 
@@ -13,6 +10,8 @@
     - Something is probably np.array instead of jnp
 
 - Adopt the 1D datasets to the new structure
+
+- Move functions outside of train (?)
 
 - Rethink the architecture: encoded coordinates, mean squared relative error, etc.
     - Decrease the latent_size of the grid nodes!! 128 is an overkill for only the coordinates and the solution.. also saves memory

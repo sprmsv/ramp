@@ -25,7 +25,7 @@ from graphneuralpdesolver.utils import disable_logging, Array
 from graphneuralpdesolver.metrics import mse, rel_l2_error, rel_l1_error
 
 
-SEED = 43
+SEED = 44
 NUM_DEVICES = jax.local_device_count()
 
 FLAGS = flags.FLAGS
@@ -140,7 +140,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
   criterion_loss = mse
   lr = optax.cosine_decay_schedule(
     init_value=FLAGS.lr,
-    decay_steps=(FLAGS.epochs * num_batches * FLAGS.direct_steps * num_lead_times),
+    decay_steps=(FLAGS.epochs * num_batches),
     alpha=FLAGS.lr_decay,
   ) if FLAGS.lr_decay else FLAGS.lr
   tx = optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-8)
@@ -149,8 +149,9 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
   # Define the autoregressive predictor
   predictor = AutoregressivePredictor(operator=model, num_steps_direct=FLAGS.direct_steps)
 
-  def compute_loss(params: flax.typing.Collection, specs: Array,
-                   u_lag: Array, ndt: int, u_tgt: Array, num_steps_autoreg: int) -> Array:
+  def _compute_loss(
+    params: flax.typing.Collection, specs: Array,
+    u_lag: Array, ndt: int, u_tgt: Array, num_steps_autoreg: int) -> Array:
     """Computes the prediction of the model and returns its loss."""
 
     variables = {'params': params}
@@ -168,8 +169,9 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
 
     return criterion_loss(u_prd, u_tgt)
 
-  def get_noisy_input(params: flax.typing.Collection, specs: Array,
-                      u_lag: Array, num_steps_autoreg: int) -> Array:
+  def _get_noisy_input(
+    params: flax.typing.Collection, specs: Array,
+    u_lag: Array, num_steps_autoreg: int) -> Array:
     """Apply the model to the lagged input to get a noisy input."""
 
     variables = {'params': params}
@@ -182,8 +184,8 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
 
     return u_inp_noisy
 
-  @functools.partial(jax.pmap, in_axes=(None, 0, 0, 0, None))
-  def get_loss_and_grads(params: flax.typing.Collection, specs: Array,
+  def _get_loss_and_grads(
+    params: flax.typing.Collection, specs: Array,
     u_lag: Array, u_tgt: Array, ndt: int) -> Tuple[Array, PyTreeDef]:
     """
     Computes the loss and the gradients of the loss w.r.t the parameters.
@@ -195,19 +197,19 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     grads_steps = FLAGS.unroll_steps - noise_steps
 
     # Get noisy input
-    u_inp = get_noisy_input(
+    u_inp = _get_noisy_input(
       params, specs, u_lag, num_steps_autoreg=noise_steps)
     # Use noisy input and compute gradients
-    loss, grads = jax.value_and_grad(compute_loss)(
+    loss, grads = jax.value_and_grad(_compute_loss)(
       params, specs, u_inp, ndt, u_tgt, num_steps_autoreg=grads_steps)
 
     return loss, grads
 
-  def get_loss_and_grads_sub_batch(
+  def _get_loss_and_grads_direct_step(
     state: TrainState, key: flax.typing.PRNGKey,
     specs: Array, u_lag: Array, u_tgt: Array, ndt: int,
   ) -> Tuple[Array, PyTreeDef]:
-    # NOTE: INPUT SHAPES [batch_size * num_lead_times, ...]
+    # NOTE: INPUT SHAPES [batch_size_per_device * num_lead_times, ...]
 
     # Shuffle the input/outputs along the batch axis
     if _use_specs:
@@ -216,64 +218,56 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
       u_lag, u_tgt = shuffle_arrays(key, [u_lag, u_tgt])
 
     # Split into num_lead_times chunks and get loss and gradients
-    # -> [num_lead_times, batch_size, ...]
+    # -> [num_lead_times, batch_size_per_device, ...]
     specs = jnp.stack(jnp.split(specs, num_lead_times)) if _use_specs else None
     u_lag = jnp.stack(jnp.split(u_lag, num_lead_times))
     u_tgt = jnp.stack(jnp.split(u_tgt, num_lead_times))
 
-    # Split between devices
-    # -> [num_lead_times, device_count, batch_size/device_count, ...]
-    specs = jnp.concatenate(jnp.split(jnp.expand_dims(
-      specs, axis=1), NUM_DEVICES, axis=2), axis=1) if _use_specs else None
-    u_lag = jnp.concatenate(jnp.split(jnp.expand_dims(
-      u_lag, axis=1), NUM_DEVICES, axis=2), axis=1)
-    u_tgt = jnp.concatenate(jnp.split(jnp.expand_dims(
-      u_tgt, axis=1), NUM_DEVICES, axis=2), axis=1)
-
-    # Loop over lead_times and apply gradients for each lead_time
-    def _update_state_on_mini_batch(i, carry):
-      _state, _loss_mean = carry
-      _loss, _grads = get_loss_and_grads(
-        _state.params,
-        (specs[i] if _use_specs else None),
-        u_lag[i],
-        u_tgt[i],
-        ndt,
+    # Add loss and gradients for each mini batch
+    def _update_loss_and_grads_lead_time(i, carry):
+      _loss_carried, _grads_carried = carry
+      _loss_lead_time, _grads_lead_time = _get_loss_and_grads(
+        params=state.params,
+        specs=(specs[i] if _use_specs else None),
+        u_lag=u_lag[i],
+        u_tgt=u_tgt[i],
+        ndt=ndt,
       )
-      # Aggregate loss and gradients
-      _grads = jax.tree_map(jnp.mean, _grads)
-      _loss = jnp.mean(_loss)
-      # Update the state by applying the gradients
-      _state = _state.apply_gradients(grads=_grads)
-      _loss_mean += _loss / num_lead_times
-      return _state, _loss_mean
+      _loss_updated = _loss_carried + _loss_lead_time / num_lead_times
+      _grads_updated = jax.tree_map(
+        lambda g_old, g_new: (g_old + g_new / num_lead_times),
+        _grads_carried,
+        _grads_lead_time
+      )
+      return _loss_updated, _grads_updated
 
-    # NOTE: Avoiding lax.scan because it contains a pmap
-    carry = (state, 0.)
-    for i in range(num_lead_times):
-      carry = _update_state_on_mini_batch(i, carry)
-    state, loss = carry
-    # FIXME: Remove if not used in a while
-    # state, loss = jax.lax.fori_loop(
-    #   lower=0,
-    #   upper=num_lead_times,
-    #   body_fun=_update_state_on_mini_batch,
-    #   init_val=(state, 0.)
-    # )
+    # Loop over lead_times
+    _init_loss = 0.
+    _init_grads = jax.tree_map(lambda p: jnp.zeros_like(p), state.params)
+    loss, grads = jax.lax.fori_loop(
+      lower=0,
+      upper=num_lead_times,
+      body_fun=_update_loss_and_grads_lead_time,
+      init_val=(_init_loss, _init_grads)
+    )
 
-    return state, loss
+    return loss, grads
 
-  def train_one_batch(
-    state: TrainState, batch: Tuple[Array, Array],
+  @functools.partial(jax.pmap,
+    in_axes=(None, 0, 0, None),
+    out_axes=(None, None),
+    axis_name="device",
+  )
+  def _train_one_batch(
+    state: TrainState, trajs: Array, specs: Array,
     key: flax.typing.PRNGKey) -> Tuple[TrainState, Array]:
     """Loads a batch, normalizes it, updates the state based on it, and returns it."""
 
-    # Unwrap the batch and normalize
-    trajs, specs = batch
+    # Normalize the trajectories
     trajs = normalize(trajs, mean=stats_trj_mean, std=stats_trj_std)
 
     # Get input output pairs for all lead times
-    # -> [num_lead_times, batch_size, ...]
+    # -> [num_lead_times, batch_size_per_device, ...]
     u_lag_batch = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
           operand=trajs,
@@ -289,13 +283,13 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     ) if _use_specs else None
 
     # Concatenate lead times along the batch axis
-    # -> [batch_size * num_lead_times, ...]
+    # -> [batch_size_per_device * num_lead_times, ...]
     u_lag_batch = u_lag_batch.reshape(
-        (FLAGS.batch_size * num_lead_times), 1, *num_grid_points, -1)
+        (batch_size_per_device * num_lead_times), 1, *num_grid_points, -1)
     u_tgt_batch = u_tgt_batch.reshape(
-        (FLAGS.batch_size * num_lead_times), FLAGS.direct_steps, *num_grid_points, -1)
+        (batch_size_per_device * num_lead_times), FLAGS.direct_steps, *num_grid_points, -1)
     specs_batch = specs_batch.reshape(
-        (FLAGS.batch_size * num_lead_times), -1) if _use_specs else None
+        (batch_size_per_device * num_lead_times), -1) if _use_specs else None
 
     # Compute loss and gradient by mapping on the time axis
     # Same u_lag and specs, loop over ndt
@@ -305,39 +299,50 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     u_tgt_batch = jnp.expand_dims(u_tgt_batch, axis=2).swapaxes(0, 1)  # -> [direct_steps, ...]
 
     # Shuffle direct_steps
-    key, subkey = jax.random.split(key)
-    ndt_batch, u_tgt_batch = shuffle_arrays(subkey, [ndt_batch, u_tgt_batch])
+    # NOTE: Redundent because we apply gradients on the whole batch
+    # key, subkey = jax.random.split(key)
+    # ndt_batch, u_tgt_batch = shuffle_arrays(subkey, [ndt_batch, u_tgt_batch])
 
-    # Loop over the direct_steps
-    def update_state_on_sub_batch(i, carry):
-      _state, _loss_mean = carry
-      _state, _loss = get_loss_and_grads_sub_batch(
-        state=_state,
+    # Add loss and gradients for each direct_step
+    def _update_loss_and_grads_direct_step(i, carry):
+      _loss_carried, _grads_carried = carry
+      _loss_direct_step, _grads_direct_step = _get_loss_and_grads_direct_step(
+        state=state,
         key=subkeys[i],
         specs=(specs_batch if _use_specs else None),
         u_lag=u_lag_batch,
         u_tgt=u_tgt_batch[i],
         ndt=ndt_batch[i],
       )
-      _loss_mean += _loss / FLAGS.direct_steps
-      return _state, _loss_mean
+      _loss_updated = _loss_carried + _loss_direct_step / FLAGS.direct_steps
+      _grads_updated = jax.tree_map(
+        lambda g_old, g_new: (g_old + g_new / FLAGS.direct_steps),
+        _grads_carried,
+        _grads_direct_step,
+      )
+      return _loss_updated, _grads_updated
 
-    # NOTE: Avoiding lax.fori_loop because it contains a pmap
-    carry = (state, 0.)
-    for i in range(FLAGS.direct_steps):
-      carry = update_state_on_sub_batch(i, carry)
-    state, loss = carry
-    # FIXME: Remove if not used in a while
-    # state, loss = jax.lax.fori_loop(
-    #   lower=0,
-    #   upper=FLAGS.direct_steps,
-    #   body_fun=update_state_on_sub_batch,
-    #   init_val=(state, 0.)
-    # )
+    # Loop over the direct_steps
+    _init_loss = 0.
+    _init_grads = jax.tree_map(lambda p: jnp.zeros_like(p), state.params)
+    loss, grads = jax.lax.fori_loop(
+      lower=0,
+      upper=FLAGS.direct_steps,
+      body_fun=_update_loss_and_grads_direct_step,
+      init_val=(_init_loss, _init_grads)
+    )
+
+    # Synchronize loss and gradients
+    grads = jax.lax.pmean(grads, axis_name="device")
+    loss = jax.lax.pmean(loss, axis_name="device")
+
+    # Apply gradients
+    state = state.apply_gradients(grads=grads)
 
     return state, loss
 
-  def train_one_epoch(state: TrainState, batches: Iterable[Tuple[Array, Array]],
+  def train_one_epoch(
+    state: TrainState, batches: Iterable[Tuple[Array, Array]],
     key: flax.typing.PRNGKey) -> Tuple[TrainState, Array]:
     """Updates the state based on accumulated losses and gradients."""
 
@@ -345,10 +350,23 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     loss_epoch = 0.
     for idx, batch in enumerate(batches):
       begin_batch = time()
+
+      # Unwrap the batch
       batch = jax.tree_map(jax.device_put, batch)  # Transfer to device memory
+      trajs, specs = batch
+
+      # Split the batch between devices
+      # -> [NUM_DEVICES, batch_size_per_device, ...]
+      trajs = jnp.concatenate(jnp.split(jnp.expand_dims(
+        trajs, axis=0), NUM_DEVICES, axis=1), axis=0)
+      specs = jnp.concatenate(jnp.split(jnp.expand_dims(
+        specs, axis=0), NUM_DEVICES, axis=1), axis=0) if _use_specs else None
+
+      # Get loss and updated state
       subkey, key = jax.random.split(key)
-      state, loss = train_one_batch(state, batch, subkey)
+      state, loss = _train_one_batch(state, trajs, specs, subkey)
       loss_epoch += loss * FLAGS.batch_size / num_samples_trn
+
       time_batch = time() - begin_batch
 
       if FLAGS.verbose:
@@ -364,7 +382,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
   @functools.partial(jax.pmap,
       in_axes=(None, 0, 0, None, None, None),
       static_broadcasted_argnums=(5,))
-  def predict_trajectory(
+  def _predict_trajectory_autoregressively(
       state: TrainState, specs: Array, u_inp: Array,
       stats_inp: Tuple[Array, Array], stats_tgt: Tuple[Array, Array],
       num_steps: int,
@@ -390,8 +408,8 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     return rollout
 
   @functools.partial(jax.pmap, in_axes=(None, 0, 0))
-  def evaluate_direct_prediction(
-      state: TrainState, trajs: Array, specs: Array) -> Tuple[Array, Array]:
+  def _evaluate_direct_prediction(
+    state: TrainState, trajs: Array, specs: Array) -> Tuple[Array, Array]:
 
     # Inputs are of shape [batch_size_per_device, ...]
 
@@ -470,87 +488,88 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
 
     return err_l1_mean, err_l2_mean
 
-  def evaluate(state: TrainState, batches: Iterable[Tuple[Array, Array]],
-        parts: Union[Sequence[int], int] = 1) -> EvalMetrics:
-      """Evaluates the model on a dataset based on multiple trajectory lengths."""
+  def evaluate(
+    state: TrainState, batches: Iterable[Tuple[Array, Array]],
+    parts: Union[Sequence[int], int] = 1) -> EvalMetrics:
+    """Evaluates the model on a dataset based on multiple trajectory lengths."""
 
-      # Initialize the containers
-      if isinstance(parts, int):
-        parts = [parts]
-      error_ar_l1_per_var = {p: [] for p in parts}
-      error_ar_l2_per_var = {p: [] for p in parts}
-      error_ar_l1 = {p: [] for p in parts}
-      error_ar_l2 = {p: [] for p in parts}
-      error_dr_l1 = []
-      error_dr_l2 = []
+    # Initialize the containers
+    if isinstance(parts, int):
+      parts = [parts]
+    error_ar_l1_per_var = {p: [] for p in parts}
+    error_ar_l2_per_var = {p: [] for p in parts}
+    error_ar_l1 = {p: [] for p in parts}
+    error_ar_l2 = {p: [] for p in parts}
+    error_dr_l1 = []
+    error_dr_l2 = []
 
-      for batch in batches:
-        # Unwrap the batch
-        batch = jax.tree_map(jax.device_put, batch)  # Transfer to device memory
-        trajs, specs = batch
+    for batch in batches:
+      # Unwrap the batch
+      batch = jax.tree_map(jax.device_put, batch)  # Transfer to device memory
+      trajs, specs = batch
 
-        # Split the batch between devices
-        # -> [NUM_DEVICES, batch_size_per_device, ...]
-        trajs = jnp.concatenate(jnp.split(jnp.expand_dims(
-          trajs, axis=0), NUM_DEVICES, axis=1), axis=0)
-        specs = jnp.concatenate(jnp.split(jnp.expand_dims(
-          specs, axis=0), NUM_DEVICES, axis=1), axis=0) if _use_specs else None
+      # Split the batch between devices
+      # -> [NUM_DEVICES, batch_size_per_device, ...]
+      trajs = jnp.concatenate(jnp.split(jnp.expand_dims(
+        trajs, axis=0), NUM_DEVICES, axis=1), axis=0)
+      specs = jnp.concatenate(jnp.split(jnp.expand_dims(
+        specs, axis=0), NUM_DEVICES, axis=1), axis=0) if _use_specs else None
 
-        # Evaluate direct prediction
-        _error_dr_l1_batch, _error_dr_l2_batch = evaluate_direct_prediction(
-          state, trajs, specs,
-        )
-        # Re-arrange the sub-batches gotten from each device
-        _error_dr_l1_batch = _error_dr_l1_batch.reshape(FLAGS.batch_size, 1)
-        _error_dr_l2_batch = _error_dr_l2_batch.reshape(FLAGS.batch_size, 1)
-        # Append the errors to the list
-        error_dr_l1.append(_error_dr_l1_batch)
-        error_dr_l2.append(_error_dr_l2_batch)
-
-        # Evaluate autoregressive prediction
-        for p in parts:
-          # Get a dividable full trajectory
-          traj_length = num_times - (num_times % p)
-          # Loop over sub-trajectories
-          for idx_sub_trajectory in np.split(np.arange(traj_length), p):
-            # Get the input/target time indices
-            idx_inp = idx_sub_trajectory[:1]
-            idx_tgt = idx_sub_trajectory[:]
-            # Split the dataset along the time axis
-            u_inp = trajs[:, :, idx_inp]
-            u_tgt = trajs[:, :, idx_tgt]
-            # Get predictions and target
-            u_prd = predict_trajectory(
-              state, specs, u_inp,
-              (stats_trj_mean[:, idx_inp], stats_trj_std[:, idx_inp]),
-              (stats_trj_mean[:, idx_tgt], stats_trj_std[:, idx_tgt]),
-              idx_sub_trajectory.shape[0],
-            )
-            # Re-arrange the predictions gotten from each device
-            u_prd = u_prd.reshape(FLAGS.batch_size, *u_prd.shape[2:])
-            u_tgt = u_tgt.reshape(FLAGS.batch_size, *u_tgt.shape[2:])
-            # Compute and store metrics
-            error_ar_l1_per_var[p].append(rel_l1_error(u_prd, u_tgt))
-            error_ar_l2_per_var[p].append(rel_l2_error(u_prd, u_tgt))
-
-      # Aggregate over the batch dimension and compute norm per variable
-      error_dr_l1 = jnp.median(jnp.concatenate(error_dr_l1), axis=0).item()
-      error_dr_l2 = jnp.median(jnp.concatenate(error_dr_l2), axis=0).item()
-      for p in parts:
-        error_l1_per_var_agg = jnp.median(jnp.concatenate(error_ar_l1_per_var[p]), axis=0)
-        error_l2_per_var_agg = jnp.median(jnp.concatenate(error_ar_l2_per_var[p]), axis=0)
-        error_ar_l1[p] = jnp.sqrt(jnp.sum(jnp.power(error_l1_per_var_agg[p], 2))).item()
-        error_ar_l2[p] = jnp.sqrt(jnp.sum(jnp.power(error_l2_per_var_agg[p], 2))).item()
-
-      # Build the metrics object
-      metrics = EvalMetrics(
-        error_autoreg_l1=[(p, errors) for p, errors in error_ar_l1.items()],
-        error_autoreg_l2=[(p, errors) for p, errors in error_ar_l2.items()],
-        error_direct_l1=error_dr_l1,
-        error_direct_l2=error_dr_l2,
+      # Evaluate direct prediction
+      _error_dr_l1_batch, _error_dr_l2_batch = _evaluate_direct_prediction(
+        state, trajs, specs,
       )
+      # Re-arrange the sub-batches gotten from each device
+      _error_dr_l1_batch = _error_dr_l1_batch.reshape(FLAGS.batch_size, 1)
+      _error_dr_l2_batch = _error_dr_l2_batch.reshape(FLAGS.batch_size, 1)
+      # Append the errors to the list
+      error_dr_l1.append(_error_dr_l1_batch)
+      error_dr_l2.append(_error_dr_l2_batch)
 
-      return metrics
+      # Evaluate autoregressive prediction
+      for p in parts:
+        # Get a dividable full trajectory
+        traj_length = num_times - (num_times % p)
+        # Loop over sub-trajectories
+        for idx_sub_trajectory in np.split(np.arange(traj_length), p):
+          # Get the input/target time indices
+          idx_inp = idx_sub_trajectory[:1]
+          idx_tgt = idx_sub_trajectory[:]
+          # Split the dataset along the time axis
+          u_inp = trajs[:, :, idx_inp]
+          u_tgt = trajs[:, :, idx_tgt]
+          # Get predictions and target
+          u_prd = _predict_trajectory_autoregressively(
+            state, specs, u_inp,
+            (stats_trj_mean[:, idx_inp], stats_trj_std[:, idx_inp]),
+            (stats_trj_mean[:, idx_tgt], stats_trj_std[:, idx_tgt]),
+            idx_sub_trajectory.shape[0],
+          )
+          # Re-arrange the predictions gotten from each device
+          u_prd = u_prd.reshape(FLAGS.batch_size, *u_prd.shape[2:])
+          u_tgt = u_tgt.reshape(FLAGS.batch_size, *u_tgt.shape[2:])
+          # Compute and store metrics
+          error_ar_l1_per_var[p].append(rel_l1_error(u_prd, u_tgt))
+          error_ar_l2_per_var[p].append(rel_l2_error(u_prd, u_tgt))
+
+    # Aggregate over the batch dimension and compute norm per variable
+    error_dr_l1 = jnp.median(jnp.concatenate(error_dr_l1), axis=0).item()
+    error_dr_l2 = jnp.median(jnp.concatenate(error_dr_l2), axis=0).item()
+    for p in parts:
+      error_l1_per_var_agg = jnp.median(jnp.concatenate(error_ar_l1_per_var[p]), axis=0)
+      error_l2_per_var_agg = jnp.median(jnp.concatenate(error_ar_l2_per_var[p]), axis=0)
+      error_ar_l1[p] = jnp.sqrt(jnp.sum(jnp.power(error_l1_per_var_agg[p], 2))).item()
+      error_ar_l2[p] = jnp.sqrt(jnp.sum(jnp.power(error_l2_per_var_agg[p], 2))).item()
+
+    # Build the metrics object
+    metrics = EvalMetrics(
+      error_autoreg_l1=[(p, errors) for p, errors in error_ar_l1.items()],
+      error_autoreg_l2=[(p, errors) for p, errors in error_ar_l2.items()],
+      error_direct_l1=error_dr_l1,
+      error_direct_l2=error_dr_l2,
+    )
+
+    return metrics
 
   # Set the evaluation partitions
   autoreg_evaluation_parts = [1, 2, 5]  # FIXME: Get as input
@@ -685,13 +704,18 @@ def main(argv):
   # We only support single-host training.
   assert process_count == 1
 
+  # Initialize the random key
+  key = jax.random.PRNGKey(SEED)
+
   # Read the dataset
+  key, subkey = jax.random.split(key)
   experiment = FLAGS.experiment
   dataset = Dataset(
     dir='/'.join([FLAGS.datadir, (experiment + '.nc')]),
     n_train=(32 if FLAGS.debug else 2**14),
     n_valid=(32 if FLAGS.debug else 1024),
     n_test=(32 if FLAGS.debug else 1024),
+    key=subkey,
   )
 
   # Read the checkpoint
@@ -740,12 +764,12 @@ def main(argv):
     )
 
   # Train the model
-  key = jax.random.PRNGKey(SEED)
+  key, subkey = jax.random.split(key)
   state = train(
     model=model,
     dataset=dataset,
     epochs=FLAGS.epochs,
-    key=key,
+    key=subkey,
     params=(state['params'] if state else None),
   )
 
