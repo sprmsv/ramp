@@ -51,8 +51,6 @@ class AugmentedMLP(nn.Module):
     if self.correction:
       assert c is not None
       x = self.correction(c=c, x=x)
-    else:
-      assert c is None
     return x
 
 class LearnedCorrection(nn.Module):

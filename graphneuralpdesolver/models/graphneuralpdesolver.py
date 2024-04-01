@@ -353,8 +353,6 @@ class GraphNeuralPDESolver(AbstractOperator):
     if self.time_conditioned:
       assert ndt is not None
       ndt = jnp.array(ndt, dtype=jnp.float32).reshape(1,)
-    else:
-      assert ndt is None
 
     # Prepare the grid node features
     # u -> [num_grid_nodes, batch_size, 1 * num_inputs]
@@ -364,8 +362,9 @@ class GraphNeuralPDESolver(AbstractOperator):
     ).reshape(self._num_grid_nodes_tot, batch_size, -1)
     # Concatente with forced features
     grid_node_features_forced = []
-    grid_node_features_forced.append(
-      jnp.tile(ndt, reps=(self._num_grid_nodes_tot, batch_size, 1)))
+    if self.time_conditioned:
+      grid_node_features_forced.append(
+        jnp.tile(ndt, reps=(self._num_grid_nodes_tot, batch_size, 1)))
     if specs is not None:
       grid_node_features_forced.append(
         jnp.repeat(specs[None, :, :], repeats=self._num_grid_nodes_tot, axis=0),)
