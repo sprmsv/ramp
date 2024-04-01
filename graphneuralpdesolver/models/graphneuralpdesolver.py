@@ -393,14 +393,7 @@ class GraphNeuralPDESolver(AbstractOperator):
       destination=(2, 3, 0, 1),
     )
 
-    # Interpret the output as the first-order derivative
-    if self.residual_update:
-      du = output  # TRY: du = output * ndt
-      u_out = u_inp + du
-    else:
-      u_out = output
-
-    return u_out
+    return output
 
   def _run_grid2mesh_gnn(self, grid_node_features: jnp.ndarray, ndt: float) -> tuple[jnp.ndarray, jnp.ndarray]:
     """Runs the grid2mesh_gnn, extracting latent mesh and grid nodes."""

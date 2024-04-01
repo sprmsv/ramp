@@ -35,16 +35,36 @@ class Dataset:
     }
 
     # Compute mean
-    _sum = np.zeros_like(self.sample[0])
+    _mean_samples = np.zeros_like(self.sample[0])
     for idx in range(n_train):
-      _sum += self.train(idx)[0]
-    self.mean_trn = _sum / n_train
+      _mean_samples += self.train(idx)[0] / n_train
+    self.mean_trn = np.mean(_mean_samples, axis=1, keepdims=True)
 
     # Compute std
-    _sum = np.zeros_like(self.sample[0])
+    _mean_samples = np.zeros_like(self.sample[0])
     for idx in range(n_train):
-      _sum += np.power(self.train(idx)[0] - self.mean_trn, 2)
-    self.std_trn = np.sqrt(_sum / n_train)
+      _mean_samples += np.power(self.train(idx)[0] - self.mean_trn, 2) / n_train
+    self.std_trn = np.sqrt(np.mean(_mean_samples, axis=1, keepdims=True))
+
+    # Compute mean of residuals
+    # TODO: Compute longer residuals too
+    _get_res = lambda trj: trj[:, 1:] - trj[:, :-1]
+    _mean_samples = np.zeros_like(_get_res(self.sample[0]))
+    for idx in range(n_train):
+      _mean_samples += _get_res(self.train(idx)[0]) / n_train
+    mean_res_trn = np.mean(_mean_samples, axis=1, keepdims=True)
+
+    # Compute std of residuals
+    # TODO: Compute longer residuals too
+    _get_res = lambda trj: trj[:, 1:] - trj[:, :-1]
+    _mean_samples = np.zeros_like(_get_res(self.sample[0]))
+    for idx in range(n_train):
+      _mean_samples += np.power(_get_res(self.train(idx)[0]) - mean_res_trn, 2) / n_train
+    std_res_trn = np.sqrt(np.mean(_mean_samples, axis=1, keepdims=True))
+
+    # TMP
+    self.mean_res_trn = [mean_res_trn]
+    self.std_res_trn = [std_res_trn]
 
   def _fetch(self, idx):
     traj = self.reader[f'sample_{str(idx)}'][:]
