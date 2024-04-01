@@ -1,7 +1,15 @@
 # PRIORITY
 
+- Find a working learning rate using rtx_3090
+    - Try normalizing AND predicting the residuals again..! Current model predicts near-zero residuals, and it's right!!
+        1. Normalize u, compute loss on r
+        2. Normalize r, compute loss on r
+    - Looks like updating the gradient on the batch is not really the greatest idea.. Confirm on a big dataset before changing it..
+
+- Run experiments with the whole and partial dataset using A100 (increase bsz)
 - Use different overlap_factor for mesh2grid
-- Tune learning rate and run experiments..
+
+# AFTER VACATION
 
 - Do something for the long compilation time..
     - Check this post: https://github.com/google/jax/issues/10596
@@ -16,13 +24,7 @@
 - Rethink the architecture: encoded coordinates, mean squared relative error, etc.
     - Decrease the latent_size of the grid nodes!! 128 is an overkill for only the coordinates and the solution.. also saves memory
 
-REASONS FOR LONG TRAINING TIMES + Memory consumption COMPARED TO CNOs:
-    1. Many more computations per network parameter.
-    2. Many more representations per network parameter -> excessive memory
-    3. Rollouts in training (applying the model multiple times)
-    4. Many lead times in training, we solve and evaluate for all times, not only the final time
-
-# 1D datasets from Equer and Welling
+# 1D datasets from Equer and Welling (?)
 
 - RE-GENERATE THE DATA !! PARAMETERS ARE REPEATED !!
 - Change the structure of the data and support all datasets
@@ -34,6 +36,8 @@ REASONS FOR LONG TRAINING TIMES + Memory consumption COMPARED TO CNOs:
 - Train with fewer time steps (128 / 64) and try extrapolating
 
 # LATER
+
+- Multihost JAX training
 
 - Rethink the normalization
     - Try normalizing the residuals again, but think it through
