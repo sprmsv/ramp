@@ -269,12 +269,12 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
 
   @functools.partial(jax.pmap,
     in_axes=(None, 0, 0, None),
-    out_axes=(None, None),
+    out_axes=(None, None, None),
     axis_name="device",
   )
   def _train_one_batch(
     state: TrainState, trajs: Array, specs: Array,
-    key: flax.typing.PRNGKey) -> Tuple[TrainState, Array]:
+    key: flax.typing.PRNGKey) -> Tuple[TrainState, Array, Array]:
     """Loads a batch, normalizes it, updates the state based on it, and returns it."""
 
     # Get input output pairs for all lead times
@@ -350,15 +350,16 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     # Apply gradients
     state = state.apply_gradients(grads=grads)
 
-    return state, loss
+    return state, loss, grads
 
   def train_one_epoch(
     state: TrainState, batches: Iterable[Tuple[Array, Array]],
-    key: flax.typing.PRNGKey) -> Tuple[TrainState, Array]:
+    key: flax.typing.PRNGKey) -> Tuple[TrainState, Array, Array]:
     """Updates the state based on accumulated losses and gradients."""
 
     # Loop over the batches
     loss_epoch = 0.
+    grad_epoch = 0.
     for idx, batch in enumerate(batches):
       begin_batch = time()
 
@@ -375,8 +376,9 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
 
       # Get loss and updated state
       subkey, key = jax.random.split(key)
-      state, loss = _train_one_batch(state, trajs, specs, subkey)
+      state, loss, grads = _train_one_batch(state, trajs, specs, subkey)
       loss_epoch += loss * FLAGS.batch_size / num_samples_trn
+      grad_epoch += np.mean(jax.tree_util.tree_flatten(jax.tree_map(jnp.mean, jax.tree_map(jnp.abs, grads)))[0]) / num_batches
 
       time_batch = time() - begin_batch
 
@@ -388,7 +390,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
           f'RMSE: {np.sqrt(loss).item() : .2e}',
         ]))
 
-    return state, loss_epoch
+    return state, loss_epoch, grad_epoch
 
   @functools.partial(jax.pmap,
       in_axes=(None, 0, 0, None, None, None),
@@ -634,7 +636,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
 
     # Train one epoch
     subkey_0, subkey_1, key = jax.random.split(key, num=3)
-    state, loss = train_one_epoch(
+    state, loss, grad = train_one_epoch(
       state=state,
       batches=dataset.batches(mode='train', batch_size=FLAGS.batch_size, key=subkey_0),
       key=subkey_1
@@ -659,6 +661,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
       f'TIME: {time_tot : 06.1f}s',
       f'LR: {state.opt_state.hyperparams["learning_rate"].item() : .2e}',
       f'RMSE: {np.sqrt(loss).item() : .2e}',
+      f'GRAD: {grad.item() : .2e}',
       f'L2-AR: {np.mean(metrics_val.error_autoreg_l2[0][1]) * 100 : .2f}%',
       f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
     ]))
