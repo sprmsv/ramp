@@ -446,39 +446,19 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     specs = (jnp.array(specs[None, :, :])
       .repeat(repeats=num_lead_times, axis=0)
     ) if _use_specs else None
-    mean_inp = jax.vmap(
-        lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=stats_trj_mean,
-          start_index=(lt), slice_size=1, axis=1)
-    )(lead_times)
-    std_inp = jax.vmap(
-        lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=stats_trj_std,
-          start_index=(lt), slice_size=1, axis=1)
-    )(lead_times)
-    mean_tgt = jax.vmap(  # TMP :: TODO: support direct steps > 1
-        lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=stats_res_mean[0],
-          start_index=(lt), slice_size=1, axis=1)
-    )(lead_times)
-    std_tgt = jax.vmap(  # TMP :: TODO: support direct steps > 1
-        lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=stats_res_std[0],
-          start_index=(lt), slice_size=1, axis=1)
-    )(lead_times)
 
     def get_direct_errors(lt, carry):
       err_l1_mean, err_l2_mean = carry
       def get_direct_prediction(ndt, forcing):
         # TMP :: TODO: Use normalizer
-        u_inp_nrm = normalize(u_inp[lt], mean=mean_inp[lt], std=std_inp[lt])
+        u_inp_nrm = normalize(u_inp[lt], mean=stats_trj_mean, std=stats_trj_std)
         r_prd_nrm = model.apply(
           variables={'params': state.params},
           u_inp=u_inp_nrm,
           specs=(specs[lt] if _use_specs else None),
           ndt=ndt,
         )
-        r_prd = unnormalize(r_prd_nrm, mean=mean_tgt[lt], std=std_tgt[lt])  # TMP :: TODO: support direct steps > 1
+        r_prd = unnormalize(r_prd_nrm, mean=stats_res_mean[0], std=stats_res_std[0])  # TMP :: TODO: support direct steps > 1
         u_prd = u_inp[lt] + r_prd
         return (ndt+1), u_prd
       _, u_prd = jax.lax.scan(
@@ -612,6 +592,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     f'TIME: {time_tot_pre : 06.1f}s',
     f'LR: {state.opt_state.hyperparams["learning_rate"].item() : .2e}',
     f'RMSE: {0. : .2e}',
+    f'GRAD: {0. : .2e}',
     f'L2-AR: {np.mean(metrics_val.error_autoreg_l2[0][1]) * 100 : .2f}%',
     f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
   ]))
