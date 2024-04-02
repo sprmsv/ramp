@@ -133,7 +133,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
   ).item()
   logging.info(f'Total number of trainable paramters: {n_model_parameters}')
 
-  # Define the permissible lead times and number of batches
+  # Define the permissible lead times
   lead_times = jnp.arange(unroll_offset, num_times - FLAGS.direct_steps)
   num_lead_times = num_times - unroll_offset - FLAGS.direct_steps
 
@@ -745,7 +745,7 @@ def main(argv):
       num_message_passing_steps=6,  # TRY: tune
     )
     if FLAGS.debug:
-      model_kwargs['num_mesh_nodes'] = (4,4)
+      model_kwargs['num_mesh_nodes'] = (4, 4)
       model_kwargs['overlap_factor'] = 1.0
       model_kwargs['num_multimesh_levels'] = 1
       model_kwargs['latent_size'] = 8

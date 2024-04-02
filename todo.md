@@ -1,10 +1,8 @@
 # PRIORITY
 
-- Find a working learning rate using rtx_3090
-    - Try normalizing AND predicting the residuals again..! Current model predicts near-zero residuals, and it's right!!
-        1. Normalize u, compute loss on r
-        2. Normalize r, compute loss on r
-    - Looks like updating the gradient on the batch is not really the greatest idea.. Confirm on a big dataset before changing it..
+- Troubleshoot on the small CPU dataset...
+
+- Looks like updating the gradient on the batch is not really the greatest idea.. Confirm on a big dataset before changing it..
 
 - Run experiments with the whole and partial dataset using A100 (increase bsz)
 - Use different overlap_factor for mesh2grid

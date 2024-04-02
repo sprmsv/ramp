@@ -19,9 +19,10 @@ NT_SUPER_RESOLUTION = 256
 
 class Dataset:
 
-  def __init__(self, dir: str, n_train: int, n_valid: int, n_test: int, key: flax.typing.PRNGKey):
+  def __init__(self, dir: str, n_train: int, n_valid: int, n_test: int, key: flax.typing.PRNGKey, dummy: bool = False):
     self.reader = h5py.File(dir, 'r')
     self.length = len([k for k in self.reader.keys() if 'sample' in k])
+    self.dummy = dummy
     self.sample = self._fetch(0)
 
     # Split the dataset
@@ -67,10 +68,24 @@ class Dataset:
     self.std_res_trn = [std_res_trn]
 
   def _fetch(self, idx):
-    traj = self.reader[f'sample_{str(idx)}'][:]
-    traj = traj[None, ...]
-    traj = np.moveaxis(traj, source=(2, 3, 4), destination=(4, 2, 3))
-    spec = None
+    if not self.dummy:
+      traj = self.reader[f'sample_{str(idx)}'][:]
+      traj = traj[None, ...]
+      traj = np.moveaxis(traj, source=(2, 3, 4), destination=(4, 2, 3))
+      spec = None
+
+    # Generate a random sample of a dummy dataset
+    else:
+      k1, k2, k3, k4 = jax.random.randint(jax.random.PRNGKey(idx), (4,), 0, 4) + 1
+      a_0 = np.tile(np.sin(np.arange(128) / 128 * k1 * 2 * np.pi).reshape(1, 1, 1, 128), reps=(1, 1, 128, 1))
+      a_1 = np.tile(np.sin(np.arange(128) / 128 * k2 * 2 * np.pi).reshape(1, 1, 128, 1), reps=(1, 1, 1, 128))
+      b_0 = np.tile(np.cos(np.arange(128) / 128 * k3 * 2 * np.pi).reshape(1, 1, 1, 128), reps=(1, 1, 128, 1))
+      b_1 = np.tile(np.cos(np.arange(128) / 128 * k4 * 2 * np.pi).reshape(1, 1, 128, 1), reps=(1, 1, 1, 128))
+      a = a_0 + a_1
+      b = b_0 + b_1
+      c = np.stack([a, b], axis=-1)
+      traj = np.concatenate([np.roll(c, shift=2*i, axis=(2, 3)) for i in range(21)], axis=1)
+      spec = None
 
     return traj, spec
 
