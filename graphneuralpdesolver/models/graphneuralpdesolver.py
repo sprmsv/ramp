@@ -1,4 +1,4 @@
-from typing import Mapping, Any, Sequence, Tuple, Union
+from typing import Sequence, Tuple, Union
 
 import numpy as np
 import jax.numpy as jnp
@@ -49,15 +49,17 @@ class GraphNeuralPDESolver(AbstractOperator):
   latent_size: int = 128
   num_mlp_hidden_layers: int = 2
   num_message_passing_steps: int = 6
-  overlap_factor: float = 1.
+  overlap_factor_grid2mesh: float = 1.
+  overlap_factor_mesh2grid: float = 1.
   num_multimesh_levels: int = 1
   residual_update: bool = True
   time_conditioned: bool = True
 
   def setup(self):
 
-    # TODO: Add upper bound
-    assert self.overlap_factor >= 1.0
+    # TODO: Add upper bounds
+    assert self.overlap_factor_grid2mesh >= 1.0
+    assert self.overlap_factor_mesh2grid >= 1.0
 
     # Initialize the structural features of the grid points
     self.zeta_grid = np.stack(
@@ -86,7 +88,7 @@ class GraphNeuralPDESolver(AbstractOperator):
     _idx_grid2mesh_mesh_nodes: list[int] = []
     for idx_mesh_node_flat in range(self._num_mesh_nodes_tot):
       idx_edges_grid, idx_edges_mesh = self._get_connections_by_mesh_node(
-        idx_mesh_node_flat, overlap_factor=self.overlap_factor, ord_distance=2)
+        idx_mesh_node_flat, overlap_factor=self.overlap_factor_grid2mesh, ord_distance=2)
       _idx_grid2mesh_grid_nodes.append(idx_edges_grid)  # flat index
       _idx_grid2mesh_mesh_nodes.append(idx_edges_mesh)  # flat index
     self.idx_grid2mesh_grid_nodes = np.concatenate(_idx_grid2mesh_grid_nodes).tolist()
@@ -117,6 +119,18 @@ class GraphNeuralPDESolver(AbstractOperator):
       map(lambda s: s[0] * self.num_mesh_nodes[0] + s[1], idx_senders))
     self.idx_multimesh_recv = list(
       map(lambda r: r[0] * self.num_mesh_nodes[0] + r[1], idx_receivers))
+
+    # Get mesh2grid edge connections
+    _idx_mesh2grid_grid_nodes: list[int] = []
+    _idx_mesh2grid_mesh_nodes: list[int] = []
+    for idx_mesh_node_flat in range(self._num_mesh_nodes_tot):
+      idx_edges_grid, idx_edges_mesh = self._get_connections_by_mesh_node(
+        idx_mesh_node_flat, overlap_factor=self.overlap_factor_mesh2grid, ord_distance=2)
+      _idx_mesh2grid_grid_nodes.append(idx_edges_grid)  # flat index
+      _idx_mesh2grid_mesh_nodes.append(idx_edges_mesh)  # flat index
+    self.idx_mesh2grid_grid_nodes = np.concatenate(_idx_mesh2grid_grid_nodes).tolist()
+    self.idx_mesh2grid_mesh_nodes = np.concatenate(_idx_mesh2grid_mesh_nodes).tolist()
+
 
     # Initialize the graphs
     self._grid2mesh_graph = self._init_grid2mesh_graph()
@@ -282,8 +296,6 @@ class GraphNeuralPDESolver(AbstractOperator):
 
   def _init_grid2mesh_graph(self) -> TypedGraph:
     """Build Grid2Mesh graph."""
-
-    # TODO: Avoid code repetition for building the features
 
     edge_set, grid_node_set, mesh_node_set = self._init_structural_features(
       zeta_sen=self.zeta_grid.reshape(self._num_grid_nodes_tot, -1),

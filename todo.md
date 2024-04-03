@@ -1,16 +1,14 @@
 # PRIORITY
 
-- Looks like updating the gradient on the batch is not really the greatest idea.. Confirm on a big dataset before changing it.. CHECK 031 in bm
-
-- Run experiments with the whole and partial dataset using A100 (increase bsz)
-
-- Use different overlap_factor for mesh2grid
+- Run experiments with the whole and partial dataset (increase bsz)
 
 - Do something for the long compilation time..
     - Check this post: https://github.com/google/jax/issues/10596
     - It is some latent features.. but why are they being constant folded?
     - Check np in setup
     - Something is probably np.array instead of jnp
+
+- Profile speed and performance vs batch_size
 
 - Adopt the 1D datasets to the new structure
 
@@ -31,6 +29,10 @@
 - Train with fewer time steps (128 / 64) and try extrapolating
 
 # LATER
+
+- It has been confirmed that updating the gradients more often is better.
+    - Consider changing the pmap strategy to speed up the convergence.
+    - This might require direct_steps * num_lead_times to be dividable by the number of processors...
 
 - Multihost JAX training
 

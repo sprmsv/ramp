@@ -722,7 +722,8 @@ def main(argv):
       num_outputs=dataset.sample[0].shape[-1],
       num_grid_nodes=dataset.sample[0].shape[2:4],
       num_mesh_nodes=(64, 64),  # TRY: tune
-      overlap_factor=2.0,  # TRY: tune
+      overlap_factor_grid2mesh=1.0,  # TRY: tune
+      overlap_factor_mesh2grid=2.0,  # TRY: tune
       num_multimesh_levels=4,  # TRY: tune
       latent_size=FLAGS.latent_size,  # TRY: tune
       num_mlp_hidden_layers=2,  # TRY: 1, 2, 3
@@ -730,7 +731,8 @@ def main(argv):
     )
     if FLAGS.debug:
       model_kwargs['num_mesh_nodes'] = (4, 4)
-      model_kwargs['overlap_factor'] = 1.0
+      model_kwargs['overlap_factor_grid2mesh'] = 1.0
+      model_kwargs['overlap_factor_mesh2grid'] = 1.0
       model_kwargs['num_multimesh_levels'] = 1
       model_kwargs['latent_size'] = 8
       model_kwargs['num_mlp_hidden_layers'] = 1
