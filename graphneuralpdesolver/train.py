@@ -103,10 +103,10 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
   time_int_pre = time()
 
   # Set the normalization statistics
-  stats_trj_mean = jax.device_put(jnp.array(dataset.mean_trn))
-  stats_trj_std = jax.device_put(jnp.array(dataset.std_trn))
-  stats_res_mean = jax.device_put(jnp.array(dataset.mean_res_trn))
-  stats_res_std = jax.device_put(jnp.array(dataset.std_res_trn))
+  stats_trj_mean = jax.device_put(jnp.array(dataset.mean_trj))
+  stats_trj_std = jax.device_put(jnp.array(dataset.std_trj))
+  stats_res_mean = jax.device_put(jnp.array(dataset.mean_res))
+  stats_res_std = jax.device_put(jnp.array(dataset.std_res))
 
   # Initialzize the model or use the loaded parameters
   if params:
@@ -151,7 +151,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
   normalizer = OperatorNormalizer(
     operator=model,
     stats_trj=(stats_trj_mean, stats_trj_std),
-    stats_res=(stats_res_mean, stats_res_std),  # TMP :: TODO: Support longer residuals
+    stats_res=(stats_res_mean, stats_res_std),
   )
   predictor = AutoregressivePredictor(operator=normalizer, num_steps_direct=FLAGS.direct_steps)
 
@@ -393,21 +393,17 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     return state, loss_epoch, grad_epoch
 
   @functools.partial(jax.pmap,
-      in_axes=(None, 0, 0, None, None, None),
-      static_broadcasted_argnums=(5,))
+      in_axes=(None, 0, 0, None),
+      static_broadcasted_argnums=(3,))
   def _predict_trajectory_autoregressively(
-      state: TrainState, specs: Array, u_inp: Array,
-      stats_inp: Tuple[Array, Array], stats_tgt: Tuple[Array, Array],
-      num_steps: int,
+      state: TrainState, specs: Array, u_inp: Array, num_steps: int,
     ) -> Array:
     """
-    Normalizes the input and predicts the trajectories autoregressively.
+    Predicts the trajectories autoregressively.
     The input dataset must be raw (not normalized).
     """
 
-    # Normalize the input
-    u_inp = normalize(u_inp, mean=stats_inp[0], std=stats_inp[1])
-    # Get normalized predictions
+    # Get predictions
     variables = {'params': state.params}
     rollout, _ = predictor.unroll(
       variables=variables,
@@ -415,13 +411,10 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
       u_inp=u_inp,
       num_steps=num_steps,
     )
-    # Denormalize the predictions
-    rollout = unnormalize(rollout, mean=stats_tgt[0], std=stats_tgt[1])
 
     return rollout
 
   @functools.partial(jax.pmap, in_axes=(None, 0, 0))
-  # TMP :: TODO: Update normalization
   def _evaluate_direct_prediction(
     state: TrainState, trajs: Array, specs: Array) -> Tuple[Array, Array]:
 
@@ -450,16 +443,12 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     def get_direct_errors(lt, carry):
       err_l1_mean, err_l2_mean = carry
       def get_direct_prediction(ndt, forcing):
-        # TMP :: TODO: Use normalizer
-        u_inp_nrm = normalize(u_inp[lt], mean=stats_trj_mean, std=stats_trj_std)
-        r_prd_nrm = model.apply(
+        u_prd = normalizer.apply(
           variables={'params': state.params},
-          u_inp=u_inp_nrm,
           specs=(specs[lt] if _use_specs else None),
+          u_inp=u_inp[lt],
           ndt=ndt,
         )
-        r_prd = unnormalize(r_prd_nrm, mean=stats_res_mean[0], std=stats_res_std[0])  # TMP :: TODO: support direct steps > 1
-        u_prd = u_inp[lt] + r_prd
         return (ndt+1), u_prd
       _, u_prd = jax.lax.scan(
         f=get_direct_prediction,
@@ -522,41 +511,37 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
       error_dr_l1.append(_error_dr_l1_batch)
       error_dr_l2.append(_error_dr_l2_batch)
 
-      # # Evaluate autoregressive prediction  # TMP
-      # for p in parts:
-      #   # Get a dividable full trajectory
-      #   traj_length = num_times - (num_times % p)
-      #   # Loop over sub-trajectories
-      #   for idx_sub_trajectory in np.split(np.arange(traj_length), p):
-      #     # Get the input/target time indices
-      #     idx_inp = idx_sub_trajectory[:1]
-      #     idx_tgt = idx_sub_trajectory[:]
-      #     # Split the dataset along the time axis
-      #     u_inp = trajs[:, :, idx_inp]
-      #     u_tgt = trajs[:, :, idx_tgt]
-      #     # Get predictions and target
-      #     u_prd = _predict_trajectory_autoregressively(
-      #       state, specs, u_inp,
-      #       (stats_trj_mean[:, idx_inp], stats_trj_std[:, idx_inp]),
-      #       (stats_trj_mean[:, idx_tgt], stats_trj_std[:, idx_tgt]),
-      #       idx_sub_trajectory.shape[0],
-      #     )
-      #     # Re-arrange the predictions gotten from each device
-      #     u_prd = u_prd.reshape(FLAGS.batch_size, *u_prd.shape[2:])
-      #     u_tgt = u_tgt.reshape(FLAGS.batch_size, *u_tgt.shape[2:])
-      #     # Compute and store metrics
-      #     error_ar_l1_per_var[p].append(rel_l1_error(u_prd, u_tgt))
-      #     error_ar_l2_per_var[p].append(rel_l2_error(u_prd, u_tgt))
+      # Evaluate autoregressive prediction
+      for p in parts:
+        # Get a dividable full trajectory
+        traj_length = num_times - (num_times % p)
+        # Loop over sub-trajectories
+        for idx_sub_trajectory in np.split(np.arange(traj_length), p):
+          # Get the input/target time indices
+          idx_inp = idx_sub_trajectory[:1]
+          idx_tgt = idx_sub_trajectory[:]
+          # Split the dataset along the time axis
+          u_inp = trajs[:, :, idx_inp]
+          u_tgt = trajs[:, :, idx_tgt]
+          # Get predictions and target
+          u_prd = _predict_trajectory_autoregressively(
+            state, specs, u_inp, idx_sub_trajectory.shape[0],
+          )
+          # Re-arrange the predictions gotten from each device
+          u_prd = u_prd.reshape(FLAGS.batch_size, *u_prd.shape[2:])
+          u_tgt = u_tgt.reshape(FLAGS.batch_size, *u_tgt.shape[2:])
+          # Compute and store metrics
+          error_ar_l1_per_var[p].append(rel_l1_error(u_prd, u_tgt))
+          error_ar_l2_per_var[p].append(rel_l2_error(u_prd, u_tgt))
 
     # Aggregate over the batch dimension and compute norm per variable
     error_dr_l1 = jnp.median(jnp.concatenate(error_dr_l1), axis=0).item()
     error_dr_l2 = jnp.median(jnp.concatenate(error_dr_l2), axis=0).item()
     for p in parts:
-      # TMP
-      # error_l1_per_var_agg = jnp.median(jnp.concatenate(error_ar_l1_per_var[p]), axis=0)
-      # error_l2_per_var_agg = jnp.median(jnp.concatenate(error_ar_l2_per_var[p]), axis=0)
-      # error_ar_l1[p] = jnp.sqrt(jnp.sum(jnp.power(error_l1_per_var_agg[p], 2))).item()
-      # error_ar_l2[p] = jnp.sqrt(jnp.sum(jnp.power(error_l2_per_var_agg[p], 2))).item()
+      error_l1_per_var_agg = jnp.median(jnp.concatenate(error_ar_l1_per_var[p]), axis=0)
+      error_l2_per_var_agg = jnp.median(jnp.concatenate(error_ar_l2_per_var[p]), axis=0)
+      error_ar_l1[p] = jnp.sqrt(jnp.sum(jnp.power(error_l1_per_var_agg[p], 2))).item()
+      error_ar_l2[p] = jnp.sqrt(jnp.sum(jnp.power(error_l2_per_var_agg[p], 2))).item()
       error_ar_l1[p] = 0
       error_ar_l2[p] = 0
 
@@ -718,6 +703,7 @@ def main(argv):
     n_test=(32 if FLAGS.debug else 1024),
     key=subkey,
   )
+  dataset.compute_stats(residual_steps=FLAGS.direct_steps)
 
   # Read the checkpoint
   if FLAGS.params:

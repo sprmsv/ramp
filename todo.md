@@ -1,13 +1,10 @@
 # PRIORITY
 
-- Troubleshoot on the small CPU dataset...
-
 - Looks like updating the gradient on the batch is not really the greatest idea.. Confirm on a big dataset before changing it..
 
 - Run experiments with the whole and partial dataset using A100 (increase bsz)
-- Use different overlap_factor for mesh2grid
 
-# AFTER VACATION
+- Use different overlap_factor for mesh2grid
 
 - Do something for the long compilation time..
     - Check this post: https://github.com/google/jax/issues/10596

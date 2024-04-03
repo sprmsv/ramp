@@ -19,11 +19,14 @@ NT_SUPER_RESOLUTION = 256
 
 class Dataset:
 
-  def __init__(self, dir: str, n_train: int, n_valid: int, n_test: int, key: flax.typing.PRNGKey, dummy: bool = False):
+  def __init__(self, dir: str, n_train: int, n_valid: int, n_test: int,
+      key: flax.typing.PRNGKey, dummy: bool = False,
+    ):
     self.reader = h5py.File(dir, 'r')
     self.length = len([k for k in self.reader.keys() if 'sample' in k])
     self.dummy = dummy
     self.sample = self._fetch(0)
+    self.shape = self.sample[0].shape
 
     # Split the dataset
     assert (n_train+n_valid+n_test) < self.length
@@ -35,37 +38,58 @@ class Dataset:
       'test': random_permutation[(n_train+n_valid):(n_train+n_valid+n_test)],
     }
 
-    # Compute mean
-    _mean_samples = np.zeros_like(self.sample[0])
-    for idx in range(n_train):
-      _mean_samples += self.train(idx)[0] / n_train
-    self.mean_trn = np.mean(_mean_samples, axis=1, keepdims=True)
+    # Instantiate the dataset stats
+    self.mean_trj, self.std_trj = None, None
+    self.mean_res, self.std_res = None, None
 
-    # Compute std
-    _mean_samples = np.zeros_like(self.sample[0])
-    for idx in range(n_train):
-      _mean_samples += np.power(self.train(idx)[0] - self.mean_trn, 2) / n_train
-    self.std_trn = np.sqrt(np.mean(_mean_samples, axis=1, keepdims=True))
+  def compute_stats(self, residual_steps: int = 0):
+    assert residual_steps > 0
+    assert residual_steps < self.shape[1]
 
-    # Compute mean of residuals
-    # TODO: Compute longer residuals too
-    _get_res = lambda trj: trj[:, 1:] - trj[:, :-1]
-    _mean_samples = np.zeros_like(_get_res(self.sample[0]))
-    for idx in range(n_train):
-      _mean_samples += _get_res(self.train(idx)[0]) / n_train
-    mean_res_trn = np.mean(_mean_samples, axis=1, keepdims=True)
+    # Compute mean of trajectories
+    if self.mean_trj is None:
+      _mean_samples = np.zeros_like(self.sample[0])
+      for idx in range(self.nums['train']):
+        _mean_samples += self.train(idx)[0] / self.nums['train']
+      self.mean_trj = np.mean(_mean_samples, axis=1, keepdims=True)
 
-    # Compute std of residuals
-    # TODO: Compute longer residuals too
-    _get_res = lambda trj: trj[:, 1:] - trj[:, :-1]
-    _mean_samples = np.zeros_like(_get_res(self.sample[0]))
-    for idx in range(n_train):
-      _mean_samples += np.power(_get_res(self.train(idx)[0]) - mean_res_trn, 2) / n_train
-    std_res_trn = np.sqrt(np.mean(_mean_samples, axis=1, keepdims=True))
+    # Compute std of trajectories
+    if self.std_trj is None:
+      _mean_samples = np.zeros_like(self.sample[0])
+      for idx in range(self.nums['train']):
+        _mean_samples += np.power(self.train(idx)[0] - self.mean_trj, 2) / self.nums['train']
+      self.std_trj = np.sqrt(np.mean(_mean_samples, axis=1, keepdims=True))
 
-    # TMP
-    self.mean_res_trn = [mean_res_trn]
-    self.std_res_trn = [std_res_trn]
+    if residual_steps:
+      _get_res = lambda s, trj: trj[:, (s+1):] - trj[:, :-(s+1)]
+
+      # Compute mean of residuals
+      _mean_samples = [
+        np.zeros_like(_get_res(s, self.sample[0]))
+        for s in range(residual_steps)
+      ]
+      for idx in range(self.nums['train']):
+        trj = self.train(idx)[0]
+        for s in range(residual_steps):
+          _mean_samples[s] += _get_res(s, trj) / self.nums['train']
+      self.mean_res = [
+        np.mean(_mean_samples[s], axis=1, keepdims=True)
+        for s in range(residual_steps)
+      ]
+
+      # Compute std of residuals
+      _mean_samples = [
+        np.zeros_like(_get_res(s, self.sample[0]))
+        for s in range(residual_steps)
+      ]
+      for idx in range(self.nums['train']):
+        trj = self.train(idx)[0]
+        for s in range(residual_steps):
+          _mean_samples[s] += np.power(_get_res(s, trj) - self.mean_res[s], 2) / self.nums['train']
+      self.std_res = [
+        np.sqrt(np.mean(_mean_samples[s], axis=1, keepdims=True))
+        for s in range(residual_steps)
+      ]
 
   def _fetch(self, idx):
     if not self.dummy:

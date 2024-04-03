@@ -17,7 +17,7 @@ class OperatorNormalizer:
   def apply(self, variables, specs: jnp.ndarray, u_inp: jnp.ndarray, ndt: int):
     # ndt >= 1
     # ndt_inp >= 0
-    # TODO: START FROM ZERO
+    # TODO: BEGIN INDEX FROM ZERO
 
     # Get normalized predicted residuals
     u_inp_nrm = normalize(
@@ -97,7 +97,7 @@ class AutoregressivePredictor:
     num_jumps = num_steps // self.num_steps_direct
     ndt_tiled = 1 + jnp.tile(
       jnp.arange(self.num_steps_direct), reps=(num_jumps, 1)
-    ).reshape(num_jumps, self.num_steps_direct, 1)
+    ).reshape(num_jumps, self.num_steps_direct)
     u_next, rollout_full = jax.lax.scan(
       f=scan_fn_autoregressive,
       init=u_inp,
@@ -112,7 +112,7 @@ class AutoregressivePredictor:
     # Get the last set of direct predictions partially (if necessary)
     num_steps_rem = num_steps % self.num_steps_direct
     if num_steps_rem:
-      ndt_tiled = 1 + jnp.arange(num_steps_rem).reshape(1, num_steps_rem, 1)
+      ndt_tiled = 1 + jnp.arange(num_steps_rem).reshape(1, num_steps_rem)
       u_next, rollout_part = jax.lax.scan(
         f=scan_fn_autoregressive,
         init=u_next,
