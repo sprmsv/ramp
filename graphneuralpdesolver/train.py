@@ -734,9 +734,9 @@ def main(argv):
       model_kwargs['overlap_factor_grid2mesh'] = 1.0
       model_kwargs['overlap_factor_mesh2grid'] = 1.0
       model_kwargs['num_multimesh_levels'] = 1
-      model_kwargs['latent_size'] = 8
+      model_kwargs['latent_size'] = 2
       model_kwargs['num_mlp_hidden_layers'] = 1
-      model_kwargs['num_message_passing_steps'] = 2
+      model_kwargs['num_message_passing_steps'] = 1
 
   model = get_model(model_kwargs)
 
