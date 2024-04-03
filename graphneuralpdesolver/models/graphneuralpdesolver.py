@@ -131,7 +131,6 @@ class GraphNeuralPDESolver(AbstractOperator):
     self.idx_mesh2grid_grid_nodes = np.concatenate(_idx_mesh2grid_grid_nodes).tolist()
     self.idx_mesh2grid_mesh_nodes = np.concatenate(_idx_mesh2grid_mesh_nodes).tolist()
 
-
     # Initialize the graphs
     self._grid2mesh_graph = self._init_grid2mesh_graph()
     self._mesh_graph = self._init_mesh_graph()
@@ -444,7 +443,7 @@ class GraphNeuralPDESolver(AbstractOperator):
         edges.features.astype(dummy_mesh_node_features.dtype), bsz)
     )
 
-    input_graph = self._grid2mesh_graph._replace(
+    input_graph = grid2mesh_graph._replace(
       edges={grid2mesh_edges_key: new_edges},
       nodes={
         'grid_nodes': new_grid_nodes,

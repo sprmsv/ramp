@@ -2,12 +2,6 @@
 
 - Run experiments with the whole and partial dataset (increase bsz)
 
-- Do something for the long compilation time..
-    - Check this post: https://github.com/google/jax/issues/10596
-    - It is some latent features.. but why are they being constant folded?
-    - Check np in setup
-    - Something is probably np.array instead of jnp
-
 - Profile speed and performance vs batch_size
 
 - Adopt the 1D datasets to the new structure
