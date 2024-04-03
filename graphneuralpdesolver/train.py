@@ -1,7 +1,7 @@
 from datetime import datetime
 import functools
 from time import time
-from typing import Tuple, Any, Mapping, Sequence, Union, Iterable, Generator
+from typing import Tuple, Any, Mapping, Sequence, Union, Iterable
 import json
 from dataclasses import dataclass
 
@@ -19,8 +19,8 @@ import orbax.checkpoint
 
 from graphneuralpdesolver.experiments import DIR_EXPERIMENTS
 from graphneuralpdesolver.autoregressive import AutoregressivePredictor, OperatorNormalizer
-from graphneuralpdesolver.dataset import read_datasets, shuffle_arrays, normalize, unnormalize, Dataset
-from graphneuralpdesolver.models.graphneuralpdesolver import GraphNeuralPDESolver, AbstractOperator, ToyOperator
+from graphneuralpdesolver.dataset import shuffle_arrays, Dataset
+from graphneuralpdesolver.models.graphneuralpdesolver import GraphNeuralPDESolver, AbstractOperator
 from graphneuralpdesolver.utils import disable_logging, Array
 from graphneuralpdesolver.metrics import mse, rel_l2_error, rel_l1_error
 
@@ -542,8 +542,6 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
       error_l2_per_var_agg = jnp.median(jnp.concatenate(error_ar_l2_per_var[p]), axis=0)
       error_ar_l1[p] = jnp.sqrt(jnp.sum(jnp.power(error_l1_per_var_agg[p], 2))).item()
       error_ar_l2[p] = jnp.sqrt(jnp.sum(jnp.power(error_l2_per_var_agg[p], 2))).item()
-      error_ar_l1[p] = 0
-      error_ar_l2[p] = 0
 
     # Build the metrics object
     metrics = EvalMetrics(

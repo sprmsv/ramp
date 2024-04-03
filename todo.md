@@ -1,6 +1,6 @@
 # PRIORITY
 
-- Looks like updating the gradient on the batch is not really the greatest idea.. Confirm on a big dataset before changing it..
+- Looks like updating the gradient on the batch is not really the greatest idea.. Confirm on a big dataset before changing it.. CHECK 031 in bm
 
 - Run experiments with the whole and partial dataset using A100 (increase bsz)
 
