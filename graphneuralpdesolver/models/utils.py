@@ -36,7 +36,7 @@ class AugmentedMLP(nn.Module):
       use_bias=True,
     ) if self.use_layer_norm else None
     self.correction = LearnedCorrection(
-      latent_size=self.layer_sizes[-1],  # TRY: other sizes
+      latent_size=4,  # TRY: other sizes
       correction_size=1,  # TRY: self.layer_sizes[-1]
     ) if self.use_learned_correction else None
 

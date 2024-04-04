@@ -1,8 +1,21 @@
 # PRIORITY
 
-- Run experiments with the whole and partial dataset (increase bsz)
+- Run experiments with different datasets
+    - Start with direct_steps=1, bm, sin_easy
+    - Increase unroll_steps for a few epochs
+    - Repeat the recipe for other datasets
+    - Put the results in a report
+    - Increase direct_steps
+        - First, try without learned_correction in the MLP
+        - Add learned_correction with care and see if it brings any good
+
+- Automize the training curriculum
+
+- Tune parameters and check TRYs
 
 - Profile speed and performance vs batch_size
+
+- Run experiments with the whole and partial dataset
 
 - Adopt the 1D datasets to the new structure
 
@@ -30,8 +43,6 @@
 
 - Multihost JAX training
 
-- Rethink the normalization
-    - Try normalizing the residuals again, but think it through
 - Normalize the inputs and residuals based on the time index
     -> Different statistics per timestep
     -> Imagine an explosion, the statistics are very different across time

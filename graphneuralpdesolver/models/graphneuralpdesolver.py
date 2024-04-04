@@ -146,7 +146,7 @@ class GraphNeuralPDESolver(AbstractOperator):
       mlp_num_hidden_layers=self.num_mlp_hidden_layers,
       num_message_passing_steps=1,
       use_layer_norm=True,
-      use_learned_correction=self.time_conditioned,
+      use_learned_correction=False,  # TMP
       include_sent_messages_in_node_update=False,
       activation='swish',
       f32_aggregation=True,
@@ -165,7 +165,7 @@ class GraphNeuralPDESolver(AbstractOperator):
       mlp_num_hidden_layers=self.num_mlp_hidden_layers,
       num_message_passing_steps=self.num_message_passing_steps,
       use_layer_norm=True,
-      use_learned_correction=self.time_conditioned,
+      use_learned_correction=False,  # TMP
       include_sent_messages_in_node_update=False,
       activation='swish',
       f32_aggregation=False,
@@ -188,7 +188,7 @@ class GraphNeuralPDESolver(AbstractOperator):
       mlp_num_hidden_layers=self.num_mlp_hidden_layers,
       num_message_passing_steps=1,
       use_layer_norm=True,
-      use_learned_correction=self.time_conditioned,
+      use_learned_correction=False,  # TMP
       include_sent_messages_in_node_update=False,
       activation='swish',
       f32_aggregation=False,
