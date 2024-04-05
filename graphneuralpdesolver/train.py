@@ -62,9 +62,6 @@ flags.DEFINE_integer(name='unroll_steps', default=1, required=False,
 flags.DEFINE_integer(name='direct_steps', default=1, required=False,
   help='Maximum number of time steps between input/output pairs during training'
 )
-flags.DEFINE_bool(name='verbose', default=False, required=False,
-  help='If passed, training reports for batches are printed'
-)
 flags.DEFINE_bool(name='debug', default=False, required=False,
   help='If passed, the code is launched only for debugging purposes.'
 )
@@ -78,8 +75,9 @@ class EvalMetrics:
 
 DIR = DIR_EXPERIMENTS / datetime.now().strftime('%Y%m%d-%H%M%S.%f')
 
-def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: int,
-  params: flax.typing.Collection = None) -> TrainState:
+def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset,
+  direct_steps: int, unroll_steps: int, epochs: int, lr: float, lr_decay: float,
+  params: flax.typing.Collection = None, epochs_before: int = 0) -> TrainState:
   """Trains a model and returns the state."""
 
   # Samples
@@ -93,7 +91,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
   num_times = sample_traj.shape[1]
   num_grid_points = sample_traj.shape[2:4]
   num_vars = sample_traj.shape[-1]
-  unroll_offset = FLAGS.unroll_steps * FLAGS.direct_steps
+  unroll_offset = unroll_steps * direct_steps
   assert num_samples_trn % FLAGS.batch_size == 0
   num_batches = num_samples_trn // FLAGS.batch_size
   assert FLAGS.batch_size % NUM_DEVICES == 0
@@ -123,27 +121,27 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     )
     variables = jax.jit(model.init)(subkey, **model_init_kwargs)
 
-  # Calculate the total number of parameters
-  n_model_parameters = np.sum(
-  jax.tree_util.tree_flatten(
-    jax.tree_map(
-      lambda x: np.prod(x.shape).item(),
-      variables['params']
-    ))[0]
-  ).item()
-  logging.info(f'Total number of trainable paramters: {n_model_parameters}')
+    # Calculate the total number of parameters
+    n_model_parameters = np.sum(
+    jax.tree_util.tree_flatten(
+      jax.tree_map(
+        lambda x: np.prod(x.shape).item(),
+        variables['params']
+      ))[0]
+    ).item()
+    logging.info(f'Total number of trainable paramters: {n_model_parameters}')
 
   # Define the permissible lead times
-  lead_times = jnp.arange(unroll_offset, num_times - FLAGS.direct_steps)
-  num_lead_times = num_times - unroll_offset - FLAGS.direct_steps
+  lead_times = jnp.arange(unroll_offset, num_times - direct_steps)
+  num_lead_times = num_times - unroll_offset - direct_steps
 
   # Set up the optimization components
   criterion_loss = mse
   lr = optax.cosine_decay_schedule(
-    init_value=FLAGS.lr,
-    decay_steps=(FLAGS.epochs * num_batches),
-    alpha=FLAGS.lr_decay,
-  ) if FLAGS.lr_decay else FLAGS.lr
+    init_value=lr,
+    decay_steps=(epochs * num_batches),
+    alpha=lr_decay,
+  ) if lr_decay else lr
   tx = optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-8)
   state = TrainState.create(apply_fn=model.apply, params=variables['params'], tx=tx)
 
@@ -153,7 +151,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     stats_trj=(stats_trj_mean, stats_trj_std),
     stats_res=(stats_res_mean, stats_res_std),
   )
-  predictor = AutoregressivePredictor(operator=normalizer, num_steps_direct=FLAGS.direct_steps)
+  predictor = AutoregressivePredictor(operator=normalizer, num_steps_direct=direct_steps)
 
   def _compute_loss(
     params: flax.typing.Collection, specs: Array,
@@ -207,8 +205,8 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
 
     # Split the unrolling steps randomly to cut the gradients along the way
     # MODIFY: Change to JAX-generated random number (reproducability)
-    noise_steps = np.random.choice(FLAGS.unroll_steps+1)
-    grads_steps = FLAGS.unroll_steps - noise_steps
+    noise_steps = np.random.choice(unroll_steps+1)
+    grads_steps = unroll_steps - noise_steps
 
     # Get noisy input
     u_inp = _get_noisy_input(
@@ -287,7 +285,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     u_tgt_batch = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
           operand=trajs,
-          start_index=(lt+1), slice_size=FLAGS.direct_steps, axis=1)
+          start_index=(lt+1), slice_size=direct_steps, axis=1)
     )(lead_times)
     specs_batch = (specs[None, :, :]
       .repeat(repeats=num_lead_times, axis=0)
@@ -298,15 +296,15 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     u_lag_batch = u_lag_batch.reshape(
         (batch_size_per_device * num_lead_times), 1, *num_grid_points, -1)
     u_tgt_batch = u_tgt_batch.reshape(
-        (batch_size_per_device * num_lead_times), FLAGS.direct_steps, *num_grid_points, -1)
+        (batch_size_per_device * num_lead_times), direct_steps, *num_grid_points, -1)
     specs_batch = specs_batch.reshape(
         (batch_size_per_device * num_lead_times), -1) if _use_specs else None
 
     # Compute loss and gradient by mapping on the time axis
     # Same u_lag and specs, loop over ndt
     key, subkey = jax.random.split(key)
-    subkeys = jnp.stack(jax.random.split(subkey, num=FLAGS.direct_steps))
-    ndt_batch = 1 + jnp.arange(FLAGS.direct_steps)  # -> [direct_steps,]
+    subkeys = jnp.stack(jax.random.split(subkey, num=direct_steps))
+    ndt_batch = 1 + jnp.arange(direct_steps)  # -> [direct_steps,]
     u_tgt_batch = jnp.expand_dims(u_tgt_batch, axis=2).swapaxes(0, 1)  # -> [direct_steps, ...]
 
     # Shuffle direct_steps
@@ -325,9 +323,9 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
         u_tgt=u_tgt_batch[i],
         ndt=ndt_batch[i],
       )
-      _loss_updated = _loss_carried + _loss_direct_step / FLAGS.direct_steps
+      _loss_updated = _loss_carried + _loss_direct_step / direct_steps
       _grads_updated = jax.tree_map(
-        lambda g_old, g_new: (g_old + g_new / FLAGS.direct_steps),
+        lambda g_old, g_new: (g_old + g_new / direct_steps),
         _grads_carried,
         _grads_direct_step,
       )
@@ -338,7 +336,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     _init_grads = jax.tree_map(lambda p: jnp.zeros_like(p), state.params)
     loss, grads = jax.lax.fori_loop(
       lower=0,
-      upper=FLAGS.direct_steps,
+      upper=direct_steps,
       body_fun=_update_loss_and_grads_direct_step,
       init_val=(_init_loss, _init_grads)
     )
@@ -361,8 +359,6 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     loss_epoch = 0.
     grad_epoch = 0.
     for idx, batch in enumerate(batches):
-      begin_batch = time()
-
       # Unwrap the batch
       batch = jax.tree_map(jax.device_put, batch)  # Transfer to device memory
       trajs, specs = batch
@@ -379,16 +375,6 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
       state, loss, grads = _train_one_batch(state, trajs, specs, subkey)
       loss_epoch += loss * FLAGS.batch_size / num_samples_trn
       grad_epoch += np.mean(jax.tree_util.tree_flatten(jax.tree_map(jnp.mean, jax.tree_map(jnp.abs, grads)))[0]) / num_batches
-
-      time_batch = time() - begin_batch
-
-      if FLAGS.verbose:
-        logging.info('\t'.join([
-          f'\t',
-          f'BTCH: {idx+1:04d}/{num_batches:04d}',
-          f'TIME: {time_batch:06.1f}s',
-          f'RMSE: {np.sqrt(loss).item() : .2e}',
-        ]))
 
     return state, loss_epoch, grad_epoch
 
@@ -421,8 +407,8 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     # Inputs are of shape [batch_size_per_device, ...]
 
     # Set lead times
-    lead_times = jnp.arange(num_times - FLAGS.direct_steps)
-    num_lead_times = num_times - FLAGS.direct_steps
+    lead_times = jnp.arange(num_times - direct_steps)
+    num_lead_times = num_times - direct_steps
 
     # Get input output pairs for all lead times
     # -> [num_lead_times, batch_size_per_device, ...]
@@ -434,7 +420,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     u_tgt = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
           operand=trajs,
-          start_index=(lt+1), slice_size=FLAGS.direct_steps, axis=1)
+          start_index=(lt+1), slice_size=direct_steps, axis=1)
     )(lead_times)
     specs = (jnp.array(specs[None, :, :])
       .repeat(repeats=num_lead_times, axis=0)
@@ -452,7 +438,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
         return (ndt+1), u_prd
       _, u_prd = jax.lax.scan(
         f=get_direct_prediction,
-        init=1, xs=None, length=FLAGS.direct_steps,
+        init=1, xs=None, length=direct_steps,
       )
       u_prd = u_prd.squeeze(axis=2).swapaxes(0, 1)
       err_l1_mean += jnp.sqrt(jnp.sum(jnp.power(rel_l1_error(u_prd, u_tgt[lt]), 2), axis=1)) / num_lead_times
@@ -555,7 +541,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
 
   # Set the evaluation partitions
   autoreg_evaluation_parts = [1, 2, 5]  # FIXME: Get as input
-  assert all([(num_times // p) >= FLAGS.direct_steps for p in autoreg_evaluation_parts])
+  assert all([(num_times // p) >= direct_steps for p in autoreg_evaluation_parts])
   # Evaluate before training
   metrics_trn = evaluate(
     state=state,
@@ -571,7 +557,9 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
   # Report the initial evaluations
   time_tot_pre = time() - time_int_pre
   logging.info('\t'.join([
-    f'EPCH: {0 : 04d}/{epochs : 04d}',
+    f'DRCT: {direct_steps : 02d}',
+    f'URLL: {unroll_steps : 02d}',
+    f'EPCH: {epochs_before : 04d}/{FLAGS.epochs : 04d}',
     f'TIME: {time_tot_pre : 06.1f}s',
     f'LR: {state.opt_state.hyperparams["learning_rate"].item() : .2e}',
     f'RMSE: {0. : .2e}',
@@ -582,7 +570,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
 
   # Set up the checkpoint manager
   with disable_logging(level=logging.FATAL):
-    (DIR / 'metrics').mkdir()
+    (DIR / 'metrics').mkdir(exist_ok=True)
     checkpointer = orbax.checkpoint.PyTreeCheckpointer()
     checkpointer_options = orbax.checkpoint.CheckpointManagerOptions(
       max_to_keep=1,
@@ -621,7 +609,9 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
     # Log the results
     time_tot = time() - time_int
     logging.info('\t'.join([
-      f'EPCH: {epoch : 04d}/{epochs : 04d}',
+      f'DRCT: {direct_steps : 02d}',
+      f'URLL: {unroll_steps : 02d}',
+      f'EPCH: {epochs_before + epoch : 04d}/{FLAGS.epochs : 04d}',
       f'TIME: {time_tot : 06.1f}s',
       f'LR: {state.opt_state.hyperparams["learning_rate"].item() : .2e}',
       f'RMSE: {np.sqrt(loss).item() : .2e}',
@@ -656,7 +646,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset, epochs: 
       }
       # Store the state and the metrics
       checkpoint_manager.save(
-        step=epoch,
+        step=(epochs_before + epoch),
         items={'state': state,},
         metrics=checkpoint_metrics,
         save_kwargs={'save_args': checkpointer_save_args}
@@ -710,10 +700,11 @@ def main(argv):
     step = orbax.checkpoint.CheckpointManager(DIR_OLD_EXPERIMENT / 'checkpoints', orbax_checkpointer).latest_step()
     ckpt = orbax_checkpointer.restore(directory=(DIR_OLD_EXPERIMENT / 'checkpoints' / str(step) / 'default'))
     state = ckpt['state']
+    params = state['params']
     with open(DIR_OLD_EXPERIMENT / 'configs.json', 'rb') as f:
       model_kwargs = json.load(f)['model_configs']
   else:
-    state = None
+    params = None
     model_kwargs = None
 
   # Get the model
@@ -737,7 +728,6 @@ def main(argv):
       model_kwargs['latent_size'] = 2
       model_kwargs['num_mlp_hidden_layers'] = 1
       model_kwargs['num_message_passing_steps'] = 1
-
   model = get_model(model_kwargs)
 
   # Store the configurations
@@ -750,15 +740,52 @@ def main(argv):
       indent=2,
     )
 
-  # Train the model
-  key, subkey = jax.random.split(key)
-  state = train(
-    model=model,
-    dataset=dataset,
-    epochs=FLAGS.epochs,
-    key=subkey,
-    params=(state['params'] if state else None),
-  )
+  # Split the epochs
+  epochs_u00 = int(FLAGS.epochs // (1 + .1 * FLAGS.unroll_steps))
+  epochs_uxx = int((FLAGS.epochs - epochs_u00) // FLAGS.unroll_steps)
+  epochs_uff = epochs_uxx + (FLAGS.epochs - epochs_u00) % FLAGS.unroll_steps
+  # TRY: Allocate more epochs to the final direct_steps
+  epochs_u00_dxx = epochs_u00 // FLAGS.direct_steps
+  epochs_u00_dff = epochs_u00_dxx + epochs_u00 % FLAGS.direct_steps
+
+  # Train the model without unrolling
+  epochs_trained = 0
+  for _d in range(1, FLAGS.direct_steps+1):
+    key, subkey = jax.random.split(key)
+    epochs = (epochs_u00_dff if (_d == FLAGS.direct_steps) else epochs_u00_dxx)
+    state = train(
+      key=subkey,
+      model=model,
+      dataset=dataset,
+      direct_steps=_d,
+      unroll_steps=0,
+      epochs=epochs,
+      lr=FLAGS.lr,
+      lr_decay=FLAGS.lr_decay,
+      params=params,
+      epochs_before=epochs_trained,
+    )
+    params = state.params
+    epochs_trained += epochs
+
+  # Train the model with unrolling
+  for _u in range(1, FLAGS.unroll_steps+1):
+    key, subkey = jax.random.split(key)
+    epochs = (epochs_uff if (_u == FLAGS.unroll_steps) else epochs_uxx)
+    state = train(
+      key=subkey,
+      model=model,
+      dataset=dataset,
+      direct_steps=FLAGS.direct_steps,
+      unroll_steps=_u,
+      epochs=epochs,
+      lr=(FLAGS.lr * FLAGS.lr_decay),
+      lr_decay=0,
+      params=params,
+      epochs_before=epochs_trained,
+    )
+    params = state.params
+    epochs_trained += epochs
 
 if __name__ == '__main__':
   logging.set_verbosity('info')
