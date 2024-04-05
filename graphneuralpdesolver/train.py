@@ -1,7 +1,7 @@
 from datetime import datetime
 import functools
 from time import time
-from typing import Tuple, Any, Mapping, Sequence, Union, Iterable
+from typing import Tuple, Any, Mapping, Sequence, Union, Iterable, Callable
 import json
 from dataclasses import dataclass
 
@@ -75,9 +75,9 @@ class EvalMetrics:
 
 DIR = DIR_EXPERIMENTS / datetime.now().strftime('%Y%m%d-%H%M%S.%f')
 
-def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset,
-  direct_steps: int, unroll_steps: int, epochs: int, lr: float, lr_decay: float,
-  params: flax.typing.Collection = None, epochs_before: int = 0) -> TrainState:
+def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset: Dataset,
+  direct_steps: int, unroll_steps: int, epochs: int,
+  epochs_before: int = 0, loss_fn: Callable = mse) -> TrainState:
   """Trains a model and returns the state."""
 
   # Samples
@@ -106,44 +106,9 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset,
   stats_res_mean = jax.device_put(jnp.array(dataset.mean_res))
   stats_res_std = jax.device_put(jnp.array(dataset.std_res))
 
-  # Initialzize the model or use the loaded parameters
-  if params:
-    variables = {'params': params}
-  else:
-    subkey, key = jax.random.split(key)
-    model_init_kwargs = dict(
-      u_inp=jnp.ones(shape=(FLAGS.batch_size, 1, *num_grid_points, num_vars)),
-      ndt=1.,
-      specs=(
-        jnp.ones_like(sample_spec).repeat(FLAGS.batch_size, axis=0)
-        if sample_spec is not None else None
-      ),
-    )
-    variables = jax.jit(model.init)(subkey, **model_init_kwargs)
-
-    # Calculate the total number of parameters
-    n_model_parameters = np.sum(
-    jax.tree_util.tree_flatten(
-      jax.tree_map(
-        lambda x: np.prod(x.shape).item(),
-        variables['params']
-      ))[0]
-    ).item()
-    logging.info(f'Total number of trainable paramters: {n_model_parameters}')
-
   # Define the permissible lead times
   lead_times = jnp.arange(unroll_offset, num_times - direct_steps)
   num_lead_times = num_times - unroll_offset - direct_steps
-
-  # Set up the optimization components
-  criterion_loss = mse
-  lr = optax.cosine_decay_schedule(
-    init_value=lr,
-    decay_steps=(epochs * num_batches),
-    alpha=lr_decay,
-  ) if lr_decay else lr
-  tx = optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-8)
-  state = TrainState.create(apply_fn=model.apply, params=variables['params'], tx=tx)
 
   # Define the autoregressive predictor
   normalizer = OperatorNormalizer(
@@ -179,7 +144,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, dataset: Dataset,
       ndt=ndt,
     )
 
-    return criterion_loss(*_loss_inputs)
+    return loss_fn(*_loss_inputs)
 
   def _get_noisy_input(
     params: flax.typing.Collection, specs: Array,
@@ -748,43 +713,68 @@ def main(argv):
   epochs_u00_dxx = epochs_u00 // FLAGS.direct_steps
   epochs_u00_dff = epochs_u00_dxx + epochs_u00 % FLAGS.direct_steps
 
+  # Initialzize the model or use the loaded parameters
+  if not params:
+    subkey, key = jax.random.split(key)
+    sample_traj, sample_spec = dataset.sample
+    num_grid_points = sample_traj.shape[2:4]
+    num_vars = dataset.sample[0].shape[-1]
+    model_init_kwargs = dict(
+      u_inp=jnp.ones(shape=(FLAGS.batch_size, 1, *num_grid_points, num_vars)),
+      ndt=1.,
+      specs=(jnp.ones_like(sample_spec).repeat(FLAGS.batch_size, axis=0)
+        if (sample_spec is not None) else None),
+    )
+    variables = jax.jit(model.init)(subkey, **model_init_kwargs)
+    params = variables['params']
+
+  # Calculate the total number of parameters
+  n_model_parameters = np.sum(
+  jax.tree_util.tree_flatten(jax.tree_map(lambda x: np.prod(x.shape).item(), params))[0]).item()
+  logging.info(f'Total number of trainable paramters: {n_model_parameters}')
+
   # Train the model without unrolling
   epochs_trained = 0
+  num_batches = dataset.nums['train'] // FLAGS.batch_size
+  lr = optax.cosine_decay_schedule(
+    init_value=FLAGS.lr,
+    decay_steps=(epochs_u00 * num_batches),
+    alpha=FLAGS.lr_decay,
+  ) if FLAGS.lr_decay else FLAGS.lr
+  tx = optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-8)
+  state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
   for _d in range(1, FLAGS.direct_steps+1):
     key, subkey = jax.random.split(key)
     epochs = (epochs_u00_dff if (_d == FLAGS.direct_steps) else epochs_u00_dxx)
     state = train(
       key=subkey,
       model=model,
+      state=state,
       dataset=dataset,
       direct_steps=_d,
       unroll_steps=0,
       epochs=epochs,
-      lr=FLAGS.lr,
-      lr_decay=FLAGS.lr_decay,
-      params=params,
       epochs_before=epochs_trained,
     )
-    params = state.params
     epochs_trained += epochs
 
   # Train the model with unrolling
+  lr = FLAGS.lr * FLAGS.lr_decay
+  tx = optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-8)
+  state = TrainState.create(apply_fn=model.apply, params=state.params, tx=tx)
   for _u in range(1, FLAGS.unroll_steps+1):
     key, subkey = jax.random.split(key)
     epochs = (epochs_uff if (_u == FLAGS.unroll_steps) else epochs_uxx)
     state = train(
       key=subkey,
       model=model,
+      state=state,
       dataset=dataset,
       direct_steps=FLAGS.direct_steps,
       unroll_steps=_u,
       epochs=epochs,
-      lr=(FLAGS.lr * FLAGS.lr_decay),
-      lr_decay=0,
-      params=params,
       epochs_before=epochs_trained,
     )
-    params = state.params
     epochs_trained += epochs
 
 if __name__ == '__main__':
