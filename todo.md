@@ -1,13 +1,7 @@
 # PRIORITY
 
-- Run experiments with different datasets
-    - Start with direct_steps=1, bm, sin_easy
-    - Increase unroll_steps for a few epochs
-    - Repeat the recipe for other datasets
-    - Put the results in a report
-    - Increase direct_steps
-        - First, try without learned_correction in the MLP
-        - Add learned_correction with care and see if it brings any good
+- Datasets
+    - Create and move a smaller version of each dataset for validations
 
 - Automize the training curriculum
 
@@ -23,6 +17,9 @@
 
 - Rethink the architecture: encoded coordinates, mean squared relative error, etc.
     - Decrease the latent_size of the grid nodes!! 128 is an overkill for only the coordinates and the solution.. also saves memory
+
+- Investigate why increasing unroll_steps has very little effect
+    - Try adding a Gaussian noise
 
 # 1D datasets from Equer and Welling (?)
 
