@@ -35,9 +35,6 @@ flags.DEFINE_string(name='datadir', default=None, required=True,
 flags.DEFINE_string(name='params', default=None, required=False,
   help='Path of the previous experiment containing the initial parameters'
 )
-flags.DEFINE_integer(name='resolution', default=128, required=False,
-  help='Resolution of the physical discretization'
-)
 flags.DEFINE_string(name='experiment', default=None, required=True,
   help='Name of the experiment: {"E1", "E2", "E3", "WE1", "WE2", "WE3"'
 )
@@ -610,13 +607,14 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
         },
       }
       # Store the state and the metrics
+      step = epochs_before + epoch
       checkpoint_manager.save(
-        step=(epochs_before + epoch),
+        step=step,
         items={'state': state,},
         metrics=checkpoint_metrics,
         save_kwargs={'save_args': checkpointer_save_args}
       )
-      with open(DIR / 'metrics' / f'{str(epoch)}.json', 'w') as f:
+      with open(DIR / 'metrics' / f'{str(step)}.json', 'w') as f:
         json.dump(checkpoint_metrics, f)
 
   return state
@@ -706,9 +704,10 @@ def main(argv):
     )
 
   # Split the epochs
-  epochs_u00 = int(FLAGS.epochs // (1 + .1 * FLAGS.unroll_steps))
-  epochs_uxx = int((FLAGS.epochs - epochs_u00) // FLAGS.unroll_steps)
-  epochs_uff = epochs_uxx + (FLAGS.epochs - epochs_u00) % FLAGS.unroll_steps
+  epochs_u00 = int(FLAGS.epochs // (1 + .2 * FLAGS.unroll_steps))
+  if FLAGS.unroll_steps:
+    epochs_uxx = int((FLAGS.epochs - epochs_u00) // FLAGS.unroll_steps)
+    epochs_uff = epochs_uxx + (FLAGS.epochs - epochs_u00) % FLAGS.unroll_steps
   # TRY: Allocate more epochs to the final direct_steps
   epochs_u00_dxx = epochs_u00 // FLAGS.direct_steps
   epochs_u00_dff = epochs_u00_dxx + epochs_u00 % FLAGS.direct_steps
