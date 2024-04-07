@@ -537,7 +537,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
     checkpointer_options = orbax.checkpoint.CheckpointManagerOptions(
       max_to_keep=1,
       keep_period=None,
-      # best_fn=(lambda metrics: np.mean(metrics['valid']['autoreg']['l2'][1][1]).item()),
+      best_fn=(lambda metrics: np.mean(metrics['valid']['autoreg']['l2'][0][1]).item()),
       best_mode='min',
       create=True,)
     checkpointer_save_args = orbax_utils.save_args_from_target(target={'state': state})
