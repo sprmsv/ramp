@@ -28,6 +28,7 @@ from graphneuralpdesolver.metrics import mse, rel_l2_error, rel_l1_error
 SEED = 44
 NUM_DEVICES = jax.local_device_count()
 
+# FLAGS::general
 FLAGS = flags.FLAGS
 flags.DEFINE_string(name='datadir', default=None, required=True,
   help='Path of the folder containing the datasets'
@@ -36,8 +37,10 @@ flags.DEFINE_string(name='params', default=None, required=False,
   help='Path of the previous experiment containing the initial parameters'
 )
 flags.DEFINE_string(name='experiment', default=None, required=True,
-  help='Name of the experiment: {"E1", "E2", "E3", "WE1", "WE2", "WE3"'
+  help='Name of the experiment: {"bm", "sin", "gauss", ...}'
 )
+
+# FLAGS::training
 flags.DEFINE_integer(name='batch_size', default=4, required=False,
   help='Size of a batch of training samples'
 )
@@ -50,17 +53,43 @@ flags.DEFINE_float(name='lr', default=1e-04, required=False,
 flags.DEFINE_float(name='lr_decay', default=None, required=False,
   help='The minimum learning rate decay in the cosine scheduler'
 )
-flags.DEFINE_integer(name='latent_size', default=128, required=False,
-  help='Size of latent node and edge features'
-)
 flags.DEFINE_integer(name='unroll_steps', default=1, required=False,
   help='Number of steps for getting a noisy input and applying the model autoregressively'
 )
 flags.DEFINE_integer(name='direct_steps', default=1, required=False,
   help='Maximum number of time steps between input/output pairs during training'
 )
-flags.DEFINE_bool(name='debug', default=False, required=False,
-  help='If passed, the code is launched only for debugging purposes.'
+flags.DEFINE_integer(name='n_train', default=(2**11), required=False,
+  help='Number of training samples'
+)
+flags.DEFINE_integer(name='n_valid', default=(2**9), required=False,
+  help='Number of validation samples'
+)
+flags.DEFINE_integer(name='n_test', default=(2**9), required=False,
+  help='Number of test samples'
+)
+
+# FLAGS::model
+flags.DEFINE_integer(name='num_mesh_nodes', default=64, required=False,
+  help='Number of mesh nodes in each dimension'
+)
+flags.DEFINE_float(name='overlap_factor_grid2mesh', default=2.0, required=False,
+  help='Overlap factor for grid2mesh edges (encoder)'
+)
+flags.DEFINE_float(name='overlap_factor_mesh2grid', default=2.0, required=False,
+  help='Overlap factor for mesh2grid edges (decoder)'
+)
+flags.DEFINE_integer(name='num_multimesh_levels', default=4, required=False,
+  help='Number of multimesh connection levels (processor)'
+)
+flags.DEFINE_integer(name='latent_size', default=128, required=False,
+  help='Size of latent node and edge features'
+)
+flags.DEFINE_integer(name='num_mlp_hidden_layers', default=2, required=False,
+  help='Number of hidden layers of all MLPs'
+)
+flags.DEFINE_integer(name='num_message_passing_steps', default=6, required=False,
+  help='Number of message-passing steps in the processor'
 )
 
 @dataclass
@@ -649,9 +678,9 @@ def main(argv):
   experiment = FLAGS.experiment
   dataset = Dataset(
     dir='/'.join([FLAGS.datadir, (experiment + '.nc')]),
-    n_train=(32 if FLAGS.debug else 2**11),
-    n_valid=(32 if FLAGS.debug else 2**9),
-    n_test=(32 if FLAGS.debug else 2**9),
+    n_train=FLAGS.n_train,
+    n_valid=FLAGS.n_valid,
+    n_test=FLAGS.n_test,
     key=subkey,
   )
   dataset.compute_stats(residual_steps=FLAGS.direct_steps)
@@ -675,22 +704,14 @@ def main(argv):
     model_kwargs = dict(
       num_outputs=dataset.sample[0].shape[-1],
       num_grid_nodes=dataset.sample[0].shape[2:4],
-      num_mesh_nodes=(64, 64),  # TRY: tune
-      overlap_factor_grid2mesh=2.0,  # TRY: tune
-      overlap_factor_mesh2grid=2.0,  # TRY: tune
-      num_multimesh_levels=4,  # TRY: tune
-      latent_size=FLAGS.latent_size,  # TRY: tune
-      num_mlp_hidden_layers=2,  # TRY: 1, 2, 3
-      num_message_passing_steps=6,  # TRY: tune
+      num_mesh_nodes=(FLAGS.num_mesh_nodes, FLAGS.num_mesh_nodes),
+      overlap_factor_grid2mesh=FLAGS.overlap_factor_grid2mesh,
+      overlap_factor_mesh2grid=FLAGS.overlap_factor_mesh2grid,
+      num_multimesh_levels=FLAGS.num_multimesh_levels,
+      latent_size=FLAGS.latent_size,
+      num_mlp_hidden_layers=FLAGS.num_mlp_hidden_layers,
+      num_message_passing_steps=FLAGS.num_message_passing_steps,
     )
-    if FLAGS.debug:
-      model_kwargs['num_mesh_nodes'] = (4, 4)
-      model_kwargs['overlap_factor_grid2mesh'] = 1.0
-      model_kwargs['overlap_factor_mesh2grid'] = 1.0
-      model_kwargs['num_multimesh_levels'] = 1
-      model_kwargs['latent_size'] = 2
-      model_kwargs['num_mlp_hidden_layers'] = 1
-      model_kwargs['num_message_passing_steps'] = 1
   model = get_model(model_kwargs)
 
   # Store the configurations
