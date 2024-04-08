@@ -167,5 +167,6 @@ tmp.*
 venv*/
 .DS_Store
 *.job
+launch.sh
 slurm-*.out
 out/*
