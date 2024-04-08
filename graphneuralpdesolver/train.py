@@ -649,9 +649,9 @@ def main(argv):
   experiment = FLAGS.experiment
   dataset = Dataset(
     dir='/'.join([FLAGS.datadir, (experiment + '.nc')]),
-    n_train=(32 if FLAGS.debug else 2**14),
-    n_valid=(32 if FLAGS.debug else 1024),
-    n_test=(32 if FLAGS.debug else 1024),
+    n_train=(32 if FLAGS.debug else 2**11),
+    n_valid=(32 if FLAGS.debug else 2**9),
+    n_test=(32 if FLAGS.debug else 2**9),
     key=subkey,
   )
   dataset.compute_stats(residual_steps=FLAGS.direct_steps)

@@ -29,7 +29,7 @@ class Dataset:
     self.shape = self.sample[0].shape
 
     # Split the dataset
-    assert (n_train+n_valid+n_test) < self.length
+    assert (n_train+n_valid+n_test) <= self.length
     self.nums = {'train': n_train, 'valid': n_valid, 'test': n_test}
     random_permutation = jax.random.permutation(key, self.length)
     self.idx_modes = {
