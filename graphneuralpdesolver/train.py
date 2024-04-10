@@ -674,14 +674,13 @@ def main(argv):
   key = jax.random.PRNGKey(SEED)
 
   # Read the dataset
-  key, subkey = jax.random.split(key)
   experiment = FLAGS.experiment
   dataset = Dataset(
     dir='/'.join([FLAGS.datadir, (experiment + '.nc')]),
     n_train=FLAGS.n_train,
     n_valid=FLAGS.n_valid,
     n_test=FLAGS.n_test,
-    key=subkey,
+    key=key,
   )
   dataset.compute_stats(residual_steps=FLAGS.direct_steps)
 

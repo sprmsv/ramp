@@ -1,38 +1,70 @@
 # PRIORITY
 
-- Datasets
-    - Create and move a smaller version of each dataset for validations
+- Check E076 and wrap up the unrolled trainings: STOP WITH UNROLLED TRAINING
 
-- Automize the training curriculum
+- The goal is to predict the final time-step !!
+    - Add an option for skipping the steps in-between
+    - Calculate and report the errors of the final time-step
 
-- Tune parameters and check TRYs
+- Check E080 and update the results of the ablation study
 
-- Profile speed and performance vs batch_size
+- Run another ablation study
+    - Increase the message-passing steps
+    - Decreasse the mesh architecture to 64x64
+    - Fewer samples / more epochs to get the full potential of the models
+    - This time, also try MM128 with OF0.1 (for discontinuities..)
+    - Separate the latent_size of the grid nodes and the mesh nodes
 
-- Run experiments with the whole and partial dataset
+- Experiment with all datasets (pwc, sin, gauss, vortex_sheet, etc.)
 
-- Adopt the 1D datasets to the new structure
+- Work on the training time (possibly parallelization..)
+    - Profile speed and performance vs batch_size
 
-- Move functions outside of train (?)
+# EXPERIMENTS
 
-- Rethink the architecture: encoded coordinates, mean squared relative error, etc.
-    - Decrease the latent_size of the grid nodes!! 128 is an overkill for only the coordinates and the solution.. also saves memory
+- Try with optax.linear_onecycle_schedule
 
-- Investigate why increasing unroll_steps has very little effect
-    - Try adding a Gaussian noise
+- Train with different n_train to see how it scales with more data
+
+- Try mean squared relative error
+
+- Experiment with other physical features
+
+- Try the old normalization strategy again..
+
+## Autoregressive error accumulation
+I am out of ideas.
+
+## Grouping phenomenon
+- Try increasing overlap_factor
+- Try more mesh nodes (128x128)
+- Try masking the edges/nodes in message-passing
+
+### Error on steep gradients
+I suspect this is a consequent of the smoothing effect. Explore with different architectures.
+
+### Structural artifact in solutions
+- Explore with different architectures.
+- Try convolutional or message-passing step after the decoder
+
+## Sequential data
+- Implement and try the LSTM idea from presentation-240315-updates
+- Simpler than LSTM: Just sum the hidden mesh nodes before decoder
+
+## OTHER
+
+- Train with fewer time steps and try extrapolating
 
 # 1D datasets from Equer and Welling (?)
-
+- Adopt the 1D datasets to the new structure
 - RE-GENERATE THE DATA !! PARAMETERS ARE REPEATED !!
 - Change the structure of the data and support all datasets
 - Adopt the models from the other works and extend your repo
 - Reproduce the experiments of the other works
 
-# EXPERIMENT
-
-- Train with fewer time steps (128 / 64) and try extrapolating
-
 # LATER
+
+- Move functions outside of main::train (?)
 
 - It has been confirmed that updating the gradients more often is better.
     - Consider changing the pmap strategy to speed up the convergence.
