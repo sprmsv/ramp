@@ -1,12 +1,8 @@
 # PRIORITY
 
-- Check E076 and wrap up the unrolled trainings: STOP WITH UNROLLED TRAINING
-
-- The goal is to predict the final time-step !!
-    - Add an option for skipping the steps in-between
+- The goal is to predict the final timestep !!
     - Calculate and report the errors of the final time-step
-
-- Check E080 and update the results of the ablation study
+    - Re-read everything carefully: ndt, residuals, batch_size, jump_steps, num_jumps, lead_times, etc.
 
 - Run another ablation study
     - Increase the message-passing steps

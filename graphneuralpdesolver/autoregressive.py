@@ -70,10 +70,11 @@ class OperatorNormalizer:
 
 class AutoregressivePredictor:
 
-  def __init__(self, operator: AbstractOperator, num_steps_direct: int = 1):
+  def __init__(self, operator: AbstractOperator, num_steps_direct: int = 1, ndt_base: int = 1):
     # FIXME: Maybe we can benefit from checkpointing scan_fn instead
     self._apply_operator = jax.checkpoint(operator.apply)
     self.num_steps_direct = num_steps_direct
+    self.ndt_base = 1
 
   def unroll(self, variables: flax.typing.VariableDict,
     specs: Array, u_inp: Array, num_steps: int) -> Array:
@@ -101,7 +102,7 @@ class AutoregressivePredictor:
     u_next, rollout_full = jax.lax.scan(
       f=scan_fn_autoregressive,
       init=u_inp,
-      xs=ndt_tiled,
+      xs=(ndt_tiled * self.ndt_base),
       length=num_jumps
     )
     rollout_full = rollout_full.swapaxes(0, 1)
@@ -116,7 +117,7 @@ class AutoregressivePredictor:
       u_next, rollout_part = jax.lax.scan(
         f=scan_fn_autoregressive,
         init=u_next,
-        xs=ndt_tiled,
+        xs=(ndt_tiled * self.ndt_base),
         length=1
       )
       rollout_part = rollout_part.swapaxes(0, 1)
@@ -135,7 +136,11 @@ class AutoregressivePredictor:
 
     def scan_fn(u_inp, forcing):
       u_out = self._apply_operator(
-        variables, specs=specs, u_inp=u_inp, ndt=self.num_steps_direct)
+        variables,
+        specs=specs,
+        u_inp=u_inp,
+        ndt=(self.ndt_base * self.num_steps_direct)
+      )
       u_inp_next = u_out
       rollout = None
       return u_inp_next, rollout

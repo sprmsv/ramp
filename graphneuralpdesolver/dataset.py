@@ -19,12 +19,14 @@ NT_SUPER_RESOLUTION = 256
 
 class Dataset:
 
-  def __init__(self, dir: str, n_train: int, n_valid: int, n_test: int,
-      key: flax.typing.PRNGKey, dummy: bool = False,
+  def __init__(self, key: flax.typing.PRNGKey, dir: str,
+      n_train: int, n_valid: int, n_test: int,
+      cutoff: int = None, downsample_factor: int = 1,
     ):
     self.reader = h5py.File(dir, 'r')
     self.length = len([k for k in self.reader.keys() if 'sample' in k])
-    self.dummy = dummy
+    self.cutoff = cutoff if (cutoff is not None) else (self._fetch(0, raw=True)[0].shape[1])
+    self.downsample_factor = downsample_factor
     self.sample = self._fetch(0)
     self.shape = self.sample[0].shape
 
@@ -42,8 +44,8 @@ class Dataset:
     self.mean_trj, self.std_trj = None, None
     self.mean_res, self.std_res = None, None
 
-  def compute_stats(self, residual_steps: int = 0):
-    assert residual_steps > 0
+  def compute_stats(self, residual_steps: int = 0, skip_residual_steps: int = 1):
+    assert residual_steps >= 0
     assert residual_steps < self.shape[1]
 
     # Compute mean of trajectories
@@ -60,56 +62,50 @@ class Dataset:
         _mean_samples += np.power(self.train(idx)[0] - self.mean_trj, 2) / self.nums['train']
       self.std_trj = np.sqrt(np.mean(_mean_samples, axis=1, keepdims=True))
 
-    if residual_steps:
-      _get_res = lambda s, trj: trj[:, (s+1):] - trj[:, :-(s+1)]
+    if residual_steps > 0:
+      _get_res = lambda s, trj: trj[:, (s):] - trj[:, :-(s)]
 
       # Compute mean of residuals
       _mean_samples = [
         np.zeros_like(_get_res(s, self.sample[0]))
-        for s in range(residual_steps)
+        for s in range(1, residual_steps+1)
       ]
       for idx in range(self.nums['train']):
         trj = self.train(idx)[0]
-        for s in range(residual_steps):
-          _mean_samples[s] += _get_res(s, trj) / self.nums['train']
+        for s in range(1, residual_steps+1):
+          if (s % skip_residual_steps):
+            continue
+          _mean_samples[s-1] += _get_res(s, trj) / self.nums['train']
       self.mean_res = [
-        np.mean(_mean_samples[s], axis=1, keepdims=True)
-        for s in range(residual_steps)
+        np.mean(_mean_samples[s-1], axis=1, keepdims=True)
+        for s in range(1, residual_steps+1)
       ]
 
       # Compute std of residuals
       _mean_samples = [
         np.zeros_like(_get_res(s, self.sample[0]))
-        for s in range(residual_steps)
+        for s in range(1, residual_steps+1)
       ]
       for idx in range(self.nums['train']):
         trj = self.train(idx)[0]
-        for s in range(residual_steps):
-          _mean_samples[s] += np.power(_get_res(s, trj) - self.mean_res[s], 2) / self.nums['train']
+        for s in range(1, residual_steps+1):
+          if (s % skip_residual_steps):
+            continue
+          _mean_samples[s-1] += np.power(
+            _get_res(s, trj) - self.mean_res[s-1], 2) / self.nums['train']
       self.std_res = [
-        np.sqrt(np.mean(_mean_samples[s], axis=1, keepdims=True))
-        for s in range(residual_steps)
+        np.sqrt(np.mean(_mean_samples[s-1], axis=1, keepdims=True))
+        for s in range(1, residual_steps+1)
       ]
 
-  def _fetch(self, idx):
-    if not self.dummy:
-      traj = self.reader[f'sample_{str(idx)}'][:]
-      traj = traj[None, ...]
-      traj = np.moveaxis(traj, source=(2, 3, 4), destination=(4, 2, 3))
-      spec = None
+  def _fetch(self, idx: int, raw: bool = False):
+    traj = self.reader[f'sample_{str(idx)}'][:]
+    traj = traj[None, ...]
+    traj = np.moveaxis(traj, source=(2, 3, 4), destination=(4, 2, 3))
+    spec = None
 
-    # Generate a random sample of a dummy dataset
-    else:
-      k1, k2, k3, k4 = jax.random.randint(jax.random.PRNGKey(idx), (4,), 0, 4) + 1
-      a_0 = np.tile(np.sin(np.arange(128) / 128 * k1 * 2 * np.pi).reshape(1, 1, 1, 128), reps=(1, 1, 128, 1))
-      a_1 = np.tile(np.sin(np.arange(128) / 128 * k2 * 2 * np.pi).reshape(1, 1, 128, 1), reps=(1, 1, 1, 128))
-      b_0 = np.tile(np.cos(np.arange(128) / 128 * k3 * 2 * np.pi).reshape(1, 1, 1, 128), reps=(1, 1, 128, 1))
-      b_1 = np.tile(np.cos(np.arange(128) / 128 * k4 * 2 * np.pi).reshape(1, 1, 128, 1), reps=(1, 1, 1, 128))
-      a = a_0 + a_1
-      b = b_0 + b_1
-      c = np.stack([a, b], axis=-1)
-      traj = np.concatenate([np.roll(c, shift=2*i, axis=(2, 3)) for i in range(21)], axis=1)
-      spec = None
+    if not raw:
+      traj = traj[:, :(self.cutoff):self.downsample_factor]
 
     return traj, spec
 
@@ -162,7 +158,6 @@ def read_datasets(dir: Union[Path, str], pde_type: str, experiment: str, nx: int
   """Reads a dataset from its source file and prepares the shapes and specifications."""
 
   dir = Path(dir)
-  assert dir.is_dir(), f'The path {dir} is not a directory.'
   datasets = {
     mode: _read_dataset_attributes(
       h5group=h5py.File(dir / f'{pde_type}_{mode}_{experiment}.h5')[mode],
@@ -190,7 +185,6 @@ def _read_dataset_attributes(h5group: h5py.Group, nx: int, nt: int) -> dict[str,
   if trajectories.ndim == 3:
     trajectories = trajectories[:, None]
   dataset = dict(
-    specs = np.stack([h5group[k][:] for k in h5group.keys() if 'pde' not in k], axis=-1),
     trajectories = np.moveaxis(trajectories, (1, 2, 3), (3, 1, 2)),
     x = h5group[resolution].attrs['x'],
     # dx = h5group[resolution].attrs['dx'].item(),
