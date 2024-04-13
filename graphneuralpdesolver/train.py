@@ -531,14 +531,8 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
       # TODO: Add evaluation at the final time-step
 
       # Evaluate autoregressive prediction
-      # Get the input/target time indices
-      idx_time = np.arange(num_times)
-      idx_inp = idx_time[:1]
-      idx_tgt = idx_time[:]
-      # Split the dataset along the time axis
-      u_inp = trajs[:, :, idx_inp]
-      u_tgt = trajs[:, :, idx_tgt]
-      # Get predictions and target
+      u_inp = trajs[:, :, :1]
+      u_tgt = trajs[:, :, :]
       u_prd = _predict_trajectory_autoregressively(state, specs, u_inp, num_times)
       # Re-arrange the predictions gotten from each device
       u_prd = u_prd.reshape(batch_size_per_device * NUM_DEVICES, *u_prd.shape[2:])

@@ -74,7 +74,7 @@ class AutoregressivePredictor:
     # FIXME: Maybe we can benefit from checkpointing scan_fn instead
     self._apply_operator = jax.checkpoint(operator.apply)
     self.num_steps_direct = num_steps_direct
-    self.ndt_base = 1
+    self.ndt_base = ndt_base
 
   def unroll(self, variables: flax.typing.VariableDict,
     specs: Array, u_inp: Array, num_steps: int) -> Array:
