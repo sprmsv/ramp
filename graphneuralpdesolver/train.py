@@ -97,10 +97,12 @@ flags.DEFINE_integer(name='num_message_passing_steps', default=6, required=False
 
 @dataclass
 class EvalMetrics:
-  error_autoreg_l1: float = None
-  error_autoreg_l2: float = None
   error_direct_l1: float = None
   error_direct_l2: float = None
+  error_rollout_l1: float = None
+  error_rollout_l2: float = None
+  error_final_l1: float = None
+  error_final_l2: float = None
 
 DIR = DIR_EXPERIMENTS / datetime.now().strftime('%Y%m%d-%H%M%S.%f')
 
@@ -163,11 +165,8 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
       u_inp=u_lag,
       num_jumps=num_steps_autoreg,
     )
-    # Get the output
-    # NOTE: using checkpointed version to avoid memory exhaustion
-    # TRY: Change it back to model.apply to get more performance, although it is only one step..
-    # u_prd = predictor._apply_operator(variables, specs=specs, u_inp=u_inp, ndt=ndt)
 
+    # Get the output
     _loss_inputs = normalizer.get_loss_inputs(
       variables=variables,
       specs=specs,
@@ -201,7 +200,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
     """
 
     # Split the unrolling steps randomly to cut the gradients along the way
-    # MODIFY: Change to JAX-generated random number (reproducability)
+    # MODIFY: Change to JAX-generated random number for reproducability
     noise_steps = np.random.choice(unroll_steps+1)
     grads_steps = unroll_steps - noise_steps
 
@@ -394,28 +393,6 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
 
     return state, loss_epoch, grad_epoch
 
-  @functools.partial(jax.pmap,
-      in_axes=(None, 0, 0, None),
-      static_broadcasted_argnums=(3,))
-  def _predict_trajectory_autoregressively(
-      state: TrainState, specs: Array, u_inp: Array, num_steps: int,
-    ) -> Array:
-    """
-    Predicts the trajectories autoregressively.
-    The input dataset must be raw (not normalized).
-    """
-
-    # Get predictions
-    variables = {'params': state.params}
-    rollout, _ = predictor.unroll(
-      variables=variables,
-      specs=specs,
-      u_inp=u_inp,
-      num_steps=num_steps,
-    )
-
-    return rollout
-
   @functools.partial(jax.pmap, in_axes=(None, 0, 0))
   def _evaluate_direct_prediction(
     state: TrainState, trajs: Array, specs: Array) -> Tuple[Array, Array]:
@@ -475,27 +452,80 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
 
     return err_l1_mean, err_l2_mean
 
+  @functools.partial(jax.pmap, in_axes=(None, 0, 0))
+  def _evaluate_rollout_prediction(
+      state: TrainState, trajs: Array, specs: Array
+    ) -> Array:
+    """
+    Predicts the trajectories autoregressively.
+    The input dataset must be raw (not normalized).
+    Inputs are of shape [batch_size_per_device, ...]
+    """
+
+    # Set input and target
+    u_inp = trajs[:, :1]
+    u_tgt = trajs
+
+    # Get unrolled predictions
+    variables = {'params': state.params}
+    u_prd, _ = predictor.unroll(
+      variables=variables,
+      specs=specs,
+      u_inp=u_inp,
+      num_steps=num_times,
+    )
+
+    # Calculate the errors
+    err_l1 = jnp.sqrt(jnp.sum(jnp.power(rel_l1_error(u_prd, u_tgt), 2), axis=1))
+    err_l2 = jnp.sqrt(jnp.sum(jnp.power(rel_l2_error(u_prd, u_tgt), 2), axis=1))
+
+    return err_l1, err_l2
+
+  @functools.partial(jax.pmap, in_axes=(None, 0, 0))
+  def _evaluate_final_prediction(
+      state: TrainState, trajs: Array, specs: Array
+    ) -> Array:
+
+    # Set input and target
+    u_inp = trajs[:, :1]
+    u_tgt = trajs[:, -1:]
+
+    # Get prediction at the final step
+    variables = {'params': state.params}
+    u_prd = predictor.jump(
+      variables=variables,
+      specs=specs,
+      u_inp=u_inp,
+      num_jumps=((len_traj - 1) // (direct_steps * jump_steps)),
+    )
+
+    # Calculate the errors
+    err_l1 = jnp.sqrt(jnp.sum(jnp.power(rel_l1_error(u_prd, u_tgt), 2), axis=1))
+    err_l2 = jnp.sqrt(jnp.sum(jnp.power(rel_l2_error(u_prd, u_tgt), 2), axis=1))
+
+    return err_l1, err_l2
+
   def evaluate(
     state: TrainState, batches: Iterable[Tuple[Array, Array]]) -> EvalMetrics:
     """Evaluates the model on a dataset based on multiple trajectory lengths."""
 
-    error_ar_l1_per_var = []
-    error_ar_l2_per_var = []
-    error_ar_l1 = []
-    error_ar_l2 = []
     error_dr_l1 = []
     error_dr_l2 = []
+    error_ro_l1 = []
+    error_ro_l2 = []
+    error_fn_l1 = []
+    error_fn_l2 = []
 
     for batch in batches:
       # Unwrap the batch
       batch = jax.tree_map(jax.device_put, batch)  # Transfer to device memory
-      trajs, specs = batch
+      trajs_raw, specs_raw = batch
 
       # Downsample the trajectories
       # -> [batch_size * jump_steps, num_times, ...]
       # NOTE: The last timestep is excluded to make the length of all the trajectories even
       trajs = jnp.concatenate(jnp.split(
-          (trajs[:, :-1]
+          (trajs_raw[:, :-1]
           .reshape(FLAGS.batch_size, (len_traj-1) // jump_steps, jump_steps, *num_grid_points, num_vars)
           .swapaxes(1, 2)
           .reshape(FLAGS.batch_size, (len_traj-1), *num_grid_points, num_vars)),
@@ -503,7 +533,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
           axis=1),
         axis=0,
       )
-      specs = (jnp.tile(specs, jump_steps)
+      specs = (jnp.tile(specs_raw, jump_steps)
         .reshape(FLAGS.batch_size, jump_steps, -1)
         .swapaxes(0, 1)
         .reshape(FLAGS.batch_size * jump_steps, -1)
@@ -527,34 +557,51 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
       error_dr_l1.append(_error_dr_l1_batch)
       error_dr_l2.append(_error_dr_l2_batch)
 
-
-      # TODO: Add evaluation at the final time-step
-
-      # Evaluate autoregressive prediction
-      u_inp = trajs[:, :, :1]
-      u_tgt = trajs[:, :, :]
-      u_prd = _predict_trajectory_autoregressively(state, specs, u_inp, num_times)
-      # Re-arrange the predictions gotten from each device
-      u_prd = u_prd.reshape(batch_size_per_device * NUM_DEVICES, *u_prd.shape[2:])
-      u_tgt = u_tgt.reshape(batch_size_per_device * NUM_DEVICES, *u_tgt.shape[2:])
+      # Evaluate rollout prediction
+      _error_ro_l1_batch, _error_ro_l2_batch = _evaluate_rollout_prediction(
+        state, trajs, specs
+      )
+      # Re-arrange the sub-batches gotten from each device
+      _error_ro_l1_batch = _error_ro_l1_batch.reshape(batch_size_per_device * NUM_DEVICES, 1)
+      _error_ro_l2_batch = _error_ro_l2_batch.reshape(batch_size_per_device * NUM_DEVICES, 1)
       # Compute and store metrics
-      error_ar_l1_per_var.append(rel_l1_error(u_prd, u_tgt))
-      error_ar_l2_per_var.append(rel_l2_error(u_prd, u_tgt))
+      error_ro_l1.append(_error_ro_l1_batch)
+      error_ro_l2.append(_error_ro_l2_batch)
+
+      # Split the batch between devices
+      # -> [NUM_DEVICES/jump_steps, batch_size_per_device, ...]
+      trajs = jnp.concatenate(jnp.split(jnp.expand_dims(
+        trajs_raw, axis=0), (NUM_DEVICES // jump_steps), axis=1), axis=0)
+      specs = jnp.concatenate(jnp.split(jnp.expand_dims(
+        specs_raw, axis=0), NUM_DEVICES, axis=1), axis=0) if _use_specs else None
+
+      # Evaluate final prediction
+      _error_fn_l1_batch, _error_fn_l2_batch = _evaluate_final_prediction(
+        state, trajs, specs,
+      )
+      # Re-arrange the sub-batches gotten from each device
+      _error_fn_l1_batch = _error_fn_l1_batch.reshape(batch_size_per_device * (NUM_DEVICES // jump_steps), 1)
+      _error_fn_l2_batch = _error_fn_l2_batch.reshape(batch_size_per_device * (NUM_DEVICES // jump_steps), 1)
+      # Append the errors to the list
+      error_fn_l1.append(_error_fn_l1_batch)
+      error_fn_l2.append(_error_fn_l2_batch)
 
     # Aggregate over the batch dimension and compute norm per variable
     error_dr_l1 = jnp.median(jnp.concatenate(error_dr_l1), axis=0).item()
     error_dr_l2 = jnp.median(jnp.concatenate(error_dr_l2), axis=0).item()
-    error_l1_per_var_agg = jnp.median(jnp.concatenate(error_ar_l1_per_var), axis=0)
-    error_l2_per_var_agg = jnp.median(jnp.concatenate(error_ar_l2_per_var), axis=0)
-    error_ar_l1 = jnp.sqrt(jnp.sum(jnp.power(error_l1_per_var_agg, 2))).item()
-    error_ar_l2 = jnp.sqrt(jnp.sum(jnp.power(error_l2_per_var_agg, 2))).item()
+    error_ro_l1 = jnp.median(jnp.concatenate(error_ro_l1), axis=0).item()
+    error_ro_l2 = jnp.median(jnp.concatenate(error_ro_l2), axis=0).item()
+    error_fn_l1 = jnp.median(jnp.concatenate(error_fn_l1), axis=0).item()
+    error_fn_l2 = jnp.median(jnp.concatenate(error_fn_l2), axis=0).item()
 
     # Build the metrics object
     metrics = EvalMetrics(
-      error_autoreg_l1=error_ar_l1,
-      error_autoreg_l2=error_ar_l2,
       error_direct_l1=error_dr_l1,
       error_direct_l2=error_dr_l2,
+      error_rollout_l1=error_ro_l1,
+      error_rollout_l2=error_ro_l2,
+      error_final_l1=error_fn_l1,
+      error_final_l2=error_fn_l2,
     )
 
     return metrics
@@ -579,8 +626,9 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
     f'LR: {state.opt_state.hyperparams["learning_rate"].item() : .2e}',
     f'RMSE: {0. : .2e}',
     f'GRAD: {0. : .2e}',
-    f'L2-AR: {metrics_val.error_autoreg_l2 * 100 : .2f}%',
     f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
+    f'L2-RO: {metrics_val.error_rollout_l2 * 100 : .2f}%',
+    f'L2-FN: {metrics_val.error_final_l2 * 100 : .2f}%',
   ]))
 
   # Set up the checkpoint manager
@@ -590,7 +638,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
     checkpointer_options = orbax.checkpoint.CheckpointManagerOptions(
       max_to_keep=1,
       keep_period=None,
-      best_fn=(lambda metrics: metrics['valid']['autoreg']['l2']),  # TODO: Get the final timestep instead
+      best_fn=(lambda metrics: metrics['valid']['final']['l2']),
       best_mode='min',
       create=True,)
     checkpointer_save_args = orbax_utils.save_args_from_target(target={'state': state})
@@ -629,31 +677,40 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
       f'LR: {state.opt_state.hyperparams["learning_rate"].item() : .2e}',
       f'RMSE: {np.sqrt(loss).item() : .2e}',
       f'GRAD: {grad.item() : .2e}',
-      f'L2-AR: {metrics_val.error_autoreg_l2 * 100 : .2f}%',
       f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
+      f'L2-RO: {metrics_val.error_rollout_l2 * 100 : .2f}%',
+      f'L2-FN: {metrics_val.error_final_l2 * 100 : .2f}%',
     ]))
 
     with disable_logging(level=logging.FATAL):
       checkpoint_metrics = {
         'loss': loss.item(),
         'train': {
-          'autoreg': {
-            'l1': metrics_trn.error_autoreg_l1,
-            'l2': metrics_trn.error_autoreg_l2,
-          },
           'direct': {
             'l1': metrics_trn.error_direct_l1,
             'l2': metrics_trn.error_direct_l2,
           },
+          'rollout': {
+            'l1': metrics_trn.error_rollout_l1,
+            'l2': metrics_trn.error_rollout_l2,
+          },
+          'final': {
+            'l1': metrics_trn.error_final_l1,
+            'l2': metrics_trn.error_final_l2,
+          },
         },
         'valid': {
-          'autoreg': {
-            'l1': metrics_val.error_autoreg_l1,
-            'l2': metrics_val.error_autoreg_l2,
-          },
           'direct': {
             'l1': metrics_val.error_direct_l1,
             'l2': metrics_val.error_direct_l2,
+          },
+          'rollout': {
+            'l1': metrics_val.error_rollout_l1,
+            'l2': metrics_val.error_rollout_l2,
+          },
+          'final': {
+            'l1': metrics_val.error_final_l1,
+            'l2': metrics_val.error_final_l2,
           },
         },
       }
