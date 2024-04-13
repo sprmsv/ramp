@@ -1,17 +1,16 @@
 # PRIORITY
 
-- The goal is to predict the final timestep !!
-    - Calculate and report the errors of the final time-step
-    - Re-read everything carefully: ndt, residuals, batch_size, jump_steps, num_jumps, lead_times, etc.
+- Validate the numbers reported in the new trainings
+    - Download trained parameters and run in the notebook
 
 - Run another ablation study
     - Increase the message-passing steps
-    - Decreasse the mesh architecture to 64x64
+    - Decreasse the mesh grid to 32x32
     - Fewer samples / more epochs to get the full potential of the models
     - This time, also try MM128 with OF0.1 (for discontinuities..)
     - Separate the latent_size of the grid nodes and the mesh nodes
 
-- Experiment with all datasets (pwc, sin, gauss, vortex_sheet, etc.)
+- Experiment with all datasets
 
 - Work on the training time (possibly parallelization..)
     - Profile speed and performance vs batch_size

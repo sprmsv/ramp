@@ -36,8 +36,11 @@ flags.DEFINE_string(name='datadir', default=None, required=True,
 flags.DEFINE_string(name='params', default=None, required=False,
   help='Path of the previous experiment containing the initial parameters'
 )
-flags.DEFINE_string(name='experiment', default=None, required=True,
-  help='Name of the experiment: {"bm", "sin", "gauss", ...}'
+flags.DEFINE_string(name='subpath', default=None, required=True,
+  help='Relative path inside the data directory'
+)
+flags.DEFINE_string(name='dataset', default=None, required=True,
+  help='Name of the dataset: {"bm", "sin", "gauss", ...}'
 )
 
 # FLAGS::training
@@ -753,10 +756,11 @@ def main(argv):
   key = jax.random.PRNGKey(SEED)
 
   # Read the dataset
-  experiment = FLAGS.experiment
   dataset = Dataset(
     key=key,
-    dir='/'.join([FLAGS.datadir, (experiment + '.nc')]),
+    datadir=FLAGS.datadir,
+    subpath=FLAGS.subpath,
+    name=FLAGS.dataset,
     n_train=FLAGS.n_train,
     n_valid=FLAGS.n_valid,
     n_test=FLAGS.n_test,
@@ -766,6 +770,7 @@ def main(argv):
   dataset.compute_stats(
     residual_steps=(FLAGS.direct_steps * FLAGS.jump_steps),
     skip_residual_steps=FLAGS.jump_steps,
+    # batch_size=128,
   )
 
   # Read the checkpoint
