@@ -1,8 +1,9 @@
 from datetime import datetime
 import functools
 from time import time
-from typing import Tuple, Any, Mapping, Sequence, Union, Iterable, Callable
+from typing import Tuple, Any, Mapping, Iterable, Callable
 import json
+import pickle
 from dataclasses import dataclass
 
 from absl import app, flags, logging
@@ -137,10 +138,10 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
   time_int_pre = time()
 
   # Set the normalization statistics
-  stats_trj_mean = jax.device_put(jnp.array(dataset.mean_trj))
-  stats_trj_std = jax.device_put(jnp.array(dataset.std_trj))
-  stats_res_mean = jax.device_put(jnp.array(dataset.mean_res))
-  stats_res_std = jax.device_put(jnp.array(dataset.std_res))
+  stats_trj_mean = jax.device_put(jnp.array(dataset.stats['trj']['mean']))
+  stats_trj_std = jax.device_put(jnp.array(dataset.stats['trj']['std']))
+  stats_res_mean = jax.device_put(jnp.array(dataset.stats['res']['mean']))
+  stats_res_std = jax.device_put(jnp.array(dataset.stats['res']['std']))
 
   # Define the permissible lead times
   num_lead_times = num_times - unroll_offset - direct_steps
@@ -811,6 +812,9 @@ def main(argv):
       obj={'flags': flags, 'model_configs': model.configs},
       indent=2,
     )
+  # Store the statistics
+  with open(DIR / 'stats.pkl', 'wb') as f:
+    pickle.dump(file=f, obj=dataset.stats)
 
   # Split the epochs
   epochs_u00 = int(FLAGS.epochs // (1 + .2 * FLAGS.unroll_steps))

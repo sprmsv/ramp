@@ -182,8 +182,10 @@ class Dataset:
     }
 
     # Instantiate the dataset stats
-    self.mean_trj, self.std_trj = None, None
-    self.mean_res, self.std_res = None, None
+    self.stats = {
+      'trj': {'mean': None, 'std': None},
+      'res': {'mean': None, 'std': None},
+    }
 
   def compute_stats(self, residual_steps: int = 0,
       skip_residual_steps: int = 1, batch_size: int = None) -> None:
@@ -197,37 +199,37 @@ class Dataset:
       trj, _ = self.train(np.arange(self.nums['train']))
 
       # Compute statistics of the solutions
-      self.mean_trj = np.mean(trj, axis=(0, 1), keepdims=True)
-      self.std_trj = np.std(trj, axis=(0, 1), keepdims=True)
+      self.stats['trj']['mean'] = np.mean(trj, axis=(0, 1), keepdims=True)
+      self.stats['trj']['std'] = np.std(trj, axis=(0, 1), keepdims=True)
 
       # Compute statistics of the residuals
-      self.mean_res = []
-      self.std_res = []
+      self.stats['res']['mean'] = []
+      self.stats['res']['std'] = []
       for s in range(1, residual_steps+1):
         if (s % skip_residual_steps):
-          self.mean_res.append(np.zeros(shape=(1, 1, *self.shape[2:])))
-          self.std_res.append(np.zeros(shape=(1, 1, *self.shape[2:])))
+          self.stats['res']['mean'].append(np.zeros(shape=(1, 1, *self.shape[2:])))
+          self.stats['res']['std'].append(np.zeros(shape=(1, 1, *self.shape[2:])))
         res = _get_res(s, trj)
-        self.mean_res.append(np.mean(res, axis=(0, 1), keepdims=True))
-        self.std_res.append(np.std(res, axis=(0, 1), keepdims=True))
+        self.stats['res']['mean'].append(np.mean(res, axis=(0, 1), keepdims=True))
+        self.stats['res']['std'].append(np.std(res, axis=(0, 1), keepdims=True))
 
     else:
       # Compute mean of trajectories
-      if self.mean_trj is None:
+      if self.stats['trj']['mean'] is None:
         _mean_samples = np.zeros_like(self.sample[0])
         for trj, _ in self.batches(mode='train', batch_size=batch_size):
           _mean_samples += np.sum(
             trj, axis=0, keepdims=True) / self.nums['train']
-        self.mean_trj = np.mean(_mean_samples, axis=1, keepdims=True)
+        self.stats['trj']['mean'] = np.mean(_mean_samples, axis=1, keepdims=True)
 
       # Compute std of trajectories
-      if self.std_trj is None:
+      if self.stats['trj']['std'] is None:
         _mean_samples = np.zeros_like(self.sample[0])
         for trj, _ in self.batches(mode='train', batch_size=batch_size):
           _mean_samples += np.sum(np.power(
-            trj - self.mean_trj, 2), axis=0, keepdims=True
+            trj - self.stats['trj']['mean'], 2), axis=0, keepdims=True
           ) / self.nums['train']
-        self.std_trj = np.sqrt(np.mean(_mean_samples, axis=1, keepdims=True))
+        self.stats['trj']['std'] = np.sqrt(np.mean(_mean_samples, axis=1, keepdims=True))
 
       if residual_steps > 0:
 
@@ -242,7 +244,7 @@ class Dataset:
               continue
             _mean_samples[s-1] += np.sum(
               _get_res(s, trj), axis=0, keepdims=True) / self.nums['train']
-        self.mean_res = [
+        self.stats['res']['mean'] = [
           np.mean(_mean_samples[s-1], axis=1, keepdims=True)
           for s in range(1, residual_steps+1)
         ]
@@ -257,9 +259,9 @@ class Dataset:
             if (s % skip_residual_steps):
               continue
             _mean_samples[s-1] += np.sum(np.power(
-              _get_res(s, trj) - self.mean_res[s-1], 2), axis=0, keepdims=True
+              _get_res(s, trj) - self.stats['res']['mean'][s-1], 2), axis=0, keepdims=True
             ) / self.nums['train']
-        self.std_res = [
+        self.stats['res']['std'] = [
           np.sqrt(np.mean(_mean_samples[s-1], axis=1, keepdims=True))
           for s in range(1, residual_steps+1)
         ]

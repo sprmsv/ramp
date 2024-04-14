@@ -1,7 +1,7 @@
 # PRIORITY
 
-- Validate the numbers reported in the new trainings
-    - Download trained parameters and run in the notebook
+- Validate the numbers reported in the trainings
+    - Try with the same statistics (load them)
 
 - Run another ablation study
     - Increase the message-passing steps
