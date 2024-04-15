@@ -217,10 +217,10 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
 
     return loss, grads
 
-  def _get_loss_and_grads_direct_step(
+  def _update_state_per_direct_step(
     state: TrainState, key: flax.typing.PRNGKey,
     specs: Array, u_lag: Array, u_tgt: Array, ndt: int,
-  ) -> Tuple[Array, PyTreeDef]:
+  ) -> Tuple[TrainState, Array, PyTreeDef]:
     # NOTE: INPUT SHAPES [batch_size_per_device * num_lead_times, ...]
 
     # Shuffle the input/outputs along the batch axis
@@ -236,34 +236,43 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
     u_tgt = jnp.stack(jnp.split(u_tgt, num_lead_times))
 
     # Add loss and gradients for each mini batch
-    def _update_loss_and_grads_lead_time(i, carry):
-      _loss_carried, _grads_carried = carry
+    def _update_state_per_lead_time(i, carry):
+      # Update state, loss, and gradients
+      _state, _loss_carried, _grads_carried = carry
       _loss_lead_time, _grads_lead_time = _get_loss_and_grads(
-        params=state.params,
+        params=_state.params,
         specs=(specs[i] if _use_specs else None),
         u_lag=u_lag[i],
         u_tgt=u_tgt[i],
         ndt=ndt,
       )
+      # Synchronize loss and gradients
+      _loss_lead_time = jax.lax.pmean(_loss_lead_time, axis_name="device")
+      _grads_lead_time = jax.lax.pmean(_grads_lead_time, axis_name="device")
+      # Apply gradients
+      _state = _state.apply_gradients(grads=_grads_lead_time)
+      # Update the carried mean loss and gradient of the minibatch
       _loss_updated = _loss_carried + _loss_lead_time / num_lead_times
       _grads_updated = jax.tree_map(
         lambda g_old, g_new: (g_old + g_new / num_lead_times),
         _grads_carried,
         _grads_lead_time
       )
-      return _loss_updated, _grads_updated
+
+      return _state, _loss_updated, _grads_updated
 
     # Loop over lead_times
+    _init_state = state
     _init_loss = 0.
     _init_grads = jax.tree_map(lambda p: jnp.zeros_like(p), state.params)
-    loss, grads = jax.lax.fori_loop(
+    state, loss, grads = jax.lax.fori_loop(
       lower=0,
       upper=num_lead_times,
-      body_fun=_update_loss_and_grads_lead_time,
-      init_val=(_init_loss, _init_grads)
+      body_fun=_update_state_per_lead_time,
+      init_val=(_init_state, _init_loss, _init_grads)
     )
 
-    return loss, grads
+    return state, loss, grads
 
   @functools.partial(jax.pmap,
     in_axes=(None, 0, 0, None),
@@ -308,45 +317,46 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
     u_tgt_batch = jnp.expand_dims(u_tgt_batch, axis=2).swapaxes(0, 1)  # -> [direct_steps, ...]
 
     # Shuffle direct_steps
-    # NOTE: Redundent because we apply gradients on the whole batch
-    # key, subkey = jax.random.split(key)
-    # ndt_batch, u_tgt_batch = shuffle_arrays(subkey, [ndt_batch, u_tgt_batch])
+    key, subkey = jax.random.split(key)
+    ndt_batch, u_tgt_batch = shuffle_arrays(subkey, [ndt_batch, u_tgt_batch])
 
     # Add loss and gradients for each direct_step
-    def _update_loss_and_grads_direct_step(i, carry):
-      _loss_carried, _grads_carried = carry
-      _loss_direct_step, _grads_direct_step = _get_loss_and_grads_direct_step(
-        state=state,
+    def _update_state(i, carry):
+      # Update state, loss, and gradients
+      _state, _loss_carried, _grads_carried = carry
+      _state, _loss_direct_step, _grads_direct_step = _update_state_per_direct_step(
+        state=_state,
         key=subkeys[i],
         specs=(specs_batch if _use_specs else None),
         u_lag=u_lag_batch,
         u_tgt=u_tgt_batch[i],
         ndt=ndt_batch[i],
       )
+      # Update the carried loss and gradients of the minibatch
       _loss_updated = _loss_carried + _loss_direct_step / direct_steps
       _grads_updated = jax.tree_map(
         lambda g_old, g_new: (g_old + g_new / direct_steps),
         _grads_carried,
         _grads_direct_step,
       )
-      return _loss_updated, _grads_updated
+
+      return _state, _loss_updated, _grads_updated
 
     # Loop over the direct_steps
+    _init_state = state
     _init_loss = 0.
     _init_grads = jax.tree_map(lambda p: jnp.zeros_like(p), state.params)
-    loss, grads = jax.lax.fori_loop(
+    state, loss, grads = jax.lax.fori_loop(
       lower=0,
       upper=direct_steps,
-      body_fun=_update_loss_and_grads_direct_step,
-      init_val=(_init_loss, _init_grads)
+      body_fun=_update_state,
+      init_val=(_init_state, _init_loss, _init_grads)
     )
 
     # Synchronize loss and gradients
-    grads = jax.lax.pmean(grads, axis_name="device")
-    loss = jax.lax.pmean(loss, axis_name="device")
-
-    # Apply gradients
-    state = state.apply_gradients(grads=grads)
+    # NOTE: Redundent since they are synchronized everytime before being applied
+    # loss = jax.lax.pmean(loss, axis_name="device")
+    # grads = jax.lax.pmean(grads, axis_name="device")
 
     return state, loss, grads
 
