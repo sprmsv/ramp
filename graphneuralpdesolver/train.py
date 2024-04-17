@@ -27,7 +27,7 @@ from graphneuralpdesolver.metrics import mse, rel_l2_error, rel_l1_error
 
 
 SEED = 44
-NUM_DEVICES = jax.local_device_count()
+NUM_DEVICES = jax.device_count()
 
 # FLAGS::general
 FLAGS = flags.FLAGS
