@@ -1,24 +1,33 @@
-# PRIORITY
+# NEXT STEPS
 
-- Check and report the numbers in E100 and E101
 
 - Experiment with all datasets
+    - (MM32/16, MLP1, OF1) might be better
+    - Train with both T08 and T09
 
-- Work on the training time (possibly parallelization..)
+- Train with many (>8) GPUs and big batches to show off the speed
+- Profile and report the time with different T and G
 
-- Separate the latent_size of the grid nodes and the mesh nodes
+- Check E104 and add new results to the report for brownian_bridge
 
 # EXPERIMENTS
 
+- Try the old normalization strategy again..
+
 - Try with optax.linear_onecycle_schedule
+    - Maybe you can increase the learning rate and converge in fewer epochs this way
 
-- Train with different n_train to see how it scales with more data
+- Start from parameters of brownian_bridge and train for another dataset
 
-- Try mean squared relative error
+- Run ablation studies with models that fully reach their potential !!
+    - Data reach regime
+    - Long trainings
 
 - Experiment with other physical features
 
-- Try the old normalization strategy again..
+- Try mean squared relative error
+
+- Train with different n_train to see how it scales with more data
 
 ## Grouping phenomenon
 - Try increasing overlap_factor
@@ -42,10 +51,6 @@ I suspect this is a consequent of the smoothing effect. Explore with different a
 
 # LATER
 
-- Move functions outside of main::train (?)
-
-- Multihost JAX training
-
 - Normalize the inputs and residuals based on the time index
     -> Different statistics per timestep
     -> Imagine an explosion, the statistics are very different across time
@@ -66,4 +71,3 @@ I suspect this is a consequent of the smoothing effect. Explore with different a
 - Change the structure of the data and support all datasets
 - Adopt the models from the other works and extend your repo
 - Reproduce the experiments of the other works
-

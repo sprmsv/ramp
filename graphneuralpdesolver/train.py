@@ -858,9 +858,13 @@ def main(argv):
   # Train the model without unrolling
   epochs_trained = 0
   num_batches = dataset.nums['train'] // FLAGS.batch_size
+  num_times = (dataset.sample[0].shape[1] - 1) // FLAGS.jump_steps
+  unroll_offset = FLAGS.unroll_steps * FLAGS.direct_steps
+  num_lead_times = num_times - unroll_offset - FLAGS.direct_steps
+  assert num_lead_times > 0
   lr = optax.cosine_decay_schedule(
     init_value=FLAGS.lr,
-    decay_steps=(epochs_u00 * num_batches),
+    decay_steps=(epochs_u00 * num_batches) * FLAGS.direct_steps * num_lead_times,
     alpha=FLAGS.lr_decay,
   ) if FLAGS.lr_decay else FLAGS.lr
   tx = optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-8)
