@@ -1,20 +1,20 @@
 # NEXT STEPS
 
-
-- Experiment with all datasets
-    - (MM32/16, MLP1, OF1) might be better
-    - Train with both T08 and T09
-
-- Train with many (>8) GPUs and big batches to show off the speed
-- Profile and report the time with different T and G
-
 - Check E104 and add new results to the report for brownian_bridge
+    - Compare different architectures + check for overfitting
+- Check E105 and report the numbers to show off speed
+- Check E106 and report the numbers
+- Prepare update slides
+
+- Add the ignored pairs to your training
+    - This way you can increase direct_steps even for short trajectories
 
 # EXPERIMENTS
 
 - Try the old normalization strategy again..
 
-- Try with optax.linear_onecycle_schedule
+- Try with other learning rates and decays
+    - Try with optax.linear_onecycle_schedule
     - Maybe you can increase the learning rate and converge in fewer epochs this way
 
 - Start from parameters of brownian_bridge and train for another dataset

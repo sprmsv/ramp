@@ -161,11 +161,13 @@ class Dataset:
   def __init__(self, key: flax.typing.PRNGKey,
       datadir: str, subpath: str, name: str,
       n_train: int, n_valid: int, n_test: int,
+      idx_vars: Union[int, Sequence] = None,
       cutoff: int = None, downsample_factor: int = 1,
     ):
     self.datagroup = DATAGROUP[subpath]
     self.reader = h5py.File(Path(datadir) / subpath / f'{name}.nc', 'r')
     self.length = self.reader[self.datagroup].shape[0]
+    self.idx_vars = [idx_vars] if isinstance(idx_vars, int) else idx_vars
     self.cutoff = cutoff if (cutoff is not None) else (self._fetch(0, raw=True)[0].shape[1])
     self.downsample_factor = downsample_factor
     self.sample = self._fetch(0)
@@ -272,6 +274,9 @@ class Dataset:
     traj = self.reader[self.datagroup][np.sort(idx)]
     traj = np.moveaxis(traj, source=(2, 3, 4), destination=(4, 2, 3))
     spec = None
+
+    if self.idx_vars is not None:
+      traj = traj[..., self.idx_vars]
 
     if not raw:
       traj = traj[:, :(self.cutoff):self.downsample_factor]
