@@ -150,7 +150,7 @@ class GraphNeuralPDESolver(AbstractOperator):
       include_sent_messages_in_node_update=False,
       activation='swish',
       f32_aggregation=True,
-      aggregate_edges_for_nodes_fn='segment_mean',  # TRY: segment_sum
+      aggregate_edges_for_nodes_fn='segment_mean',
       aggregate_normalization=None,
       name='grid2mesh_gnn',
     )
@@ -170,7 +170,7 @@ class GraphNeuralPDESolver(AbstractOperator):
       activation='swish',
       f32_aggregation=False,
       # NOTE: segment_mean because number of edges is not balanced
-      aggregate_edges_for_nodes_fn='segment_mean',  # TRY: segment_sum
+      aggregate_edges_for_nodes_fn='segment_mean',
       name='mesh_gnn',
     )
 

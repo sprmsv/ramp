@@ -19,7 +19,7 @@ NT_SUPER_RESOLUTION = 256
 
 DATAGROUP = {
   'incompressible_fluids': 'velocity',
-  'compressible_downsampled_128': 'data',
+  'compressible_flow': 'data',
 }
 
 # TODO: Remove
