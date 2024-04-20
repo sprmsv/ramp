@@ -8,6 +8,7 @@ from graphneuralpdesolver.graph.typed_graph import (
     TypedGraph, EdgeSet, EdgeSetKey,
     EdgesIndices, NodeSet, Context)
 from graphneuralpdesolver.models.deep_typed_graph_net import DeepTypedGraphNet
+from graphneuralpdesolver.utils import Array
 
 
 class AbstractOperator(nn.Module):
@@ -25,20 +26,6 @@ class AbstractOperator(nn.Module):
     }
     return configs
 
-class ToyOperator(AbstractOperator):
-  c: float = 1.
-
-  def setup(self):
-    self.correction_net = nn.Sequential([
-      nn.Dense(features=64),
-      nn.Dense(features=1),
-    ])
-
-  def __call__(self, specs: jnp.ndarray, u_inp: jnp.ndarray, ndt: float = 1.):
-    corr = self.correction_net(jnp.array([ndt]))
-    dudt = self.c * corr
-    return u_inp + dudt
-
 class GraphNeuralPDESolver(AbstractOperator):
   """TODO: Add docstrings"""
   # NOTE: Only fixed dx is supported for now
@@ -53,7 +40,8 @@ class GraphNeuralPDESolver(AbstractOperator):
   overlap_factor_mesh2grid: float = 1.
   num_multimesh_levels: int = 1
   residual_update: bool = True
-  time_conditioned: bool = True
+  use_tau: bool = True
+  use_t: bool = True
 
   def setup(self):
 
@@ -347,7 +335,7 @@ class GraphNeuralPDESolver(AbstractOperator):
 
     return graph
 
-  def __call__(self, u_inp: jnp.ndarray, ndt: Union[float, int] = None, specs: jnp.ndarray = None):
+  def __call__(self, u_inp: Array, t_inp: Array = None, tau: Union[float, int] = None, specs: jnp.ndarray = None):
     # INPUT :: [batch_size, 1, num_grid_nodes_0, num_grid_nodes_1, num_inputs]
     assert u_inp.ndim == 3 + len(self.num_grid_nodes)
     batch_size = u_inp.shape[0]
@@ -361,9 +349,12 @@ class GraphNeuralPDESolver(AbstractOperator):
       assert specs.ndim == 2  # [batch_size, num_params]
       assert specs.shape[0] == batch_size
 
-    if self.time_conditioned:
-      assert ndt is not None
-      ndt = jnp.array(ndt, dtype=jnp.float32).reshape(1,)
+    if self.use_tau:
+      assert tau is not None
+      tau = jnp.array(tau, dtype=jnp.float32).reshape(1,)
+    if self.use_t:
+      assert t_inp is not None
+      t_inp = jnp.array(t_inp, dtype=jnp.float32)
 
     # Prepare the grid node features
     # u -> [num_grid_nodes, batch_size, 1 * num_inputs]
@@ -373,9 +364,12 @@ class GraphNeuralPDESolver(AbstractOperator):
     ).reshape(self._num_grid_nodes_tot, batch_size, -1)
     # Concatente with forced features
     grid_node_features_forced = []
-    if self.time_conditioned:
+    if self.use_tau:
       grid_node_features_forced.append(
-        jnp.tile(ndt, reps=(self._num_grid_nodes_tot, batch_size, 1)))
+        jnp.tile(tau, reps=(self._num_grid_nodes_tot, batch_size, 1)))
+    if self.use_t:
+      grid_node_features_forced.append(
+        jnp.tile(t_inp, reps=(self._num_grid_nodes_tot, 1, 1)))
     if specs is not None:
       grid_node_features_forced.append(
         jnp.repeat(specs[None, :, :], repeats=self._num_grid_nodes_tot, axis=0),)
@@ -384,15 +378,15 @@ class GraphNeuralPDESolver(AbstractOperator):
 
     # Transfer data for the grid to the mesh
     # [num_mesh_nodes, batch_size, latent_size], [num_grid_nodes, batch_size, latent_size]
-    (latent_mesh_nodes, latent_grid_nodes) = self._run_grid2mesh_gnn(grid_node_features, ndt)
+    (latent_mesh_nodes, latent_grid_nodes) = self._run_grid2mesh_gnn(grid_node_features, tau)
 
     # Run message passing in the multimesh.
     # [num_mesh_nodes, batch_size, latent_size]
-    updated_latent_mesh_nodes = self._run_mesh_gnn(latent_mesh_nodes, ndt)
+    updated_latent_mesh_nodes = self._run_mesh_gnn(latent_mesh_nodes, tau)
 
     # Transfer data frome the mesh to the grid.
     # [num_grid_nodes, batch_size, 1 * num_outputs]
-    output_grid_nodes = self._run_mesh2grid_gnn(updated_latent_mesh_nodes, latent_grid_nodes, ndt)
+    output_grid_nodes = self._run_mesh2grid_gnn(updated_latent_mesh_nodes, latent_grid_nodes, tau)
 
     # Reshape the output to [batch_size, 1, num_grid_nodes, num_outputs]
     output = jnp.moveaxis(
@@ -405,7 +399,7 @@ class GraphNeuralPDESolver(AbstractOperator):
 
     return output
 
-  def _run_grid2mesh_gnn(self, grid_node_features: jnp.ndarray, ndt: float) -> tuple[jnp.ndarray, jnp.ndarray]:
+  def _run_grid2mesh_gnn(self, grid_node_features: jnp.ndarray, tau: float) -> tuple[jnp.ndarray, jnp.ndarray]:
     """Runs the grid2mesh_gnn, extracting latent mesh and grid nodes."""
 
     bsz = grid_node_features.shape[1]
@@ -451,13 +445,13 @@ class GraphNeuralPDESolver(AbstractOperator):
       })
 
     # Run the GNN.
-    grid2mesh_out = self._grid2mesh_gnn(input_graph, correction=ndt)
+    grid2mesh_out = self._grid2mesh_gnn(input_graph, correction=tau)
     latent_mesh_nodes = grid2mesh_out.nodes['mesh_nodes'].features
     latent_grid_nodes = grid2mesh_out.nodes['grid_nodes'].features
 
     return latent_mesh_nodes, latent_grid_nodes
 
-  def _run_mesh_gnn(self, latent_mesh_nodes: jnp.ndarray, ndt: float) -> jnp.ndarray:
+  def _run_mesh_gnn(self, latent_mesh_nodes: jnp.ndarray, tau: float) -> jnp.ndarray:
     """Runs the mesh_gnn, extracting updated latent mesh nodes."""
 
     bsz = latent_mesh_nodes.shape[1]
@@ -491,10 +485,10 @@ class GraphNeuralPDESolver(AbstractOperator):
     )
 
     # Run the GNN
-    return self._mesh_gnn(input_graph, correction=ndt).nodes['mesh_nodes'].features
+    return self._mesh_gnn(input_graph, correction=tau).nodes['mesh_nodes'].features
 
   def _run_mesh2grid_gnn(self, updated_latent_mesh_nodes: jnp.ndarray,
-                        latent_grid_nodes: jnp.ndarray, ndt: float) -> jnp.ndarray:
+                        latent_grid_nodes: jnp.ndarray, tau: float) -> jnp.ndarray:
     """Runs the mesh2grid_gnn, extracting the output grid nodes."""
 
     bsz = updated_latent_mesh_nodes.shape[1]
@@ -525,7 +519,7 @@ class GraphNeuralPDESolver(AbstractOperator):
       })
 
     # Run the GNN
-    output_graph = self._mesh2grid_gnn(input_graph, correction=ndt)
+    output_graph = self._mesh2grid_gnn(input_graph, correction=tau)
     output_grid_nodes = output_graph.nodes['grid_nodes'].features
 
     return output_grid_nodes

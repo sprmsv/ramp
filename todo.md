@@ -1,10 +1,13 @@
 # NEXT STEPS
 
+- Prepare update slides
+
 - Check E104 and add new results to the report for brownian_bridge
     - Compare different architectures + check for overfitting
-- Check E105 and report the numbers to show off speed
-- Check E106 and report the numbers
-- Prepare update slides
+- Check E105/E108 and report the numbers to show off speed
+- Check E106/E107 and report the numbers
+- Check E110 and report numbers
+
 
 - Add the ignored pairs to your training
     - This way you can increase direct_steps even for short trajectories
@@ -12,6 +15,7 @@
 # EXPERIMENTS
 
 - Try the old normalization strategy again..
+- Normalize t_inp and tau and try correction again
 
 - Try with other learning rates and decays
     - Try with optax.linear_onecycle_schedule
