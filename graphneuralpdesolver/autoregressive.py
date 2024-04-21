@@ -9,12 +9,10 @@ from graphneuralpdesolver.dataset import normalize, unnormalize
 
 class OperatorNormalizer:
 
-  def __init__(self, operator: AbstractOperator, stats_trj, stats_res):
+  def __init__(self, operator: AbstractOperator):
     self._apply_operator = operator.apply
-    self._stats_trj_mean, self._stats_trj_std = stats_trj
-    self._stats_res_mean, self._stats_res_std = stats_res
 
-  def apply(self, variables, specs: Array, u_inp: Array, t_inp: Array, tau: int):
+  def apply(self, variables, stats, specs: Array, u_inp: Array, t_inp: Array, tau: int):
     # tau >= 1
     # tau_inp >= 0
     # TODO: BEGIN INDEX FROM ZERO
@@ -22,8 +20,8 @@ class OperatorNormalizer:
     # Get normalized predicted residuals
     u_inp_nrm = normalize(
       u_inp,
-      mean=self._stats_trj_mean,
-      std=self._stats_trj_std
+      mean=stats['trj']['mean'],
+      std=stats['trj']['std'],
     )
     # TODO: Normalize specifications as well
     r_prd_nrm = self._apply_operator(
@@ -37,14 +35,14 @@ class OperatorNormalizer:
     # Get predicted output
     r_prd = unnormalize(
       r_prd_nrm,
-      mean=self._stats_res_mean[(tau-1)],
-      std=self._stats_res_std[(tau-1)],
+      mean=stats['res']['mean'][(tau-1)],
+      std=stats['res']['std'][(tau-1)],
     )
     u_prd = u_inp + r_prd
 
     return u_prd
 
-  def get_loss_inputs(self, variables, specs: Array, u_inp: Array, t_inp: Array, u_tgt: Array, tau: int):
+  def get_loss_inputs(self, variables, stats, specs: Array, u_inp: Array, t_inp: Array, u_tgt: Array, tau: int):
     # tau >= 1
     # tau_inp >= 0
     # TODO: START FROM ZERO
@@ -53,7 +51,10 @@ class OperatorNormalizer:
 
     # Get normalized predicted residuals
     u_inp_nrm = normalize(
-      u_inp, mean=self._stats_trj_mean, std=self._stats_trj_std)
+      u_inp,
+      mean=stats['trj']['mean'],
+      std=stats['trj']['std'],
+    )
     r_prd_nrm = self._apply_operator(
       variables,
       specs=specs,
@@ -66,21 +67,21 @@ class OperatorNormalizer:
     r_tgt = u_tgt - u_inp
     r_tgt_nrm = normalize(
       r_tgt,
-      mean=self._stats_res_mean[(tau-1)],
-      std=self._stats_res_std[(tau-1)],
+      mean=stats['res']['mean'][(tau-1)],
+      std=stats['res']['std'][(tau-1)],
     )
 
     return (r_prd_nrm, r_tgt_nrm)
 
 class AutoregressivePredictor:
 
-  def __init__(self, operator: AbstractOperator, num_steps_direct: int = 1, tau_base: int = 1):
+  def __init__(self, normalizer: OperatorNormalizer, num_steps_direct: int = 1, tau_base: int = 1):
     # FIXME: Maybe we can benefit from checkpointing scan_fn instead
-    self._apply_operator = jax.checkpoint(operator.apply)
+    self._apply_operator = jax.checkpoint(normalizer.apply)
     self.num_steps_direct = num_steps_direct
     self.tau_base = tau_base
 
-  def unroll(self, variables: flax.typing.VariableDict,
+  def unroll(self, variables: flax.typing.VariableDict, stats: flax.typing.VariableDict,
     specs: Array, u_inp: Array, t_inp: Array, num_steps: int) -> Array:
 
     batch_size = u_inp.shape[0]
@@ -89,7 +90,7 @@ class AutoregressivePredictor:
 
     def scan_fn_direct(carry, _tau):
       u_inp, t_inp = carry
-      u_out = self._apply_operator(variables, specs=specs, u_inp=u_inp, t_inp=t_inp, tau=_tau)
+      u_out = self._apply_operator(variables, stats, specs=specs, u_inp=u_inp, t_inp=t_inp, tau=_tau)
       carry = (u_inp, t_inp)  # NOTE: the input is the same for all _tau
       return carry, u_out
 
@@ -139,7 +140,7 @@ class AutoregressivePredictor:
 
     return rollout, u_next
 
-  def jump(self, variables: flax.typing.VariableDict,
+  def jump(self, variables: flax.typing.VariableDict, stats: flax.typing.VariableDict,
     specs: Array, u_inp: Array, t_inp: Array, num_jumps: int) -> Array:
     """Takes num_jumps large steps, each of length num_steps_direct."""
 
@@ -148,6 +149,7 @@ class AutoregressivePredictor:
       tau = self.tau_base * self.num_steps_direct
       u_out = self._apply_operator(
         variables,
+        stats,
         specs=specs,
         u_inp=u_inp,
         t_inp=t_inp,
