@@ -161,12 +161,18 @@ class Dataset:
   def __init__(self, key: flax.typing.PRNGKey,
       datadir: str, subpath: str, name: str,
       n_train: int, n_valid: int, n_test: int,
+      preload: bool = False,
       idx_vars: Union[int, Sequence] = None,
       cutoff: int = None, downsample_factor: int = 1,
     ):
     self.datagroup = DATAGROUP[subpath]
     self.reader = h5py.File(Path(datadir) / subpath / f'{name}.nc', 'r')
-    self.length = self.reader[self.datagroup].shape[0]
+    self.preload = preload
+    self.data = None
+    if self.preload:
+      self.length = n_train+n_valid+n_test
+    else:
+      self.length = self.reader[self.datagroup].shape[0]
     self.idx_vars = [idx_vars] if isinstance(idx_vars, int) else idx_vars
     self.cutoff = cutoff if (cutoff is not None) else (self._fetch(0, raw=True)[0].shape[1])
     self.downsample_factor = downsample_factor
@@ -188,6 +194,9 @@ class Dataset:
       'trj': {'mean': None, 'std': None},
       'res': {'mean': None, 'std': None},
     }
+
+    if self.preload:
+      self.data = self.reader[self.datagroup][np.arange(self.length)]
 
   def compute_stats(self, residual_steps: int = 0,
       skip_residual_steps: int = 1, batch_size: int = None) -> None:
@@ -271,7 +280,12 @@ class Dataset:
   def _fetch(self, idx: Union[int, Sequence], raw: bool = False):
     if isinstance(idx, int):
       idx = [idx]
-    traj = self.reader[self.datagroup][np.sort(idx)]
+
+    if self.data is not None:
+      traj = self.data[np.sort(idx)]
+    else:
+      traj = self.reader[self.datagroup][np.sort(idx)]
+
     traj = np.moveaxis(traj, source=(2, 3, 4), destination=(4, 2, 3))
     spec = None
 
