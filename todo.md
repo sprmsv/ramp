@@ -4,10 +4,8 @@
 
 - Check E104 and add new results to the report for brownian_bridge
     - Compare different architectures + check for overfitting
-- Check E105/E108 and report the numbers to show off speed
 - Check E106/E107 and report the numbers
 - Check E110 and report numbers
-
 
 - Add the ignored pairs to your training
     - This way you can increase direct_steps even for short trajectories
@@ -54,6 +52,11 @@ I suspect this is a consequent of the smoothing effect. Explore with different a
 - Train with continuious time and try inter- and extrapolating
 
 # LATER
+
+- Try to understand why without preloading the dataset, loading batches takes longer with more GPUs or a larger model.
+
+- Re-implement segment_sum to avoid constant folding
+    - Not sure there is an easy solution
 
 - Normalize the inputs and residuals based on the time index
     -> Different statistics per timestep

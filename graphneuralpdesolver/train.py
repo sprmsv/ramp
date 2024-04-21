@@ -827,6 +827,7 @@ def main(argv):
     n_valid=FLAGS.n_valid,
     n_test=FLAGS.n_test,
     cutoff=17,
+    preload=True,
     downsample_factor=2,
   )
   dataset.compute_stats(
