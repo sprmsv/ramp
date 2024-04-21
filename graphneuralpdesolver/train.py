@@ -16,6 +16,8 @@ import flax.linen as nn
 import flax.typing
 from flax.training import orbax_utils
 from flax.training.train_state import TrainState
+from flax.training.common_utils import shard, shard_prng_key
+from flax.jax_utils import replicate, unreplicate
 import orbax.checkpoint
 
 from graphneuralpdesolver.experiments import DIR_EXPERIMENTS
@@ -27,7 +29,7 @@ from graphneuralpdesolver.metrics import mse, rel_l2_error, rel_l1_error
 
 
 SEED = 44
-NUM_DEVICES = jax.device_count()
+NUM_DEVICES = jax.local_device_count()
 
 # FLAGS::general
 FLAGS = flags.FLAGS
@@ -137,12 +139,6 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
   # Store the initial time
   time_int_pre = time()
 
-  # Set the normalization statistics
-  stats = {
-    key: {k: jnp.array(v) for k, v in val.items()}
-    for key, val in dataset.stats.items()
-  }
-
   # Define the permissible lead times
   num_lead_times = num_times - unroll_offset - direct_steps
   assert num_lead_times > 0
@@ -156,11 +152,18 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
     tau_base=jump_steps
   )
 
-  @functools.partial(jax.pmap,
-    in_axes=(None, None, 0, 0, 0, None),
-    out_axes=(None, None, None),
-    axis_name="device",
-  )
+  # Set the normalization statistics
+  stats = {
+    key: {k: jnp.array(v) for k, v in val.items()}
+    for key, val in dataset.stats.items()
+  }
+
+  # Replicate state and stats
+  # NOTE: Internally uses jax.device_put_replicate
+  state = replicate(state)
+  stats = replicate(stats)
+
+  @functools.partial(jax.pmap, axis_name='device')
   def _train_one_batch(
     state: TrainState, stats: dict, trajs: Array, times: Array, specs: Array,
     key: flax.typing.PRNGKey) -> Tuple[TrainState, Array, Array]:
@@ -264,8 +267,8 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
           tau=tau,
         )
         # Synchronize loss and gradients
-        _loss_lead_time = jax.lax.pmean(_loss_lead_time, axis_name="device")
-        _grads_lead_time = jax.lax.pmean(_grads_lead_time, axis_name="device")
+        _loss_lead_time = jax.lax.pmean(_loss_lead_time, axis_name='device')
+        _grads_lead_time = jax.lax.pmean(_grads_lead_time, axis_name='device')
         # Apply gradients
         _state = _state.apply_gradients(grads=_grads_lead_time)
         # Update the carried mean loss and gradient of the minibatch
@@ -369,8 +372,8 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
 
     # Synchronize loss and gradients
     # NOTE: Redundent since they are synchronized everytime before being applied
-    # loss = jax.lax.pmean(loss, axis_name="device")
-    # grads = jax.lax.pmean(grads, axis_name="device")
+    # loss = jax.lax.pmean(loss, axis_name='device')
+    # grads = jax.lax.pmean(grads, axis_name='device')
 
     return state, loss, grads
 
@@ -418,22 +421,22 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
 
       # Split the batch between devices
       # -> [NUM_DEVICES, batch_size_per_device, ...]
-      trajs = jnp.concatenate(jnp.split(jnp.expand_dims(
-        trajs, axis=0), NUM_DEVICES, axis=1), axis=0)
-      times = jnp.concatenate(jnp.split(jnp.expand_dims(
-        times, axis=0), NUM_DEVICES, axis=1), axis=0)
-      specs = jnp.concatenate(jnp.split(jnp.expand_dims(
-        specs, axis=0), NUM_DEVICES, axis=1), axis=0) if _use_specs else None
+      trajs = shard(trajs)
+      times = shard(times)
+      specs = shard(specs) if _use_specs else None
 
       # Get loss and updated state
       subkey, key = jax.random.split(key)
+      subkey = shard_prng_key(subkey)
       state, loss, grads = _train_one_batch(state, stats, trajs, times, specs, subkey)
-      loss_epoch += loss * FLAGS.batch_size / num_samples_trn
-      grad_epoch += np.mean(jax.tree_util.tree_flatten(jax.tree_map(jnp.mean, jax.tree_map(jnp.abs, grads)))[0]) / num_batches
+      # NOTE: Using the first element of replicated loss and grads
+      loss_epoch += loss[0] * FLAGS.batch_size / num_samples_trn
+      grad_epoch += np.mean(jax.tree_util.tree_flatten(
+        jax.tree_map(jnp.mean, jax.tree_map(lambda g: jnp.abs(g[0]), grads)))[0]) / num_batches
 
     return state, loss_epoch, grad_epoch
 
-  @functools.partial(jax.pmap, in_axes=(None, None, 0, 0, 0))
+  @jax.pmap
   def _evaluate_direct_prediction(
     state: TrainState, stats, trajs: Array, times: Array, specs: Array) -> Tuple[Array, Array]:
 
@@ -499,7 +502,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
 
     return err_l1_mean, err_l2_mean
 
-  @functools.partial(jax.pmap, in_axes=(None, None, 0, 0, 0))
+  @jax.pmap
   def _evaluate_rollout_prediction(
       state: TrainState, stats, trajs: Array, times: Array, specs: Array
     ) -> Array:
@@ -531,7 +534,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
 
     return err_l1, err_l2
 
-  @functools.partial(jax.pmap, in_axes=(None, None, 0, 0, 0))
+  @jax.pmap
   def _evaluate_final_prediction(
       state: TrainState, stats, trajs: Array, times: Array, specs: Array
     ) -> Array:
@@ -604,12 +607,9 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
 
       # Split the batch between devices
       # -> [NUM_DEVICES, batch_size_per_device, ...]
-      trajs = jnp.concatenate(jnp.split(jnp.expand_dims(
-        trajs, axis=0), NUM_DEVICES, axis=1), axis=0)
-      times = jnp.concatenate(jnp.split(jnp.expand_dims(
-        times, axis=0), NUM_DEVICES, axis=1), axis=0)
-      specs = jnp.concatenate(jnp.split(jnp.expand_dims(
-        specs, axis=0), NUM_DEVICES, axis=1), axis=0) if _use_specs else None
+      trajs = shard(trajs)
+      times = shard(times)
+      specs = shard(specs) if _use_specs else None
 
       # Evaluate direct prediction
       _error_dr_l1_batch, _error_dr_l2_batch = _evaluate_direct_prediction(
@@ -640,7 +640,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
       times = jnp.concatenate(jnp.split(jnp.expand_dims(
         times_raw, axis=0), (NUM_DEVICES // jump_steps), axis=1), axis=0)
       specs = jnp.concatenate(jnp.split(jnp.expand_dims(
-        specs_raw, axis=0), NUM_DEVICES, axis=1), axis=0) if _use_specs else None
+        specs_raw, axis=0), (NUM_DEVICES // jump_steps), axis=1), axis=0) if _use_specs else None
 
       # Evaluate final prediction
       _error_fn_l1_batch, _error_fn_l2_batch = _evaluate_final_prediction(
@@ -690,7 +690,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
     f'URLL: {unroll_steps : 02d}',
     f'EPCH: {epochs_before : 04d}/{FLAGS.epochs : 04d}',
     f'TIME: {time_tot_pre : 06.1f}s',
-    f'LR: {state.opt_state.hyperparams["learning_rate"].item() : .2e}',
+    f'LR: {state.opt_state.hyperparams["learning_rate"][0].item() : .2e}',
     f'RMSE: {0. : .2e}',
     f'GRAD: {0. : .2e}',
     f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
@@ -741,7 +741,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
       f'URLL: {unroll_steps : 02d}',
       f'EPCH: {epochs_before + epoch : 04d}/{FLAGS.epochs : 04d}',
       f'TIME: {time_tot : 06.1f}s',
-      f'LR: {state.opt_state.hyperparams["learning_rate"].item() : .2e}',
+      f'LR: {state.opt_state.hyperparams["learning_rate"][0].item() : .2e}',
       f'RMSE: {np.sqrt(loss).item() : .2e}',
       f'GRAD: {grad.item() : .2e}',
       f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
@@ -785,14 +785,14 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
       step = epochs_before + epoch
       checkpoint_manager.save(
         step=step,
-        items={'state': state,},
+        items={'state': unreplicate(state),},
         metrics=checkpoint_metrics,
         save_kwargs={'save_args': checkpointer_save_args}
       )
       with open(DIR / 'metrics' / f'{str(step)}.json', 'w') as f:
         json.dump(checkpoint_metrics, f)
 
-  return state
+  return unreplicate(state)
 
 def get_model(model_configs: Mapping[str, Any]) -> AbstractOperator:
 
