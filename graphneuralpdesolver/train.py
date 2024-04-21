@@ -388,7 +388,6 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
     for batch in batches:
       # Unwrap the batch
       # -> [batch_size, len_traj, ...]
-      batch = jax.tree_map(jax.device_put, batch)  # Transfer to device memory
       trajs, specs = batch
       times = np.tile(jnp.arange(trajs.shape[1]), reps=(trajs.shape[0], 1))
 
@@ -574,7 +573,6 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
 
     for batch in batches:
       # Unwrap the batch
-      batch = jax.tree_map(jax.device_put, batch)  # Transfer to device memory
       trajs_raw, specs_raw = batch
       times_raw = np.tile(jnp.arange(trajs_raw.shape[1]), reps=(trajs_raw.shape[0], 1))
 
