@@ -135,6 +135,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
   batch_size_per_device = (jump_steps * FLAGS.batch_size) // NUM_DEVICES
   assert (len_traj - 1) % jump_steps == 0
   num_times = (len_traj - 1) // jump_steps  # TODO: Support J08
+  evaluation_frequency = (FLAGS.epochs // 20) if (FLAGS.epochs >= 20) else 1
 
   # Store the initial time
   time_int_pre = time()
@@ -722,73 +723,88 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
       key=subkey_1
     )
 
-    # Evaluate
-    metrics_trn = evaluate(
-      state=state,
-      batches=dataset.batches(mode='train', batch_size=FLAGS.batch_size),
-    )
-    metrics_val = evaluate(
-      state=state,
-      batches=dataset.batches(mode='valid', batch_size=FLAGS.batch_size),
-    )
-
-    # Log the results
-    time_tot = time() - time_int
-    logging.info('\t'.join([
-      f'DRCT: {direct_steps : 02d}',
-      f'URLL: {unroll_steps : 02d}',
-      f'EPCH: {epochs_before + epoch : 04d}/{FLAGS.epochs : 04d}',
-      f'TIME: {time_tot : 06.1f}s',
-      f'LR: {state.opt_state.hyperparams["learning_rate"][0].item() : .2e}',
-      f'RMSE: {np.sqrt(loss).item() : .2e}',
-      f'GRAD: {grad.item() : .2e}',
-      f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
-      f'L2-RO: {metrics_val.error_rollout_l2 * 100 : .2f}%',
-      f'L2-FN: {metrics_val.error_final_l2 * 100 : .2f}%',
-    ]))
-
-    with disable_logging(level=logging.FATAL):
-      checkpoint_metrics = {
-        'loss': loss.item(),
-        'train': {
-          'direct': {
-            'l1': metrics_trn.error_direct_l1,
-            'l2': metrics_trn.error_direct_l2,
-          },
-          'rollout': {
-            'l1': metrics_trn.error_rollout_l1,
-            'l2': metrics_trn.error_rollout_l2,
-          },
-          'final': {
-            'l1': metrics_trn.error_final_l1,
-            'l2': metrics_trn.error_final_l2,
-          },
-        },
-        'valid': {
-          'direct': {
-            'l1': metrics_val.error_direct_l1,
-            'l2': metrics_val.error_direct_l2,
-          },
-          'rollout': {
-            'l1': metrics_val.error_rollout_l1,
-            'l2': metrics_val.error_rollout_l2,
-          },
-          'final': {
-            'l1': metrics_val.error_final_l1,
-            'l2': metrics_val.error_final_l2,
-          },
-        },
-      }
-      # Store the state and the metrics
-      step = epochs_before + epoch
-      checkpoint_manager.save(
-        step=step,
-        items={'state': unreplicate(state),},
-        metrics=checkpoint_metrics,
-        save_kwargs={'save_args': checkpointer_save_args}
+    if (epoch % evaluation_frequency) == 0:
+      # Evaluate
+      metrics_trn = evaluate(
+        state=state,
+        batches=dataset.batches(mode='train', batch_size=FLAGS.batch_size),
       )
-      with open(DIR / 'metrics' / f'{str(step)}.json', 'w') as f:
-        json.dump(checkpoint_metrics, f)
+      metrics_val = evaluate(
+        state=state,
+        batches=dataset.batches(mode='valid', batch_size=FLAGS.batch_size),
+      )
+
+      # Log the results
+      time_tot = time() - time_int
+      logging.info('\t'.join([
+        f'DRCT: {direct_steps : 02d}',
+        f'URLL: {unroll_steps : 02d}',
+        f'EPCH: {epochs_before + epoch : 04d}/{FLAGS.epochs : 04d}',
+        f'TIME: {time_tot : 06.1f}s',
+        f'LR: {state.opt_state.hyperparams["learning_rate"][0].item() : .2e}',
+        f'RMSE: {np.sqrt(loss).item() : .2e}',
+        f'GRAD: {grad.item() : .2e}',
+        f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
+        f'L2-RO: {metrics_val.error_rollout_l2 * 100 : .2f}%',
+        f'L2-FN: {metrics_val.error_final_l2 * 100 : .2f}%',
+      ]))
+
+      with disable_logging(level=logging.FATAL):
+        checkpoint_metrics = {
+          'loss': loss.item(),
+          'train': {
+            'direct': {
+              'l1': metrics_trn.error_direct_l1,
+              'l2': metrics_trn.error_direct_l2,
+            },
+            'rollout': {
+              'l1': metrics_trn.error_rollout_l1,
+              'l2': metrics_trn.error_rollout_l2,
+            },
+            'final': {
+              'l1': metrics_trn.error_final_l1,
+              'l2': metrics_trn.error_final_l2,
+            },
+          },
+          'valid': {
+            'direct': {
+              'l1': metrics_val.error_direct_l1,
+              'l2': metrics_val.error_direct_l2,
+            },
+            'rollout': {
+              'l1': metrics_val.error_rollout_l1,
+              'l2': metrics_val.error_rollout_l2,
+            },
+            'final': {
+              'l1': metrics_val.error_final_l1,
+              'l2': metrics_val.error_final_l2,
+            },
+          },
+        }
+        # Store the state and the metrics
+        step = epochs_before + epoch
+        checkpoint_manager.save(
+          step=step,
+          items={'state': jax.device_get(unreplicate(state)),},
+          metrics=checkpoint_metrics,
+          save_kwargs={'save_args': checkpointer_save_args}
+        )
+        with open(DIR / 'metrics' / f'{str(step)}.json', 'w') as f:
+          json.dump(checkpoint_metrics, f)
+
+    else:
+      # Log the results
+      time_tot = time() - time_int
+      logging.info('\t'.join([
+        f'DRCT: {direct_steps : 02d}',
+        f'URLL: {unroll_steps : 02d}',
+        f'EPCH: {epochs_before + epoch : 04d}/{FLAGS.epochs : 04d}',
+        f'TIME: {time_tot : 06.1f}s',
+        f'LR: {state.opt_state.hyperparams["learning_rate"][0].item() : .2e}',
+        f'RMSE: {np.sqrt(loss).item() : .2e}',
+        f'GRAD: {grad.item() : .2e}',
+      ]))
+
 
   return unreplicate(state)
 
