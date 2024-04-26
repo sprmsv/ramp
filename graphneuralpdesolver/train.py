@@ -91,6 +91,9 @@ flags.DEFINE_float(name='overlap_factor_mesh2grid', default=2.0, required=False,
 flags.DEFINE_integer(name='num_multimesh_levels', default=4, required=False,
   help='Number of multimesh connection levels (processor)'
 )
+flags.DEFINE_integer(name='node_coordinate_freqs', default=1, required=False,
+  help='Number of frequencies for encoding periodic node coordinates'
+)
 flags.DEFINE_integer(name='latent_size', default=128, required=False,
   help='Size of latent node and edge features'
 )
@@ -878,6 +881,7 @@ def main(argv):
       overlap_factor_grid2mesh=FLAGS.overlap_factor_grid2mesh,
       overlap_factor_mesh2grid=FLAGS.overlap_factor_mesh2grid,
       num_multimesh_levels=FLAGS.num_multimesh_levels,
+      node_coordinate_freqs=FLAGS.node_coordinate_freqs,
       residual_update=True,
       use_tau=True,
       use_t=True,

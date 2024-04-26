@@ -39,6 +39,7 @@ class GraphNeuralPDESolver(AbstractOperator):
   overlap_factor_grid2mesh: float = 1.
   overlap_factor_mesh2grid: float = 1.
   num_multimesh_levels: int = 1
+  node_coordinate_freqs: int = 1,
   residual_update: bool = True
   use_tau: bool = True
   use_t: bool = True
@@ -222,7 +223,7 @@ class GraphNeuralPDESolver(AbstractOperator):
 
   @staticmethod
   def _init_structural_features(
-    zeta_sen: np.ndarray, zeta_rec: np.ndarray, idx_sen: list[int], idx_rec: list[int]
+    zeta_sen: np.ndarray, zeta_rec: np.ndarray, idx_sen: list[int], idx_rec: list[int], node_freqs: int,
   ) -> Tuple[EdgeSet, NodeSet, NodeSet]:
     # NOTE: All inputs must be flattened: [num_nodes, num_dims]
 
@@ -237,9 +238,14 @@ class GraphNeuralPDESolver(AbstractOperator):
     phi_rec = np.pi * (zeta_rec + 1)  # [0, 2pi]
 
     # Define node features
-    # TRY: Other features (zeta, abs(zeta), phi, etc.)
-    sender_node_feats = np.concatenate([np.sin(phi_sen), np.cos(phi_sen)], axis=-1)
-    receiver_node_feats = np.concatenate([np.sin(phi_rec), np.cos(phi_rec)], axis=-1)
+    sender_node_feats = np.concatenate([
+        np.concatenate([np.sin((k+1) * phi_sen), np.cos((k+1) * phi_sen)], axis=-1)
+        for k in range(node_freqs)
+      ], axis=-1)
+    receiver_node_feats = np.concatenate([
+        np.concatenate([np.sin((k+1) * phi_rec), np.cos((k+1) * phi_rec)], axis=-1)
+        for k in range(node_freqs)
+      ], axis=-1)
 
     # Build node sets
     sender_node_set = NodeSet(
@@ -252,20 +258,16 @@ class GraphNeuralPDESolver(AbstractOperator):
     )
 
     # Define edge features
-    # TRY: Other features
-    sin_phi_ij = np.stack([
-      np.sin(phi_sen[s]) - np.sin(phi_rec[r])
+    z_ij = np.stack([
+      (zeta_sen[s] - zeta_rec[r])
       for s, r in zip(idx_sen, idx_rec)
     ], axis=0)
-    cos_phi_ij = np.stack([
-      np.cos(phi_sen[s]) - np.cos(phi_rec[r])
-      for s, r in zip(idx_sen, idx_rec)
-    ], axis=0)
-    abs_z_ij = np.stack([
-      np.abs(zeta_sen[s]) - np.abs(zeta_rec[r])
-      for s, r in zip(idx_sen, idx_rec)
-    ], axis=0)
-    edge_feats = np.concatenate([sin_phi_ij, cos_phi_ij, abs_z_ij], axis=-1)
+    assert np.sum(z_ij < -2) == 0  # TODO: Remove assertions
+    assert np.sum(z_ij > +2) == 0
+    z_ij = np.where(z_ij < -1, z_ij + 2, z_ij)
+    z_ij = np.where(z_ij >= 1, z_ij - 2, z_ij)
+    d_ij = np.linalg.norm(z_ij, axis=-1, keepdims=True)
+    edge_feats = np.concatenate([z_ij, d_ij], axis=-1)
     # Normalize edge features
     edge_feats = edge_feats / np.max(np.abs(edge_feats), axis=0, keepdims=True)
 
@@ -289,6 +291,7 @@ class GraphNeuralPDESolver(AbstractOperator):
       zeta_rec=self.zeta_mesh.reshape(self._num_mesh_nodes_tot, -1),
       idx_sen=self.idx_grid2mesh_grid_nodes,
       idx_rec=self.idx_grid2mesh_mesh_nodes,
+      node_freqs=self.node_coordinate_freqs,
     )
 
     graph = TypedGraph(
@@ -307,6 +310,7 @@ class GraphNeuralPDESolver(AbstractOperator):
       zeta_rec=self.zeta_mesh.reshape(self._num_mesh_nodes_tot, -1),
       idx_sen=self.idx_multimesh_send,
       idx_rec=self.idx_multimesh_recv,
+      node_freqs=self.node_coordinate_freqs,
     )
 
     graph = TypedGraph(
@@ -323,8 +327,9 @@ class GraphNeuralPDESolver(AbstractOperator):
     edge_set, mesh_node_set, grid_node_set = self._init_structural_features(
       zeta_sen=self.zeta_mesh.reshape(self._num_mesh_nodes_tot, -1),
       zeta_rec=self.zeta_grid.reshape(self._num_grid_nodes_tot, -1),
-      idx_sen=self.idx_grid2mesh_mesh_nodes,  # TODO: Use different connections
+      idx_sen=self.idx_grid2mesh_mesh_nodes,
       idx_rec=self.idx_grid2mesh_grid_nodes,
+      node_freqs=self.node_coordinate_freqs,
     )
 
     graph = TypedGraph(
