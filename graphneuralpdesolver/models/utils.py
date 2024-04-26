@@ -14,6 +14,14 @@ def concatenate_args(args, kwargs, axis: int = -1):
   concat_args = jnp.concatenate(combined_args, axis=axis)
   return concat_args
 
+def compute_gradients(arr, axis):
+  grads = []
+  for ax in axis:
+    grads.append((jnp.roll(arr, axis=ax, shift=-1) - jnp.roll(arr, axis=ax, shift=1)) / 2)
+  grad_abs = jnp.sqrt(jnp.sum(jnp.power(jnp.stack(grads), 2), axis=0))
+
+  return (*grads, grad_abs)
+
 class AugmentedMLP(nn.Module):
   """
   Multi-layer perceptron with optional layer norm and learned correction on the last layer.
