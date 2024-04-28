@@ -128,9 +128,9 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
 
   # Set constants
   num_samples_trn = dataset.nums['train']
-  len_traj = sample_traj.shape[1]
-  num_grid_points = sample_traj.shape[2:4]
-  num_vars = sample_traj.shape[-1]
+  len_traj = dataset.shape[1]
+  num_grid_points = dataset.shape[2:4]
+  num_vars = dataset.shape[-1]
   unroll_offset = unroll_steps * direct_steps
   assert num_samples_trn % FLAGS.batch_size == 0
   num_batches = num_samples_trn // FLAGS.batch_size
@@ -158,7 +158,10 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
 
   # Set the normalization statistics
   stats = {
-    key: {k: jnp.array(v) for k, v in val.items()}
+    key: {
+      k: (jnp.array(v) if v is not None else None)
+      for k, v in val.items()
+    }
     for key, val in dataset.stats.items()
   }
 
@@ -392,7 +395,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
     for batch in batches:
       # Unwrap the batch
       # -> [batch_size, len_traj, ...]
-      trajs, specs = batch
+      trajs, specs, auxil = batch
       times = np.tile(jnp.arange(trajs.shape[1]), reps=(trajs.shape[0], 1))
 
       # Downsample the trajectories
@@ -577,7 +580,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
 
     for batch in batches:
       # Unwrap the batch
-      trajs_raw, specs_raw = batch
+      trajs_raw, specs_raw, auxil_raw = batch
       times_raw = np.tile(jnp.arange(trajs_raw.shape[1]), reps=(trajs_raw.shape[0], 1))
 
       # Downsample the trajectories
@@ -846,13 +849,13 @@ def main(argv):
     n_valid=FLAGS.n_valid,
     n_test=FLAGS.n_test,
     cutoff=17,
-    preload=True,
     downsample_factor=2,
+    preload=True,
   )
   dataset.compute_stats(
+    grads_degree=0,
     residual_steps=(FLAGS.direct_steps * FLAGS.jump_steps),
     skip_residual_steps=FLAGS.jump_steps,
-    # batch_size=128,
   )
 
   # Read the checkpoint
@@ -872,8 +875,8 @@ def main(argv):
   # Get the model
   if not model_kwargs:
     model_kwargs = dict(
-      num_outputs=dataset.sample[0].shape[-1],
-      num_grid_nodes=dataset.sample[0].shape[2:4],
+      num_outputs=dataset.shape[-1],
+      num_grid_nodes=dataset.shape[2:4],
       num_mesh_nodes=(FLAGS.num_mesh_nodes, FLAGS.num_mesh_nodes),
       latent_size=FLAGS.latent_size,
       num_mlp_hidden_layers=FLAGS.num_mlp_hidden_layers,
@@ -913,9 +916,9 @@ def main(argv):
   # Initialzize the model or use the loaded parameters
   if not params:
     subkey, key = jax.random.split(key)
-    sample_traj, sample_spec = dataset.sample
-    num_grid_points = sample_traj.shape[2:4]
-    num_vars = dataset.sample[0].shape[-1]
+    _, sample_spec = dataset.sample
+    num_grid_points = dataset.shape[2:4]
+    num_vars = dataset.shape[-1]
     model_init_kwargs = dict(
       u_inp=jnp.ones(shape=(FLAGS.batch_size, 1, *num_grid_points, num_vars)),
       t_inp=jnp.zeros(shape=(FLAGS.batch_size, 1)),
@@ -934,7 +937,7 @@ def main(argv):
   # Train the model without unrolling
   epochs_trained = 0
   num_batches = dataset.nums['train'] // FLAGS.batch_size
-  num_times = (dataset.sample[0].shape[1] - 1) // FLAGS.jump_steps
+  num_times = (dataset.shape[1] - 1) // FLAGS.jump_steps
   unroll_offset = FLAGS.unroll_steps * FLAGS.direct_steps
   num_lead_times = num_times - unroll_offset - FLAGS.direct_steps
   assert num_lead_times > 0
