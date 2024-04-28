@@ -66,10 +66,10 @@ class Dataset:
       self.data = self.reader[self.datagroup][np.arange(self.length)]
 
   def compute_stats(self,
+      axes: Sequence[int] = (0,),
       grads_degree: int = 0,
       residual_steps: int = 0,
       skip_residual_steps: int = 1,
-      batch_size: int = None,
     ) -> None:
 
     # Check inputs
@@ -78,96 +78,28 @@ class Dataset:
 
     _get_res = lambda s, trj: trj[:, (s):] - trj[:, :-(s)]
 
-    if batch_size is None:
-      # Get all trajectories
-      trj, _, grd = self.train(np.arange(self.nums['train']), grads_degree=grads_degree)
-      # Set axis of the statistics
-      axis = (0, 1)
+    # Get all trajectories
+    trj, _ = self.train(np.arange(self.nums['train']))
 
-      # Compute statistics of the solutions
-      self.stats['trj']['mean'] = np.mean(trj, axis=axis, keepdims=True)
-      self.stats['trj']['std'] = np.std(trj, axis=axis, keepdims=True)
+    # Compute statistics of the solutions
+    self.stats['trj']['mean'] = np.mean(trj, axis=axes, keepdims=True)
+    self.stats['trj']['std'] = np.std(trj, axis=axes, keepdims=True)
 
-      # Compute statistics of the gradients
-      if grads_degree > 0:
-        self.stats['grd']['mean'] = np.mean(grd, axis=axis, keepdims=True)
-        self.stats['grd']['std'] = np.std(grd, axis=axis, keepdims=True)
+    # Compute statistics of the gradients
+    if grads_degree > 0:
+      ...
 
-      # Compute statistics of the residuals
-      self.stats['res']['mean'] = []
-      self.stats['res']['std'] = []
-      for s in range(1, residual_steps+1):
-        if (s % skip_residual_steps):
-          self.stats['res']['mean'].append(np.zeros(shape=(1, 1, *self.shape[2:])))
-          self.stats['res']['std'].append(np.zeros(shape=(1, 1, *self.shape[2:])))
-        res = _get_res(s, trj)
-        self.stats['res']['mean'].append(np.mean(res, axis=axis, keepdims=True))
-        self.stats['res']['std'].append(np.std(res, axis=axis, keepdims=True))
-
-    else:
-      # Compute mean of trajectories and gradients
-      if self.stats['trj']['mean'] is None:
-        _mean_samples_trj = np.zeros_like(self.sample[0])
-        _mean_samples_grd = 0.
-        for trj, _, grd in self.batches(mode='train', grads_degree=grads_degree, batch_size=batch_size):
-          _mean_samples_trj += np.sum(
-            trj, axis=0, keepdims=True) / self.nums['train']
-          if grads_degree > 0:
-            _mean_samples_grd += np.sum(
-              grd, axis=0, keepdims=True) / self.nums['train']
-        self.stats['trj']['mean'] = np.mean(_mean_samples_trj, axis=1, keepdims=True)
-        if grads_degree > 0:
-          self.stats['grd']['mean'] = np.mean(_mean_samples_grd, axis=1, keepdims=True)
-
-      # Compute std of trajectories and gradients
-      if self.stats['trj']['std'] is None:
-        _mean_samples_trj = np.zeros_like(self.sample[0])
-        _mean_samples_grd = 0.
-        for trj, _, grd in self.batches(mode='train', grads_degree=grads_degree, batch_size=batch_size):
-          _mean_samples_trj += np.sum(np.power(
-            trj - self.stats['trj']['mean'], 2), axis=0, keepdims=True
-          ) / self.nums['train']
-          if grads_degree > 0:
-            _mean_samples_grd += np.sum(np.power(
-              grd - self.stats['grd']['mean'], 2), axis=0, keepdims=True
-            ) / self.nums['train']
-        self.stats['trj']['std'] = np.sqrt(np.mean(_mean_samples_trj, axis=1, keepdims=True))
-        if grads_degree > 0:
-          self.stats['grd']['std'] = np.sqrt(np.mean(_mean_samples_grd, axis=1, keepdims=True))
-
-      if residual_steps > 0:
-        # Compute mean of residuals
-        _mean_samples = [
-          np.zeros_like(_get_res(s, self.sample[0]))
-          for s in range(1, residual_steps+1)
-        ]
-        for trj, _, _ in self.batches(mode='train', batch_size=batch_size):
-          for s in range(1, residual_steps+1):
-            if (s % skip_residual_steps):
-              continue
-            _mean_samples[s-1] += np.sum(
-              _get_res(s, trj), axis=0, keepdims=True) / self.nums['train']
-        self.stats['res']['mean'] = [
-          np.mean(_mean_samples[s-1], axis=1, keepdims=True)
-          for s in range(1, residual_steps+1)
-        ]
-
-        # Compute std of residuals
-        _mean_samples = [
-          np.zeros_like(_get_res(s, self.sample[0]))
-          for s in range(1, residual_steps+1)
-        ]
-        for trj, _, _ in self.batches(mode='train', batch_size=batch_size):
-          for s in range(1, residual_steps+1):
-            if (s % skip_residual_steps):
-              continue
-            _mean_samples[s-1] += np.sum(np.power(
-              _get_res(s, trj) - self.stats['res']['mean'][s-1], 2), axis=0, keepdims=True
-            ) / self.nums['train']
-        self.stats['res']['std'] = [
-          np.sqrt(np.mean(_mean_samples[s-1], axis=1, keepdims=True))
-          for s in range(1, residual_steps+1)
-        ]
+    # Compute statistics of the residuals
+    self.stats['res']['mean'] = []
+    self.stats['res']['std'] = []
+    for s in range(1, residual_steps+1):
+      # TODO: Unify shape with trajs and update the skipped ones
+      # if (s % skip_residual_steps):
+      #   self.stats['res']['mean'].append(np.zeros(shape=(1, 1, *self.shape[2:])))
+      #   self.stats['res']['std'].append(np.zeros(shape=(1, 1, *self.shape[2:])))
+      res = _get_res(s, trj)
+      self.stats['res']['mean'].append(np.mean(res, axis=axes, keepdims=True))
+      self.stats['res']['std'].append(np.std(res, axis=axes, keepdims=True))
 
   def _fetch(self, idx: Union[int, Sequence], raw: bool = False):
     """Fetches a sample from the dataset, given its global index."""
@@ -196,7 +128,7 @@ class Dataset:
 
     return traj, spec
 
-  def _fetch_mode(self, idx: Union[int, Sequence], mode: str, grads_degree: int):
+  def _fetch_mode(self, idx: Union[int, Sequence], mode: str):
     # Check inputs
     if isinstance(idx, int):
       idx = [idx]
@@ -206,9 +138,8 @@ class Dataset:
 
     # Get gradients
     traj, spec = self._fetch(_idx)
-    grad = self._get_grads(traj, degree=grads_degree)
 
-    return traj, spec, grad
+    return traj, spec
 
   def _get_grads(self, traj: Array, degree: int = 1):
     """Returns spatial gradients."""
@@ -229,16 +160,16 @@ class Dataset:
 
     return grads
 
-  def train(self, idx: Union[int, Sequence], grads_degree: int = 0):
-    return self._fetch_mode(idx, mode='train', grads_degree=grads_degree)
+  def train(self, idx: Union[int, Sequence]):
+    return self._fetch_mode(idx, mode='train')
 
-  def valid(self, idx: Union[int, Sequence], grads_degree: int = 0):
-    return self._fetch_mode(idx, mode='valid', grads_degree=grads_degree)
+  def valid(self, idx: Union[int, Sequence]):
+    return self._fetch_mode(idx, mode='valid')
 
-  def test(self, idx: Union[int, Sequence], grads_degree: int = 0):
-    return self._fetch_mode(idx, mode='test', grads_degree=grads_degree)
+  def test(self, idx: Union[int, Sequence]):
+    return self._fetch_mode(idx, mode='test')
 
-  def batches(self, mode: str, batch_size: int, grads_degree: int = 0, key: flax.typing.PRNGKey = None):
+  def batches(self, mode: str, batch_size: int, key: flax.typing.PRNGKey = None):
     assert batch_size > 0
     assert batch_size <= self.nums[mode]
 
@@ -249,12 +180,12 @@ class Dataset:
 
     len_dividable = self.nums[mode] - (self.nums[mode] % batch_size)
     for idx in np.split(_idx_mode_permuted[:len_dividable], len_dividable // batch_size):
-      batch = self._fetch_mode(idx, mode, grads_degree=grads_degree)
+      batch = self._fetch_mode(idx, mode)
       yield batch
 
     if (self.nums[mode] % batch_size):
       idx = _idx_mode_permuted[len_dividable:]
-      batch = self._fetch_mode(idx, mode, grads_degree=grads_degree)
+      batch = self._fetch_mode(idx, mode)
       yield batch
 
   def __len__(self):

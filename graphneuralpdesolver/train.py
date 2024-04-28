@@ -395,7 +395,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
     for batch in batches:
       # Unwrap the batch
       # -> [batch_size, len_traj, ...]
-      trajs, specs, auxil = batch
+      trajs, specs = batch
       times = np.tile(jnp.arange(trajs.shape[1]), reps=(trajs.shape[0], 1))
 
       # Downsample the trajectories
@@ -580,7 +580,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
 
     for batch in batches:
       # Unwrap the batch
-      trajs_raw, specs_raw, auxil_raw = batch
+      trajs_raw, specs_raw = batch
       times_raw = np.tile(jnp.arange(trajs_raw.shape[1]), reps=(trajs_raw.shape[0], 1))
 
       # Downsample the trajectories
@@ -853,6 +853,7 @@ def main(argv):
     preload=True,
   )
   dataset.compute_stats(
+    axes=(0, 1),
     grads_degree=0,
     residual_steps=(FLAGS.direct_steps * FLAGS.jump_steps),
     skip_residual_steps=FLAGS.jump_steps,
