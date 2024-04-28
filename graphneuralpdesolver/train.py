@@ -22,9 +22,9 @@ import orbax.checkpoint
 
 from graphneuralpdesolver.experiments import DIR_EXPERIMENTS
 from graphneuralpdesolver.autoregressive import AutoregressivePredictor, OperatorNormalizer
-from graphneuralpdesolver.dataset import shuffle_arrays, Dataset
+from graphneuralpdesolver.dataset import Dataset
 from graphneuralpdesolver.models.graphneuralpdesolver import GraphNeuralPDESolver, AbstractOperator
-from graphneuralpdesolver.utils import disable_logging, Array
+from graphneuralpdesolver.utils import disable_logging, Array, shuffle_arrays
 from graphneuralpdesolver.metrics import mse, rel_l2_error, rel_l1_error
 
 

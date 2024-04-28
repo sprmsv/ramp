@@ -2,9 +2,8 @@ import jax
 import jax.numpy as jnp
 import flax.typing
 
-from graphneuralpdesolver.utils import Array
+from graphneuralpdesolver.utils import Array, normalize, unnormalize
 from graphneuralpdesolver.models.graphneuralpdesolver import AbstractOperator
-from graphneuralpdesolver.dataset import normalize, unnormalize
 
 
 class OperatorNormalizer:

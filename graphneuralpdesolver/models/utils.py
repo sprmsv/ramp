@@ -1,18 +1,37 @@
-"""A library of auxliary functions and classes."""
+"""A library of auxiliary functions and classes."""
 
-from typing import Sequence, Callable, Tuple
-import functools
+from typing import Sequence, Callable
 
-import jax
 import jax.numpy as jnp
 import jax.tree_util as tree
 import flax.linen as nn
+
+from graphneuralpdesolver.utils import Array, calculate_fd_derivative
 
 
 def concatenate_args(args, kwargs, axis: int = -1):
   combined_args = tree.tree_flatten(args)[0] + tree.tree_flatten(kwargs)[0]
   concat_args = jnp.concatenate(combined_args, axis=axis)
   return concat_args
+
+def get_gradients(traj: Array, degree: int = 1):
+  """Returns spatial gradients."""
+
+  if degree < 1:
+    return None
+
+  grads = []
+  if degree >= 1:
+    g_x, g_y = calculate_fd_derivative(traj, axes=(2, 3))
+    grads.extend([g_x, g_y])
+  if degree >= 2:
+    g_xx, g_xy = calculate_fd_derivative(g_x, axes=(2, 3))
+    _, g_yy = calculate_fd_derivative(g_y, axes=(2, 3))
+    grads.extend([g_xx, g_yy, g_xy])
+
+  grads = jnp.concatenate(grads, axis=-1)
+
+  return grads
 
 class AugmentedMLP(nn.Module):
   """

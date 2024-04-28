@@ -3,7 +3,7 @@
 from pathlib import Path
 import h5py
 import numpy as np
-from typing import Any, Union, Sequence, Tuple
+from typing import Any, Union, Sequence
 
 import numpy as np
 import jax
@@ -141,25 +141,6 @@ class Dataset:
 
     return traj, spec
 
-  def _get_grads(self, traj: Array, degree: int = 1):
-    """Returns spatial gradients."""
-
-    if degree < 1:
-      return None
-
-    grads = []
-    if degree >= 1:
-      g_x, g_y = compute_gradients(traj, axes=(2, 3))
-      grads.extend([g_x, g_y])
-    if degree >= 2:
-      g_xx, g_xy = compute_gradients(g_x, axes=(2, 3))
-      _, g_yy = compute_gradients(g_y, axes=(2, 3))
-      grads.extend([g_xx, g_yy, g_xy])
-
-    grads = jnp.concatenate(grads, axis=-1)
-
-    return grads
-
   def train(self, idx: Union[int, Sequence]):
     return self._fetch_mode(idx, mode='train')
 
@@ -244,31 +225,6 @@ def _read_dataset_attributes(h5group: h5py.Group, nx: int, nt: int) -> dict[str,
   dataset['range_x'] = (np.min(dataset['x']), np.max(dataset['x']))
 
   return dataset
-
-def shuffle_arrays(key: flax.typing.PRNGKey, arrays: Sequence[Array]) -> Sequence[Array]:
-  """Shuffles a set of arrays with the same random permutation along the first axis."""
-
-  size = arrays[0].shape[0]
-  assert all([arr.shape[0] == size for arr in arrays])
-  permutation = jax.random.permutation(key, size)
-
-  return [arr[permutation] for arr in arrays]
-
-def normalize(arr: Array, mean: Array, std: Array):
-  std = jnp.where(std == 0., 1., std)
-  arr = (arr - mean) / std
-  return arr
-
-def unnormalize(arr: Array, mean: Array, std: Array):
-  arr = std * arr + mean
-  return arr
-
-def compute_gradients(arr, axes):
-  grads = []
-  for ax in axes:
-    grads.append((jnp.roll(arr, axis=ax, shift=-1) - jnp.roll(arr, axis=ax, shift=1)) / 2)
-
-  return (*grads,)
 
 # NOTE: 1D
 def downsample_convolution(trajectories: Array, ratio: int) -> Array:
