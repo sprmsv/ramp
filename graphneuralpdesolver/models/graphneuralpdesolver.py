@@ -8,6 +8,7 @@ from graphneuralpdesolver.graph.typed_graph import (
     TypedGraph, EdgeSet, EdgeSetKey,
     EdgesIndices, NodeSet, Context)
 from graphneuralpdesolver.models.deep_typed_graph_net import DeepTypedGraphNet
+from graphneuralpdesolver.models.utils import compute_derivatives
 from graphneuralpdesolver.utils import Array
 
 
@@ -33,6 +34,7 @@ class GraphNeuralPDESolver(AbstractOperator):
   num_outputs: int
   num_grid_nodes: Sequence[int]
   num_mesh_nodes: Sequence[int]
+  deriv_degree: int = 0
   latent_size: int = 128
   num_mlp_hidden_layers: int = 2
   num_message_passing_steps: int = 6
@@ -360,6 +362,12 @@ class GraphNeuralPDESolver(AbstractOperator):
     if self.use_t:
       assert t_inp is not None
       t_inp = jnp.array(t_inp, dtype=jnp.float32)
+
+    # Calculate and concatenate gradient
+    if self.deriv_degree:
+      d_inp = compute_derivatives(traj=u_inp, degree=self.deriv_degree)
+      # TODO: Normalize g_inp based on global statistics
+      u_inp = jnp.concatenate([u_inp, d_inp], axis=-1)
 
     # Prepare the grid node features
     # u -> [num_grid_nodes, batch_size, 1 * num_inputs]

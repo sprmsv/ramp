@@ -67,7 +67,7 @@ class Dataset:
 
   def compute_stats(self,
       axes: Sequence[int] = (0,),
-      grads_degree: int = 0,
+      derivs_degree: int = 0,
       residual_steps: int = 0,
       skip_residual_steps: int = 1,
     ) -> None:
@@ -86,7 +86,7 @@ class Dataset:
     self.stats['trj']['std'] = np.std(trj, axis=axes, keepdims=True)
 
     # Compute statistics of the gradients
-    if grads_degree > 0:
+    if derivs_degree > 0:
       ...
 
     # Compute statistics of the residuals

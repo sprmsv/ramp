@@ -14,7 +14,7 @@ def concatenate_args(args, kwargs, axis: int = -1):
   concat_args = jnp.concatenate(combined_args, axis=axis)
   return concat_args
 
-def get_gradients(traj: Array, degree: int = 1):
+def compute_derivatives(traj: Array, degree: int = 1):
   """Returns spatial gradients."""
 
   if degree < 1:
