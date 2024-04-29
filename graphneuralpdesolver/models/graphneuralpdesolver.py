@@ -363,7 +363,7 @@ class GraphNeuralPDESolver(AbstractOperator):
       assert t_inp is not None
       t_inp = jnp.array(t_inp, dtype=jnp.float32)
 
-    # Calculate and concatenate gradient
+    # Calculate and concatenate derivatives
     if self.deriv_degree:
       d_inp = compute_derivatives(traj=u_inp, degree=self.deriv_degree)
       # TODO: Normalize g_inp based on global statistics

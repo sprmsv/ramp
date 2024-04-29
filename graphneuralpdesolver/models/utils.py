@@ -15,7 +15,7 @@ def concatenate_args(args, kwargs, axis: int = -1):
   return concat_args
 
 def compute_derivatives(traj: Array, degree: int = 1):
-  """Returns spatial gradients."""
+  """Returns spatial derivatives."""
 
   if degree < 1:
     return None

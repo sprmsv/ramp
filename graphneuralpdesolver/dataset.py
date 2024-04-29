@@ -160,10 +160,7 @@ class Dataset:
     assert all([i < len(self.idx_modes[mode]) for i in idx])
     _idx = self.idx_modes[mode][np.array(idx)]
 
-    # Get gradients
-    traj, spec = self._fetch(_idx)
-
-    return traj, spec
+    return self._fetch(_idx)
 
   def train(self, idx: Union[int, Sequence]):
     return self._fetch_mode(idx, mode='train')
