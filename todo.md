@@ -1,33 +1,30 @@
 # NEXT STEPS
 
-- Prepare update slides
+- Get all inputs but output only a set of variables
 
-- Check E104 and add new results to the report for brownian_bridge
-    - Compare different architectures + check for overfitting
-- Check E106/E107 and report the numbers
-- Check E110 and report numbers
+## Other
+
+- Update cutoff, evaluation, and assertions to have a fair comparison for different jump_steps
+    - Temporarily, evaluate on 14 with J=1
+    - Make sure to check direct evaluation too
 
 - Add the ignored pairs to your training
     - This way you can increase direct_steps even for short trajectories
+- Debug jump_steps
+
+- Get new datasets (blast etc.)
 
 # EXPERIMENTS
-
-- Try the old normalization strategy again..
-- Normalize t_inp and tau and try correction again
 
 - Try with other learning rates and decays
     - Try with optax.linear_onecycle_schedule
     - Maybe you can increase the learning rate and converge in fewer epochs this way
 
-- Start from parameters of brownian_bridge and train for another dataset
+- Try mean squared relative error
 
 - Run ablation studies with models that fully reach their potential !!
     - Data reach regime
     - Long trainings
-
-- Experiment with other physical features
-
-- Try mean squared relative error
 
 - Train with different n_train to see how it scales with more data
 
@@ -51,7 +48,7 @@ I suspect this is a consequent of the smoothing effect. Explore with different a
 
 - Train with continuious time and try inter- and extrapolating
 
-# LATER
+# LOW PRIORITY / CODE PERFORMANCE
 
 - Try to understand why without preloading the dataset, loading batches takes longer with more GPUs or a larger model.
 
@@ -72,7 +69,7 @@ I suspect this is a consequent of the smoothing effect. Explore with different a
 
 - Write docstring and type annotations
 
-### 1D datasets from Equer and Welling (?)
+## 1D datasets from Equer and Welling (?)
 - Adopt the 1D datasets to the new structure
 - RE-GENERATE THE DATA !! PARAMETERS ARE REPEATED !!
 - Change the structure of the data and support all datasets
