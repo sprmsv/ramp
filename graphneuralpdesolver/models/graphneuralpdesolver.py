@@ -9,7 +9,7 @@ from graphneuralpdesolver.graph.typed_graph import (
     EdgesIndices, NodeSet, Context)
 from graphneuralpdesolver.models.deep_typed_graph_net import DeepTypedGraphNet
 from graphneuralpdesolver.models.utils import compute_derivatives
-from graphneuralpdesolver.utils import Array
+from graphneuralpdesolver.utils import Array, normalize
 
 
 class AbstractOperator(nn.Module):
@@ -343,7 +343,10 @@ class GraphNeuralPDESolver(AbstractOperator):
     return graph
 
   def __call__(self, u_inp: Array, t_inp: Array = None, tau: Union[float, int] = None, specs: jnp.ndarray = None):
-    # INPUT :: [batch_size, 1, num_grid_nodes_0, num_grid_nodes_1, num_inputs]
+    """
+    Inputs must be of shape (batch_size, 1, num_grid_nodes_0, num_grid_nodes_1, num_inputs)
+    """
+
     assert u_inp.ndim == 3 + len(self.num_grid_nodes)
     batch_size = u_inp.shape[0]
     assert u_inp.shape[1] == 1
@@ -363,10 +366,14 @@ class GraphNeuralPDESolver(AbstractOperator):
       assert t_inp is not None
       t_inp = jnp.array(t_inp, dtype=jnp.float32)
 
-    # Calculate and concatenate derivatives
+    # Calculate, normalize, and concatenate derivatives
     if self.deriv_degree:
       d_inp = compute_derivatives(traj=u_inp, degree=self.deriv_degree)
-      # TODO: Normalize g_inp based on global statistics
+      d_inp = normalize(
+        arr=d_inp,
+        mean=jnp.mean(d_inp, axes=(2, 3), keepdims=True),
+        std=jnp.std(d_inp, axes=(2, 3), keepdims=True),
+      )
       u_inp = jnp.concatenate([u_inp, d_inp], axis=-1)
 
     # Prepare the grid node features
