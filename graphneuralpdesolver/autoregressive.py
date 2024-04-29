@@ -28,13 +28,17 @@ class OperatorNormalizer:
     stats_res_mean = stats['res']['mean'][(tau-1)][:, t_inp.reshape(-1)].swapaxes(0, 1)
     stats_res_std = stats['res']['std'][(tau-1)][:, t_inp.reshape(-1)].swapaxes(0, 1)
 
-    # Get normalized predicted residuals
+    # Normalize inputs
     # TODO: Normalize specs as well
     u_inp_nrm = normalize(
       u_inp,
       mean=stats_trj_mean,
       std=stats_trj_std,
     )
+    tau = tau / stats['time']['max']
+    t_inp = t_inp / stats['time']['max']
+
+    # Get predicted normalized residuals
     r_prd_nrm = self._apply_operator(
       variables,
       specs=specs,
@@ -43,12 +47,14 @@ class OperatorNormalizer:
       tau=tau,
     )
 
-    # Get predicted output
+    # Unnormalize predicted residuals
     r_prd = unnormalize(
       r_prd_nrm,
       mean=stats_res_mean,
       std=stats_res_std,
     )
+
+    # Get predicted output
     u_prd = u_inp + r_prd
 
     return u_prd
@@ -70,14 +76,17 @@ class OperatorNormalizer:
     stats_res_mean = stats['res']['mean'][(tau-1)][:, t_inp.reshape(-1)].swapaxes(0, 1)
     stats_res_std = stats['res']['std'][(tau-1)][:, t_inp.reshape(-1)].swapaxes(0, 1)
 
-    # TODO: Normalize t_inp and tau
-
-    # Get normalized predicted residuals
+    # Normalize inputs
+    # TODO: Normalize specs as well
     u_inp_nrm = normalize(
       u_inp,
       mean=stats_trj_mean,
       std=stats_trj_std,
     )
+    tau = tau / stats['time']['max']
+    t_inp = t_inp / stats['time']['max']
+
+    # Get predicted normalized residuals
     r_prd_nrm = self._apply_operator(
       variables,
       specs=specs,
@@ -86,7 +95,7 @@ class OperatorNormalizer:
       tau=tau,
     )
 
-    # Get normalized target residuals
+    # Get target normalized residuals
     r_tgt = u_tgt - u_inp
     r_tgt_nrm = normalize(
       r_tgt,

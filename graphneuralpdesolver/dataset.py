@@ -60,8 +60,9 @@ class Dataset:
     # Instantiate the dataset stats
     self.stats = {
       'trj': {'mean': None, 'std': None},
-      'res': {'mean': None, 'std': None},
       'der': {'mean': None, 'std': None},
+      'res': {'mean': None, 'std': None},
+      'time': {'max': self.shape[1]},
     }
 
     if self.preload:
