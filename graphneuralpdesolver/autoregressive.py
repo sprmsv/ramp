@@ -12,17 +12,29 @@ class OperatorNormalizer:
     self._apply_operator = operator.apply
 
   def apply(self, variables, stats, specs: Array, u_inp: Array, t_inp: Array, tau: int):
-    # tau >= 1
-    # tau_inp >= 0
-    # TODO: BEGIN INDEX FROM ZERO
+    """
+    Normalizes raw inputs and applies the operator on it.
+
+    t_inp is the time of the input and must be a non-negative integer.
+    tau is the time difference and must be an integer greater than zero.
+    """
+
+    # Get the corresponding the global statistics
+    # NOTE: Swap axes is necessary because we will have statistics of shape (1, bsz, ...)
+    # NOTE:   and we want shape (bsz, 1, ...), same as u_inp
+    # NOTE: The trick here is that each sample in the batch gets the statistics of its corresponding t_inp
+    stats_trj_mean = stats['trj']['mean'][:, t_inp.reshape(-1)].swapaxes(0, 1)
+    stats_trj_std = stats['trj']['std'][:, t_inp.reshape(-1)].swapaxes(0, 1)
+    stats_res_mean = stats['res']['mean'][(tau-1)][:, t_inp.reshape(-1)].swapaxes(0, 1)
+    stats_res_std = stats['res']['std'][(tau-1)][:, t_inp.reshape(-1)].swapaxes(0, 1)
 
     # Get normalized predicted residuals
+    # TODO: Normalize specs as well
     u_inp_nrm = normalize(
       u_inp,
-      mean=stats['trj']['mean'],
-      std=stats['trj']['std'],
+      mean=stats_trj_mean,
+      std=stats_trj_std,
     )
-    # TODO: Normalize specifications as well
     r_prd_nrm = self._apply_operator(
       variables,
       specs=specs,
@@ -34,25 +46,37 @@ class OperatorNormalizer:
     # Get predicted output
     r_prd = unnormalize(
       r_prd_nrm,
-      mean=stats['res']['mean'][(tau-1)],
-      std=stats['res']['std'][(tau-1)],
+      mean=stats_res_mean,
+      std=stats_res_std,
     )
     u_prd = u_inp + r_prd
 
     return u_prd
 
   def get_loss_inputs(self, variables, stats, specs: Array, u_inp: Array, t_inp: Array, u_tgt: Array, tau: int):
-    # tau >= 1
-    # tau_inp >= 0
-    # TODO: START FROM ZERO
+    """
+    Calculates prediction and target variables, ready to be given as input to the loss function.
+
+    t_inp is the time of the input and must be a non-negative integer.
+    tau is the time difference and must be an integer greater than zero.
+    """
+
+    # Get the corresponding the global statistics
+    # NOTE: Swap axes is necessary because we will have statistics of shape (1, bsz, ...)
+    # NOTE:   and we want shape (bsz, 1, ...), same as u_inp
+    # NOTE: The trick here is that each sample in the batch gets the statistics of its corresponding t_inp
+    stats_trj_mean = stats['trj']['mean'][:, t_inp.reshape(-1)].swapaxes(0, 1)
+    stats_trj_std = stats['trj']['std'][:, t_inp.reshape(-1)].swapaxes(0, 1)
+    stats_res_mean = stats['res']['mean'][(tau-1)][:, t_inp.reshape(-1)].swapaxes(0, 1)
+    stats_res_std = stats['res']['std'][(tau-1)][:, t_inp.reshape(-1)].swapaxes(0, 1)
 
     # TODO: Normalize t_inp and tau
 
     # Get normalized predicted residuals
     u_inp_nrm = normalize(
       u_inp,
-      mean=stats['trj']['mean'],
-      std=stats['trj']['std'],
+      mean=stats_trj_mean,
+      std=stats_trj_std,
     )
     r_prd_nrm = self._apply_operator(
       variables,
@@ -66,8 +90,8 @@ class OperatorNormalizer:
     r_tgt = u_tgt - u_inp
     r_tgt_nrm = normalize(
       r_tgt,
-      mean=stats['res']['mean'][(tau-1)],
-      std=stats['res']['std'][(tau-1)],
+      mean=stats_res_mean,
+      std=stats_res_std,
     )
 
     return (r_prd_nrm, r_tgt_nrm)

@@ -12,6 +12,8 @@ import jax.numpy as jnp
 import flax.typing
 
 from graphneuralpdesolver.utils import Array
+from graphneuralpdesolver.utils import normalize
+from graphneuralpdesolver.models.utils import compute_derivatives
 
 
 DATAGROUP = {
@@ -58,8 +60,8 @@ class Dataset:
     # Instantiate the dataset stats
     self.stats = {
       'trj': {'mean': None, 'std': None},
-      'grd': {'mean': None, 'std': None},
       'res': {'mean': None, 'std': None},
+      'der': {'mean': None, 'std': None},
     }
 
     if self.preload:
@@ -76,8 +78,6 @@ class Dataset:
     assert residual_steps >= 0
     assert residual_steps < self.shape[1]
 
-    _get_res = lambda s, trj: trj[:, (s):] - trj[:, :-(s)]
-
     # Get all trajectories
     trj, _ = self.train(np.arange(self.nums['train']))
 
@@ -85,21 +85,44 @@ class Dataset:
     self.stats['trj']['mean'] = np.mean(trj, axis=axes, keepdims=True)
     self.stats['trj']['std'] = np.std(trj, axis=axes, keepdims=True)
 
-    # Compute statistics of the gradients
+    # Compute statistics of the derivatives
     if derivs_degree > 0:
-      ...
+      trj_nrm = normalize(trj, mean=self.stats['trj']['mean'], std=self.stats['trj']['std'])
+      trj_nrm_der = compute_derivatives(trj_nrm, degree=derivs_degree)
+      self.stats['der']['mean'] = np.mean(trj_nrm_der, axis=axes, keepdims=True)
+      self.stats['der']['std'] = np.std(trj_nrm_der, axis=axes, keepdims=True)
 
     # Compute statistics of the residuals
+    # TRY: Compute statistics of residuals of normalized trajectories
+    _get_res = lambda s, trj: trj[:, (s):] - trj[:, :-(s)]
     self.stats['res']['mean'] = []
     self.stats['res']['std'] = []
     for s in range(1, residual_steps+1):
-      # TODO: Unify shape with trajs and update the skipped ones
-      # if (s % skip_residual_steps):
-      #   self.stats['res']['mean'].append(np.zeros(shape=(1, 1, *self.shape[2:])))
-      #   self.stats['res']['std'].append(np.zeros(shape=(1, 1, *self.shape[2:])))
+      if (s % skip_residual_steps):
+        self.stats['res']['mean'].append(np.zeros(shape=(1, *self.shape[1:])))
+        self.stats['res']['std'].append(np.ones(shape=(1, *self.shape[1:])))
       res = _get_res(s, trj)
-      self.stats['res']['mean'].append(np.mean(res, axis=axes, keepdims=True))
-      self.stats['res']['std'].append(np.std(res, axis=axes, keepdims=True))
+      res_mean = np.mean(res, axis=axes, keepdims=True)
+      res_std = np.std(res, axis=axes, keepdims=True)
+      # Fill the time axis so that all stats have the same shape
+      if 1 not in axes:
+        fill_shape = [1 if (ax in axes) else self.shape[ax] for ax in range(len(self.shape))]
+        fill_shape[1] = s
+        res_mean = np.concatenate([res_mean, np.zeros(shape=fill_shape)], axis=1)
+        res_std = np.concatenate([res_std, np.ones(shape=fill_shape)], axis=1)
+      self.stats['res']['mean'].append(res_mean)
+      self.stats['res']['std'].append(res_std)
+
+    # Repeat along the time axis
+    if 1 in axes:
+      reps = (1, self.shape[1], 1, 1, 1)
+      self.stats['trj']['mean'] = np.tile(self.stats['trj']['mean'], reps=reps)
+      self.stats['trj']['std'] = np.tile(self.stats['trj']['std'], reps=reps)
+      if derivs_degree > 0:
+        self.stats['der']['mean'] = np.tile(self.stats['der']['mean'], reps=reps)
+        self.stats['der']['std'] = np.tile(self.stats['der']['std'], reps=reps)
+      self.stats['res']['mean'] = [np.tile(stat, reps=reps) for stat in self.stats['res']['mean']]
+      self.stats['res']['std'] = [np.tile(stat, reps=reps) for stat in self.stats['res']['std']]
 
   def _fetch(self, idx: Union[int, Sequence], raw: bool = False):
     """Fetches a sample from the dataset, given its global index."""
