@@ -1,6 +1,13 @@
 # NEXT STEPS
 
+- Add the recent work to your update slides (Check E142/E143)
+
 - Get all inputs but output only a set of variables
+
+## Challenging datasets
+- Add message-passing steps before the output
+- Concatenate latent features before the final message-passing steps
+- Predict output directly instead of residuals
 
 ## Other
 

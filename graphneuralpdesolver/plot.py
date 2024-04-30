@@ -86,7 +86,10 @@ def plot_trajectory(traj, idx_time, idx_traj=0, symmetric=True, cmap=CMAP_BBR, y
 
   n_vars = traj[0].shape[-1]
 
-  fig, axs = plt.subplots(nrows=n_vars, ncols=len(idx_time), figsize=(10, 1.6*n_vars), sharex=True, sharey=True)
+  fig, axs = plt.subplots(nrows=n_vars, ncols=len(idx_time), figsize=(8, 1.5*n_vars+.2), sharex=True, sharey=True)
+  if (n_vars == 1) and len(idx_time) == 1:
+    axs = np.array(axs)
+  axs = axs.reshape(n_vars, len(idx_time))
 
   for ivar in range(n_vars):
     if symmetric:
