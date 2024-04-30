@@ -18,8 +18,10 @@ from graphneuralpdesolver.models.utils import compute_derivatives
 
 DATAGROUP = {
   'incompressible_fluids': 'velocity',
-  'compressible_flow': 'solution',  # TMP
+  'compressible_flow': 'data',
   'compressible_flow/gravity': 'solution',
+  'reaction_diffusion': 'solution',
+  'wave_equation': 'solution',
 }
 
 class Dataset:
@@ -35,6 +37,7 @@ class Dataset:
 
     # Set attributes
     self.datagroup = DATAGROUP[subpath]
+    if name == 'richtmyer_meshkov': self.datagroup = 'solution'
     self.reader = h5py.File(Path(datadir) / subpath / f'{name}.nc', 'r')
     self.idx_vars = [idx_vars] if isinstance(idx_vars, int) else idx_vars
     self.preload = preload
@@ -139,7 +142,10 @@ class Dataset:
     else:
       traj = self.reader[self.datagroup][np.sort(idx)]
     # Move axes
-    traj = np.moveaxis(traj, source=(2, 3, 4), destination=(4, 2, 3))
+    if len(traj.shape) == 5:
+      traj = np.moveaxis(traj, source=(2, 3, 4), destination=(4, 2, 3))
+    elif len(traj.shape) == 4:
+      traj = np.expand_dims(traj, axis=-1)
     # Set equation parameters
     spec = None
 

@@ -3,6 +3,9 @@
 - Add the recent work to your update slides (Check E142/E143)
     - Also check the overfitting of E143 with lighter models
 
+- Launch E144: New architecture
+- Experiment with the new datasets
+
 ## Challenging datasets
 
 - Predict output directly instead of residuals
