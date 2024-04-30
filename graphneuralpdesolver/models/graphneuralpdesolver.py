@@ -371,8 +371,8 @@ class GraphNeuralPDESolver(AbstractOperator):
       d_inp = compute_derivatives(traj=u_inp, degree=self.deriv_degree)
       d_inp = normalize(
         arr=d_inp,
-        mean=jnp.mean(d_inp, axes=(2, 3), keepdims=True),
-        std=jnp.std(d_inp, axes=(2, 3), keepdims=True),
+        mean=jnp.mean(d_inp, axis=(2, 3), keepdims=True),
+        std=jnp.std(d_inp, axis=(2, 3), keepdims=True),
       )
       u_inp = jnp.concatenate([u_inp, d_inp], axis=-1)
 
