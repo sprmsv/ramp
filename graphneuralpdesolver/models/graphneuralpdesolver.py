@@ -121,10 +121,36 @@ class GraphNeuralPDESolver(AbstractOperator):
     self.idx_mesh2grid_grid_nodes = np.concatenate(_idx_mesh2grid_grid_nodes).tolist()
     self.idx_mesh2grid_mesh_nodes = np.concatenate(_idx_mesh2grid_mesh_nodes).tolist()
 
+    # Get grid2grid edge connections
+    # TODO: Optimize the procedure (avoid for loops)
+    idx_senders = []
+    idx_receivers = []
+    for p in range(1):
+      dist = (
+        min(2 ** p, self.num_grid_nodes[0] // 2),
+        min(2 ** p, self.num_grid_nodes[1] // 2)
+      )
+      for i in np.arange(self.num_grid_nodes[0], step=dist[0]):
+        for j in np.arange(self.num_grid_nodes[1], step=dist[1]):
+          idx_senders.append((i, j))  # LEFT
+          idx_receivers.append(((i-dist[0]) % self.num_grid_nodes[0], j))
+          idx_senders.append((i, j))  # RIGHT
+          idx_receivers.append(((i+dist[0]) % self.num_grid_nodes[0], j))
+          idx_senders.append((i, j))  # DOWN
+          idx_receivers.append((i, (j-dist[1]) % self.num_grid_nodes[0]))
+          idx_senders.append((i, j))  # UP
+          idx_receivers.append((i, (j+dist[1]) % self.num_grid_nodes[0]))
+    # Get flat indexes
+    self.idx_grid2grid_send = list(
+      map(lambda s: s[0] * self.num_grid_nodes[0] + s[1], idx_senders))
+    self.idx_grid2grid_recv = list(
+      map(lambda r: r[0] * self.num_grid_nodes[0] + r[1], idx_receivers))
+
     # Initialize the graphs
     self._grid2mesh_graph = self._init_grid2mesh_graph()
     self._mesh_graph = self._init_mesh_graph()
     self._mesh2grid_graph = self._init_mesh2grid_graph()
+    self._grid2grid_graph = self._init_grid2grid_graph()
 
     # Define the encoder
     self._grid2mesh_gnn = DeepTypedGraphNet(
@@ -149,8 +175,8 @@ class GraphNeuralPDESolver(AbstractOperator):
     self._mesh_gnn = DeepTypedGraphNet(
       embed_nodes=False,  # Node features already embdded by previous layers.
       embed_edges=True,  # Embed raw features of the multi-mesh edges.
-      node_latent_size=dict(mesh_nodes=self.latent_size),
       edge_latent_size=dict(mesh=self.latent_size),
+      node_latent_size=dict(mesh_nodes=self.latent_size),
       mlp_hidden_size=self.latent_size,
       mlp_num_hidden_layers=self.num_mlp_hidden_layers,
       num_message_passing_steps=self.num_message_passing_steps,
@@ -164,16 +190,12 @@ class GraphNeuralPDESolver(AbstractOperator):
       name='mesh_gnn',
     )
 
-    # Define the decoder
+    # Define step 1 of the decoder
     self._mesh2grid_gnn = DeepTypedGraphNet(
-      # Require a specific node dimensionaly for the grid node outputs.
-      node_output_size=dict(grid_nodes=self.num_outputs),
       embed_nodes=False,  # Node features already embdded by previous layers.
       embed_edges=True,  # Embed raw features of the mesh2grid edges.
       edge_latent_size=dict(mesh2grid=self.latent_size),
-      node_latent_size=dict(
-          mesh_nodes=self.latent_size,
-          grid_nodes=self.latent_size),
+      node_latent_size=dict(mesh_nodes=self.latent_size, grid_nodes=self.latent_size),
       mlp_hidden_size=self.latent_size,
       mlp_num_hidden_layers=self.num_mlp_hidden_layers,
       num_message_passing_steps=1,
@@ -185,6 +207,27 @@ class GraphNeuralPDESolver(AbstractOperator):
       # NOTE: segment_mean because number of edges is not balanced
       aggregate_edges_for_nodes_fn='segment_mean',
       name='mesh2grid_gnn',
+    )
+
+    # Define step 2 of the decoder
+    self._grid2grid_gnn = DeepTypedGraphNet(
+      # Require a specific node dimensionaly for the grid node outputs.
+      node_output_size=dict(grid_nodes=self.num_outputs),
+      embed_nodes=False,  # Node features already embdded by previous layers.
+      embed_edges=True,  # Embed raw features of the grid2grid edges.
+      edge_latent_size=dict(grid2grid=self.latent_size),
+      node_latent_size=dict(grid_nodes=self.latent_size),
+      mlp_hidden_size=self.latent_size,
+      mlp_num_hidden_layers=self.num_mlp_hidden_layers,
+      num_message_passing_steps=1,  # TMP PARAMETERIZE
+      use_layer_norm=True,
+      use_learned_correction=False,
+      include_sent_messages_in_node_update=False,
+      activation='swish',
+      f32_aggregation=False,
+      # NOTE: segment_mean because number of edges is not balanced
+      aggregate_edges_for_nodes_fn='segment_mean',
+      name='grid2grid_gnn',
     )
 
   # TODO: Support 1D
@@ -341,6 +384,25 @@ class GraphNeuralPDESolver(AbstractOperator):
 
     return graph
 
+  def _init_grid2grid_graph(self) -> TypedGraph:
+    """Build Grid2Grid graph."""
+
+    edge_set, grid_node_set, _ = self._init_structural_features(
+      zeta_sen=self.zeta_grid.reshape(self._num_grid_nodes_tot, -1),
+      zeta_rec=self.zeta_grid.reshape(self._num_grid_nodes_tot, -1),
+      idx_sen=self.idx_grid2grid_send,
+      idx_rec=self.idx_grid2grid_recv,
+      node_freqs=self.node_coordinate_freqs,
+    )
+
+    graph = TypedGraph(
+      context=Context(n_graph=jnp.array([1]), features=()),
+      nodes={'grid_nodes': grid_node_set},
+      edges={EdgeSetKey('grid2grid', ('grid_nodes', 'grid_nodes')): edge_set},
+    )
+
+    return graph
+
   def __call__(self, u_inp: Array, t_inp: Array = None, tau: Union[float, int] = None, specs: jnp.ndarray = None):
     """
     Inputs must be of shape (batch_size, 1, num_grid_nodes_0, num_grid_nodes_1, num_inputs)
@@ -395,16 +457,20 @@ class GraphNeuralPDESolver(AbstractOperator):
       [grid_node_features, *grid_node_features_forced], axis=-1)
 
     # Transfer data for the grid to the mesh
-    # [num_mesh_nodes, batch_size, latent_size], [num_grid_nodes, batch_size, latent_size]
+    # -> [num_mesh_nodes, batch_size, latent_size], [num_grid_nodes, batch_size, latent_size]
     (latent_mesh_nodes, latent_grid_nodes) = self._run_grid2mesh_gnn(grid_node_features, tau)
 
-    # Run message passing in the multimesh.
-    # [num_mesh_nodes, batch_size, latent_size]
+    # Run message-passing in the multimesh.
+    # -> [num_mesh_nodes, batch_size, latent_size]
     updated_latent_mesh_nodes = self._run_mesh_gnn(latent_mesh_nodes, tau)
 
-    # Transfer data frome the mesh to the grid.
-    # [num_grid_nodes, batch_size, 1 * num_outputs]
-    output_grid_nodes = self._run_mesh2grid_gnn(updated_latent_mesh_nodes, latent_grid_nodes, tau)
+    # Transfer data from the mesh to the grid.
+    # -> [num_grid_nodes, batch_size, latent_size]
+    updated_latent_grid_nodes = self._run_mesh2grid_gnn(updated_latent_mesh_nodes, latent_grid_nodes, tau)
+
+    # Run message passing in the grid.
+    # -> [num_grid_nodes, batch_size, num_outputs]
+    output_grid_nodes = self._run_grid2grid_gnn(updated_latent_grid_nodes, latent_grid_nodes, tau)
 
     # Reshape the output to [batch_size, 1, num_grid_nodes, num_outputs]
     output = jnp.moveaxis(
@@ -476,7 +542,6 @@ class GraphNeuralPDESolver(AbstractOperator):
     mesh_graph = self._mesh_graph
 
     # Replace the node features
-    # CHECK: Try keeping the structural ones
     # NOTE: We don't need to add the structural node features, because these are
     # already part of  the latent state, via the original Grid2Mesh gnn.
     nodes = mesh_graph.nodes['mesh_nodes']
@@ -503,7 +568,10 @@ class GraphNeuralPDESolver(AbstractOperator):
     )
 
     # Run the GNN
-    return self._mesh_gnn(input_graph, correction=tau).nodes['mesh_nodes'].features
+    output_graph = self._mesh_gnn(input_graph, correction=tau)
+    output_mesh_nodes = output_graph.nodes['mesh_nodes'].features
+
+    return output_mesh_nodes
 
   def _run_mesh2grid_gnn(self, updated_latent_mesh_nodes: jnp.ndarray,
                         latent_grid_nodes: jnp.ndarray, tau: float) -> jnp.ndarray:
@@ -538,6 +606,42 @@ class GraphNeuralPDESolver(AbstractOperator):
 
     # Run the GNN
     output_graph = self._mesh2grid_gnn(input_graph, correction=tau)
+    output_grid_nodes = output_graph.nodes['grid_nodes'].features
+
+    return output_grid_nodes
+
+  def _run_grid2grid_gnn(self, latent_grid_nodes: jnp.ndarray,
+                         initial_latent_grid_nodes: jnp.ndarray, tau: float) -> jnp.ndarray:
+    """Runs the grid2grid_gnn, extracting updated latent grid nodes."""
+
+    bsz = latent_grid_nodes.shape[1]
+    grid2grid_graph = self._grid2grid_graph
+
+    # Replace the node features
+    # NOTE: We don't need to add the structural node features, because these are
+    # already part of the latent state, via the original Grid2Mesh gnn.
+    concatenated_latent_grid_nodes = jnp.concatenate(
+      [latent_grid_nodes, initial_latent_grid_nodes], axis=-1)
+    nodes = grid2grid_graph.nodes['grid_nodes']
+    nodes = nodes._replace(features=latent_grid_nodes)
+
+    # Add the structural edge features of this graph.
+    # NOTE: We need the structural edge features, because it is the first
+    # time we are seeing this particular set of edges.
+    grid_edges_key = grid2grid_graph.edge_key_by_name('grid2grid')
+    edges = grid2grid_graph.edges[grid_edges_key]
+    new_edges = edges._replace(
+      features=_add_batch_second_axis(
+        edges.features.astype(latent_grid_nodes.dtype), bsz)
+    )
+
+    # Build the graph
+    input_graph = grid2grid_graph._replace(
+      edges={grid_edges_key: new_edges}, nodes={'grid_nodes': nodes}
+    )
+
+    # Run the GNN
+    output_graph = self._grid2grid_gnn(input_graph, correction=tau)
     output_grid_nodes = output_graph.nodes['grid_nodes'].features
 
     return output_grid_nodes
