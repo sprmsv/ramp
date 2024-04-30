@@ -32,8 +32,8 @@ class OperatorNormalizer:
     # TODO: Normalize specs as well
     u_inp_nrm = normalize(
       u_inp,
-      mean=stats_trj_mean,
-      std=stats_trj_std,
+      shift=stats_trj_mean,
+      scale=stats_trj_std,
     )
     tau = tau / stats['time']['max']
     t_inp = t_inp / stats['time']['max']
@@ -80,8 +80,8 @@ class OperatorNormalizer:
     # TODO: Normalize specs as well
     u_inp_nrm = normalize(
       u_inp,
-      mean=stats_trj_mean,
-      std=stats_trj_std,
+      shift=stats_trj_mean,
+      scale=stats_trj_std,
     )
     tau = tau / stats['time']['max']
     t_inp = t_inp / stats['time']['max']
@@ -99,8 +99,8 @@ class OperatorNormalizer:
     r_tgt = u_tgt - u_inp
     r_tgt_nrm = normalize(
       r_tgt,
-      mean=stats_res_mean,
-      std=stats_res_std,
+      shift=stats_res_mean,
+      scale=stats_res_std,
     )
 
     return (r_prd_nrm, r_tgt_nrm)

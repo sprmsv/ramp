@@ -1,13 +1,12 @@
 # NEXT STEPS
 
 - Add the recent work to your update slides (Check E142/E143)
-
-- Get all inputs but output only a set of variables
+    - Also check the overfitting of E143 with lighter models
 
 ## Challenging datasets
-- Add message-passing steps before the output
-- Concatenate latent features before the final message-passing steps
+
 - Predict output directly instead of residuals
+- Train without downsampling the trajectories (easier dynamics)
 
 ## Other
 
@@ -18,8 +17,6 @@
 - Add the ignored pairs to your training
     - This way you can increase direct_steps even for short trajectories
 - Debug jump_steps
-
-- Get new datasets (blast etc.)
 
 # EXPERIMENTS
 

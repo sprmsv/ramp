@@ -34,9 +34,9 @@ def shuffle_arrays(key: flax.typing.PRNGKey, arrays: Sequence[Array]) -> Sequenc
   return [arr[permutation] for arr in arrays]
 
 
-def normalize(arr: Array, mean: Array, std: Array):
-  std = jnp.where(std == 0., 1., std)
-  arr = (arr - mean) / std
+def normalize(arr: Array, shift: Array, scale: Array):
+  scale = jnp.where(scale == 0., 1., scale)
+  arr = (arr - shift) / scale
   return arr
 
 def unnormalize(arr: Array, mean: Array, std: Array):

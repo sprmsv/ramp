@@ -37,11 +37,12 @@ class GraphNeuralPDESolver(AbstractOperator):
   deriv_degree: int = 0
   latent_size: int = 128
   num_mlp_hidden_layers: int = 2
-  num_message_passing_steps: int = 6
+  num_message_passing_steps: int = 18
+  num_message_passing_steps_grid: int = 2
   overlap_factor_grid2mesh: float = 1.
   overlap_factor_mesh2grid: float = 1.
   num_multimesh_levels: int = 1
-  node_coordinate_freqs: int = 1,
+  node_coordinate_freqs: int = 1
   use_tau: bool = True
   use_t: bool = True
 
@@ -216,10 +217,10 @@ class GraphNeuralPDESolver(AbstractOperator):
       embed_nodes=False,  # Node features already embdded by previous layers.
       embed_edges=True,  # Embed raw features of the grid2grid edges.
       edge_latent_size=dict(grid2grid=self.latent_size),
-      node_latent_size=dict(grid_nodes=self.latent_size),
+      node_latent_size=dict(grid_nodes=(self.latent_size * 2)),
       mlp_hidden_size=self.latent_size,
       mlp_num_hidden_layers=self.num_mlp_hidden_layers,
-      num_message_passing_steps=1,  # TMP PARAMETERIZE
+      num_message_passing_steps=self.num_message_passing_steps_grid,
       use_layer_norm=True,
       use_learned_correction=False,
       include_sent_messages_in_node_update=False,
@@ -431,8 +432,8 @@ class GraphNeuralPDESolver(AbstractOperator):
       d_inp = compute_derivatives(traj=u_inp, degree=self.deriv_degree)
       d_inp = normalize(
         arr=d_inp,
-        mean=jnp.mean(d_inp, axis=(2, 3), keepdims=True),
-        std=jnp.std(d_inp, axis=(2, 3), keepdims=True),
+        shift=0.,
+        scale=jnp.max(jnp.abs(d_inp), axis=(2, 3), keepdims=True),
       )
       u_inp = jnp.concatenate([u_inp, d_inp], axis=-1)
 
@@ -623,7 +624,7 @@ class GraphNeuralPDESolver(AbstractOperator):
     concatenated_latent_grid_nodes = jnp.concatenate(
       [latent_grid_nodes, initial_latent_grid_nodes], axis=-1)
     nodes = grid2grid_graph.nodes['grid_nodes']
-    nodes = nodes._replace(features=latent_grid_nodes)
+    nodes = nodes._replace(features=concatenated_latent_grid_nodes)
 
     # Add the structural edge features of this graph.
     # NOTE: We need the structural edge features, because it is the first

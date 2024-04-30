@@ -18,7 +18,8 @@ from graphneuralpdesolver.models.utils import compute_derivatives
 
 DATAGROUP = {
   'incompressible_fluids': 'velocity',
-  'compressible_flow': 'data',
+  'compressible_flow': 'solution',  # TMP
+  'compressible_flow/gravity': 'solution',
 }
 
 class Dataset:
@@ -88,7 +89,7 @@ class Dataset:
 
     # Compute statistics of the derivatives
     if derivs_degree > 0:
-      trj_nrm = normalize(trj, mean=self.stats['trj']['mean'], std=self.stats['trj']['std'])
+      trj_nrm = normalize(trj, shift=self.stats['trj']['mean'], scale=self.stats['trj']['std'])
       trj_nrm_der = compute_derivatives(trj_nrm, degree=derivs_degree)
       self.stats['der']['mean'] = np.mean(trj_nrm_der, axis=axes, keepdims=True)
       self.stats['der']['std'] = np.std(trj_nrm_der, axis=axes, keepdims=True)

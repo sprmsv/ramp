@@ -106,6 +106,9 @@ flags.DEFINE_integer(name='num_mlp_hidden_layers', default=2, required=False,
 flags.DEFINE_integer(name='num_message_passing_steps', default=6, required=False,
   help='Number of message-passing steps in the processor'
 )
+flags.DEFINE_integer(name='num_message_passing_steps_grid', default=6, required=False,
+  help='Number of message-passing steps in the decoder'
+)
 
 @dataclass
 class EvalMetrics:
@@ -886,6 +889,7 @@ def main(argv):
       latent_size=FLAGS.latent_size,
       num_mlp_hidden_layers=FLAGS.num_mlp_hidden_layers,
       num_message_passing_steps=FLAGS.num_message_passing_steps,
+      num_message_passing_steps_grid=FLAGS.num_message_passing_steps_grid,
       overlap_factor_grid2mesh=FLAGS.overlap_factor_grid2mesh,
       overlap_factor_mesh2grid=FLAGS.overlap_factor_mesh2grid,
       num_multimesh_levels=FLAGS.num_multimesh_levels,
