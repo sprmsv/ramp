@@ -890,7 +890,6 @@ def main(argv):
       overlap_factor_mesh2grid=FLAGS.overlap_factor_mesh2grid,
       num_multimesh_levels=FLAGS.num_multimesh_levels,
       node_coordinate_freqs=FLAGS.node_coordinate_freqs,
-      residual_update=True,
       use_tau=True,
       use_t=True,
     )

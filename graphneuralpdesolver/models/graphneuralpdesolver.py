@@ -42,7 +42,6 @@ class GraphNeuralPDESolver(AbstractOperator):
   overlap_factor_mesh2grid: float = 1.
   num_multimesh_levels: int = 1
   node_coordinate_freqs: int = 1,
-  residual_update: bool = True
   use_tau: bool = True
   use_t: bool = True
 
@@ -352,8 +351,7 @@ class GraphNeuralPDESolver(AbstractOperator):
     assert u_inp.shape[1] == 1
     assert u_inp.shape[2] == self.num_grid_nodes[0]
     assert u_inp.shape[3] == self.num_grid_nodes[1]
-    if self.residual_update:
-      assert u_inp.shape[-1] == self.num_outputs
+    assert u_inp.shape[-1] == self.num_outputs
 
     if specs is not None:
       assert specs.ndim == 2  # [batch_size, num_params]
