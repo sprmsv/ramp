@@ -1,10 +1,15 @@
 # NEXT STEPS
 
 - Add the recent work to your update slides (Check E142/E143)
-    - Also check the overfitting of E143 with lighter models
+    - Check the overfitting of E143 with lighter models
+    - Check the L2-DR effect with each normalization
+- Check E144/E145/E146 for normalization axes
 
-- Launch E144: New architecture
+- Launch E150: New architecture
+    - Launch with two normalizations: axis=(0,) and axis=(0, 1,)
+
 - Experiment with the new datasets
+- Add data augmentation
 
 ## Challenging datasets
 
