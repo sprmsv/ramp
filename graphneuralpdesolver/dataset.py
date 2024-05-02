@@ -31,8 +31,8 @@ class Dataset:
       n_train: int, n_valid: int, n_test: int,
       idx_vars: Union[int, Sequence] = None,
       preload: bool = False,
-      cutoff: int = None,
       downsample_factor: int = 1,
+      cutoff: int = None,
     ):
 
     # Set attributes
@@ -155,7 +155,8 @@ class Dataset:
 
     # Downsample and cut the trajectories
     if not raw:
-      traj = traj[:, :(self.cutoff):self.downsample_factor]
+      traj = traj[:, ::self.downsample_factor]
+      traj = traj[:, :self.cutoff]
 
     return traj, spec
 

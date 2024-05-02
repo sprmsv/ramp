@@ -31,6 +31,11 @@ from graphneuralpdesolver.metrics import mse, rel_l2_error, rel_l1_error
 SEED = 44
 NUM_DEVICES = jax.local_device_count()
 
+TIME_DOWNSAMPLE_FACTOR = 2
+IDX_FN = 8
+# NOTE: With JUMP_STEPS=4, we need trajectories of length 12 after downsampling
+MAX_JUMP_STEPS = 2
+
 # FLAGS::general
 FLAGS = flags.FLAGS
 flags.DEFINE_string(name='datadir', default=None, required=True,
@@ -142,8 +147,8 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
   num_batches = num_samples_trn // FLAGS.batch_size
   assert (jump_steps * FLAGS.batch_size) % NUM_DEVICES == 0
   batch_size_per_device = (jump_steps * FLAGS.batch_size) // NUM_DEVICES
-  assert (len_traj - 1) % jump_steps == 0
-  num_times = (len_traj - 1) // jump_steps  # TODO: Support J08
+  assert len_traj % jump_steps == 0
+  num_times = len_traj // jump_steps
   evaluation_frequency = (FLAGS.epochs // 20) if (FLAGS.epochs >= 20) else 1
 
   # Store the initial time
@@ -406,21 +411,20 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
 
       # Downsample the trajectories
       # -> [batch_size * jump_steps, num_times, ...]
-      # NOTE: The last timestep is excluded to make the length of all the trajectories even
       trajs = jnp.concatenate(jnp.split(
-          (trajs[:, :-1]
-          .reshape(FLAGS.batch_size, (len_traj-1) // jump_steps, jump_steps, *num_grid_points, num_vars)
+          (trajs
+          .reshape(FLAGS.batch_size, num_times, jump_steps, *num_grid_points, num_vars)
           .swapaxes(1, 2)
-          .reshape(FLAGS.batch_size, (len_traj-1), *num_grid_points, num_vars)),
+          .reshape(FLAGS.batch_size, len_traj, *num_grid_points, num_vars)),
           jump_steps,
           axis=1),
         axis=0,
       )
       times = jnp.concatenate(jnp.split(
-          (times[:, :-1]
-          .reshape(FLAGS.batch_size, (len_traj-1) // jump_steps, jump_steps)
+          (times
+          .reshape(FLAGS.batch_size, num_times, jump_steps)
           .swapaxes(1, 2)
-          .reshape(FLAGS.batch_size, (len_traj-1))),
+          .reshape(FLAGS.batch_size, len_traj)),
           jump_steps,
           axis=1),
         axis=0,
@@ -554,7 +558,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
     # Set input and target
     u_inp = trajs[:, :1]
     t_inp = times[:, :1]
-    u_tgt = trajs[:, -1:]
+    u_tgt = trajs[:, (IDX_FN):(IDX_FN+1)]
 
     # Get prediction at the final step
     variables = {'params': state.params}
@@ -564,7 +568,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
       specs=specs,
       u_inp=u_inp,
       t_inp=t_inp,
-      num_jumps=((len_traj - 1) // (direct_steps * jump_steps)),
+      num_jumps=(IDX_FN // (direct_steps * jump_steps)),
     )
 
     # Calculate the errors
@@ -593,19 +597,19 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
       # -> [batch_size * jump_steps, num_times, ...]
       # NOTE: The last timestep is excluded to make the length of all the trajectories even
       trajs = jnp.concatenate(jnp.split(
-          (trajs_raw[:, :-1]
-          .reshape(FLAGS.batch_size, (len_traj-1) // jump_steps, jump_steps, *num_grid_points, num_vars)
+          (trajs_raw
+          .reshape(FLAGS.batch_size, num_times, jump_steps, *num_grid_points, num_vars)
           .swapaxes(1, 2)
-          .reshape(FLAGS.batch_size, (len_traj-1), *num_grid_points, num_vars)),
+          .reshape(FLAGS.batch_size, len_traj, *num_grid_points, num_vars)),
           jump_steps,
           axis=1),
         axis=0,
       )
       times = jnp.concatenate(jnp.split(
-          (times_raw[:, :-1]
-          .reshape(FLAGS.batch_size, (len_traj-1) // jump_steps, jump_steps)
+          (times_raw
+          .reshape(FLAGS.batch_size, num_times, jump_steps)
           .swapaxes(1, 2)
-          .reshape(FLAGS.batch_size, (len_traj-1))),
+          .reshape(FLAGS.batch_size, len_traj)),
           jump_steps,
           axis=1),
         axis=0,
@@ -651,6 +655,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
       specs = shard(specs_raw) if _use_specs else None
 
       # Evaluate final prediction
+      assert IDX_FN < trajs.shape[2]
       _error_fn_l1_batch, _error_fn_l2_batch = _evaluate_final_prediction(
         state, stats, trajs, times, specs,
       )
@@ -839,6 +844,10 @@ def main(argv):
   # We only support single-host training.
   assert process_count == 1
 
+  # Check the inputs
+  assert FLAGS.jump_steps <= MAX_JUMP_STEPS
+  assert (IDX_FN % (FLAGS.direct_steps * FLAGS.jump_steps)) == 0
+
   # Initialize the random key
   key = jax.random.PRNGKey(SEED)
 
@@ -851,8 +860,8 @@ def main(argv):
     n_train=FLAGS.n_train,
     n_valid=FLAGS.n_valid,
     n_test=FLAGS.n_test,
-    cutoff=17,
-    downsample_factor=2,
+    downsample_factor=TIME_DOWNSAMPLE_FACTOR,
+    cutoff=(IDX_FN + MAX_JUMP_STEPS),
     preload=True,
   )
   dataset.compute_stats(

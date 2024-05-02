@@ -1,27 +1,36 @@
 # NEXT STEPS
 
-- Experiment with the new datasets
 
 - Check E144/E145/E146 for normalization axes
     - Fix the axes in train.py
 
-- Add data augmentation
+- Check E150/E151/E152 for the new architecture
+    - Add them to the report if they are interesting
+    - Run further experiments if any of them works
 
-## Challenging datasets
+- Invest a bit more on the compressible datasets
+    - Experiment with normalization axes on different datasets
+    - Try correction again with t_inp and tau
+    - Consider using BatchNorm instead of LayerNorm
+    - Predict output directly instead of residuals
+    - Train without downsampling the trajectories (easier dynamics)
+    - Try data augmentation
+        - Try shifting first (approved)
+        - Try repeating but this is physically incorrect
 
-- Predict output directly instead of residuals
-
-- Train without downsampling the trajectories (easier dynamics)
+- Data scaling experiments
+    * Start with one/two dataset
+    * Train with ALL active variables
+    * Make sure to do one of the compressible datasets (kh and riemann_kh)
 
 ## Other
 
-- Update cutoff, evaluation, and assertions to have a fair comparison for different jump_steps
-    - Temporarily, evaluate on 14 with J=1
-    - Make sure to check direct evaluation too
+- Automize validation (extend the Dataset class)
 
 - Add the ignored pairs to your training
     - This way you can increase direct_steps even for short trajectories
-- Debug jump_steps
+
+- Fix everything and start reproducing experiments (with repeats) for reporting in the thesis
 
 # EXPERIMENTS
 
