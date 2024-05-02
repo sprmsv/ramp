@@ -645,13 +645,10 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
       error_ro_l2.append(_error_ro_l2_batch)
 
       # Split the batch between devices
-      # -> [NUM_DEVICES/jump_steps, batch_size_per_device, ...]
-      trajs = jnp.concatenate(jnp.split(jnp.expand_dims(
-        trajs_raw, axis=0), (NUM_DEVICES // jump_steps), axis=1), axis=0)
-      times = jnp.concatenate(jnp.split(jnp.expand_dims(
-        times_raw, axis=0), (NUM_DEVICES // jump_steps), axis=1), axis=0)
-      specs = jnp.concatenate(jnp.split(jnp.expand_dims(
-        specs_raw, axis=0), (NUM_DEVICES // jump_steps), axis=1), axis=0) if _use_specs else None
+      # -> [NUM_DEVICES, batch_size/NUM_DEVICES, ...]
+      trajs = shard(trajs_raw)
+      times = shard(times_raw)
+      specs = shard(specs_raw) if _use_specs else None
 
       # Evaluate final prediction
       _error_fn_l1_batch, _error_fn_l2_batch = _evaluate_final_prediction(
