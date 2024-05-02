@@ -1,6 +1,5 @@
 # NEXT STEPS
 
-
 - Check E144/E145/E146 for normalization axes
     - Fix the axes in train.py
 
@@ -18,6 +17,8 @@
         - Try shifting first (approved)
         - Try repeating but this is physically incorrect
 
+- Experiment with direct_steps and jump_steps too
+
 - Data scaling experiments
     * Start with one/two dataset
     * Train with ALL active variables
@@ -25,7 +26,8 @@
 
 ## Other
 
-- Automize validation (extend the Dataset class)
+- Automize testing (extend the Dataset class)
+    - Always test with the same indices (not permuted)
 
 - Add the ignored pairs to your training
     - This way you can increase direct_steps even for short trajectories

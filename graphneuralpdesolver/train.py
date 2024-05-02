@@ -32,9 +32,9 @@ SEED = 44
 NUM_DEVICES = jax.local_device_count()
 
 TIME_DOWNSAMPLE_FACTOR = 2
-IDX_FN = 8
+IDX_FN = 7
 # NOTE: With JUMP_STEPS=4, we need trajectories of length 12 after downsampling
-MAX_JUMP_STEPS = 2
+MAX_JUMP_STEPS = 1
 
 # FLAGS::general
 FLAGS = flags.FLAGS
@@ -561,6 +561,8 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
     u_tgt = trajs[:, (IDX_FN):(IDX_FN+1)]
 
     # Get prediction at the final step
+    _num_jumps = IDX_FN // (direct_steps * jump_steps)
+    _num_direct_steps = IDX_FN % (direct_steps * jump_steps)
     variables = {'params': state.params}
     u_prd = predictor.jump(
       variables=variables,
@@ -568,8 +570,17 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
       specs=specs,
       u_inp=u_inp,
       t_inp=t_inp,
-      num_jumps=(IDX_FN // (direct_steps * jump_steps)),
+      num_jumps=_num_jumps,
     )
+    if _num_direct_steps:
+      _, u_prd = predictor.unroll(
+        variables=variables,
+        stats=stats,
+        specs=specs,
+        u_inp=u_prd,
+        t_inp=t_inp,
+        num_steps=_num_direct_steps,
+      )
 
     # Calculate the errors
     err_l1 = jnp.sqrt(jnp.sum(jnp.power(rel_l1_error(u_prd, u_tgt), 2), axis=1))
@@ -846,7 +857,7 @@ def main(argv):
 
   # Check the inputs
   assert FLAGS.jump_steps <= MAX_JUMP_STEPS
-  assert (IDX_FN % (FLAGS.direct_steps * FLAGS.jump_steps)) == 0
+  assert (IDX_FN % FLAGS.jump_steps) == 0
 
   # Initialize the random key
   key = jax.random.PRNGKey(SEED)
@@ -962,7 +973,8 @@ def main(argv):
   ) if FLAGS.lr_decay else FLAGS.lr
   tx = optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-8)
   state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
-  for _d in range(1, FLAGS.direct_steps+1):
+  # for _d in range(1, FLAGS.direct_steps+1):  # TMP
+  for _d in [FLAGS.direct_steps]:  # TMP
     key, subkey = jax.random.split(key)
     epochs = (epochs_u00_dff if (_d == FLAGS.direct_steps) else epochs_u00_dxx)
     state = train(
