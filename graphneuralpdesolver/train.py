@@ -60,11 +60,14 @@ flags.DEFINE_integer(name='batch_size', default=4, required=False,
 flags.DEFINE_integer(name='epochs', default=20, required=False,
   help='Number of training epochs'
 )
-flags.DEFINE_float(name='lr', default=1e-04, required=False,
-  help='Training learning rate'
+flags.DEFINE_float(name='lr_peak', default=1e-03, required=False,
+  help='Peak learning rate in the onecycle scheduler'
 )
-flags.DEFINE_float(name='lr_decay', default=None, required=False,
-  help='The minimum learning rate decay in the cosine scheduler'
+flags.DEFINE_float(name='lr_init', default=1e-04, required=False,
+  help='Initial learning rate in the onecycle scheduler'
+)
+flags.DEFINE_float(name='lr_final', default=1e-05, required=False,
+  help='Final learning rate in the onecycle scheduler'
 )
 flags.DEFINE_integer(name='jump_steps', default=1, required=False,
   help='Factor by which the dataset time delta is multiplied in prediction'
@@ -966,19 +969,21 @@ def main(argv):
   assert num_lead_times > 0
   num_lead_times_full = max(0, num_times - FLAGS.direct_steps - unroll_offset)
   num_lead_times_part = num_lead_times - num_lead_times_full
-  decay_steps = 0
+  transition_steps = 0
   for _d in range(1, FLAGS.direct_steps+1):
     num_valid_pairs_d = (
       num_lead_times_full * _d
       + (num_lead_times_part * (num_lead_times_part+1) // 2)
     )
     epochs_d = (epochs_u00_dff if (_d == FLAGS.direct_steps) else epochs_u00_dxx)
-    decay_steps +=  epochs_d * num_batches * FLAGS.jump_steps * num_valid_pairs_d
-  lr = optax.cosine_decay_schedule(
-    init_value=FLAGS.lr,
-    decay_steps=decay_steps,
-    alpha=FLAGS.lr_decay,
-  ) if FLAGS.lr_decay else FLAGS.lr
+    transition_steps +=  epochs_d * num_batches * FLAGS.jump_steps * num_valid_pairs_d
+  lr = optax.cosine_onecycle_schedule(
+    transition_steps=transition_steps,
+    peak_value=FLAGS.lr_peak,
+    pct_start=.1,
+    div_factor=(FLAGS.lr_peak / FLAGS.lr_init),
+    final_div_factor=(FLAGS.lr_peak / FLAGS.lr_final),
+  ) if FLAGS.lr_final else FLAGS.lr_peak
   tx = optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-8)
   state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
   for _d in range(1, FLAGS.direct_steps+1):
@@ -998,7 +1003,7 @@ def main(argv):
     epochs_trained += epochs
 
   # Train the model with unrolling
-  lr = FLAGS.lr * FLAGS.lr_decay
+  lr = FLAGS.lr_final
   tx = optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-8)
   state = TrainState.create(apply_fn=model.apply, params=state.params, tx=tx)
   for _u in range(1, FLAGS.unroll_steps+1):

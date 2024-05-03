@@ -26,21 +26,14 @@
 
 ## Other
 
-- Fix everything and start reproducing experiments (with repeats) for reporting in the thesis
-
-# EXPERIMENTS
-
-- Try with other learning rates and decays
-    - Try with optax.linear_onecycle_schedule
-    - Maybe you can increase the learning rate and converge in fewer epochs this way
-
 - Try mean squared relative error
 
 - Run ablation studies with models that fully reach their potential !!
     - Data reach regime
     - Long trainings
 
-- Train with different n_train to see how it scales with more data
+- Fix everything and start reproducing experiments (with repeats) for reporting in the thesis
+
 
 ## Grouping phenomenon
 - Try increasing overlap_factor
