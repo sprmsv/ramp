@@ -974,8 +974,7 @@ def main(argv):
   ) if FLAGS.lr_decay else FLAGS.lr
   tx = optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-8)
   state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
-  # for _d in range(1, FLAGS.direct_steps+1):  # TMP
-  for _d in [FLAGS.direct_steps]:  # TMP
+  for _d in [FLAGS.direct_steps]:
     key, subkey = jax.random.split(key)
     epochs = (epochs_u00_dff if (_d == FLAGS.direct_steps) else epochs_u00_dxx)
     state = train(

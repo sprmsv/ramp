@@ -68,7 +68,10 @@ class Dataset:
     }
 
     if self.preload:
-      self.data = self.reader[self.datagroup][np.arange(self.length)]
+      _len_dataset = self.reader[self.datagroup].shape[0]
+      train_data = self.reader[self.datagroup][np.arange(n_train)]
+      valid_data = self.reader[self.datagroup][np.arange(_len_dataset - n_valid, _len_dataset)]
+      self.data = np.concatenate([train_data, valid_data], axis=0)
 
   def compute_stats(self,
       axes: Sequence[int] = (0,),
