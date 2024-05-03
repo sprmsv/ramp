@@ -75,14 +75,11 @@ flags.DEFINE_integer(name='direct_steps', default=1, required=False,
 flags.DEFINE_integer(name='unroll_steps', default=0, required=False,
   help='Number of steps for getting a noisy input and applying the model autoregressively'
 )
-flags.DEFINE_integer(name='n_train', default=(2**11), required=False,
+flags.DEFINE_integer(name='n_train', default=(2**10), required=False,
   help='Number of training samples'
 )
 flags.DEFINE_integer(name='n_valid', default=(2**9), required=False,
   help='Number of validation samples'
-)
-flags.DEFINE_integer(name='n_test', default=(2**9), required=False,
-  help='Number of test samples'
 )
 
 # FLAGS::model
@@ -875,7 +872,6 @@ def main(argv):
     name=FLAGS.dataset,
     n_train=FLAGS.n_train,
     n_valid=FLAGS.n_valid,
-    n_test=FLAGS.n_test,
     downsample_factor=TIME_DOWNSAMPLE_FACTOR,
     cutoff=(IDX_FN + MAX_JUMP_STEPS),
     preload=True,
