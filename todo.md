@@ -24,9 +24,6 @@
 
 ## Other
 
-- Automize testing (extend the Dataset class)
-    - Always test with the same indices (not permuted)
-
 - Add the ignored pairs to your training
     - This way you can increase direct_steps even for short trajectories
 

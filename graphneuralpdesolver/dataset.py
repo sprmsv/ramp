@@ -28,7 +28,7 @@ class Dataset:
 
   def __init__(self, key: flax.typing.PRNGKey,
       datadir: str, subpath: str, name: str,
-      n_train: int, n_valid: int, n_test: int,
+      n_train: int = 0, n_valid: int = 0,
       idx_vars: Union[int, Sequence] = None,
       preload: bool = False,
       downsample_factor: int = 1,
@@ -43,7 +43,7 @@ class Dataset:
     self.preload = preload
     self.data = None
     if self.preload:
-      self.length = n_train+n_valid+n_test
+      self.length = n_train + n_valid
     else:
       self.length = self.reader[self.datagroup].shape[0]
     self.cutoff = cutoff if (cutoff is not None) else (self._fetch(0, raw=True)[0].shape[1])
@@ -52,13 +52,11 @@ class Dataset:
     self.shape = self.sample[0].shape
 
     # Split the dataset
-    assert (n_train+n_valid+n_test) <= self.length
-    self.nums = {'train': n_train, 'valid': n_valid, 'test': n_test}
-    random_permutation = jax.random.permutation(key, self.length)
+    assert (n_train + n_valid) <= self.length
+    self.nums = {'train': n_train, 'valid': n_valid}
     self.idx_modes = {
-      'train': random_permutation[:n_train],
-      'valid': random_permutation[n_train:(n_train+n_valid)],
-      'test': random_permutation[(n_train+n_valid):(n_train+n_valid+n_test)],
+      'train': jax.random.permutation(key, n_train),
+      'valid': np.arange((self.length - n_valid), self.length),
     }
 
     # Instantiate the dataset stats
@@ -175,9 +173,6 @@ class Dataset:
 
   def valid(self, idx: Union[int, Sequence]):
     return self._fetch_mode(idx, mode='valid')
-
-  def test(self, idx: Union[int, Sequence]):
-    return self._fetch_mode(idx, mode='test')
 
   def batches(self, mode: str, batch_size: int, key: flax.typing.PRNGKey = None):
     assert batch_size > 0
