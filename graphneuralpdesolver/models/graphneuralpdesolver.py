@@ -422,10 +422,14 @@ class GraphNeuralPDESolver(AbstractOperator):
 
     if self.use_tau:
       assert tau is not None
-      tau = jnp.array(tau, dtype=jnp.float32).reshape(1,)
+      tau = jnp.array(tau, dtype=jnp.float32)
+      if tau.size == 1:
+        tau = jnp.tile(tau.reshape(1, 1), reps=(batch_size, 1))
     if self.use_t:
       assert t_inp is not None
       t_inp = jnp.array(t_inp, dtype=jnp.float32)
+      if t_inp.size == 1:
+        t_inp = jnp.tile(t_inp.reshape(1, 1), reps=(batch_size, 1))
 
     # Calculate, normalize, and concatenate derivatives
     if self.deriv_degree:
@@ -438,7 +442,7 @@ class GraphNeuralPDESolver(AbstractOperator):
       u_inp = jnp.concatenate([u_inp, d_inp], axis=-1)
 
     # Prepare the grid node features
-    # u -> [num_grid_nodes, batch_size, 1 * num_inputs]
+    # u -> [num_grid_nodes, batch_size, num_inputs]
     grid_node_features = jnp.moveaxis(
       u_inp, source=(0, 1, 2, 3),
       destination=(2, 3, 0, 1)
@@ -447,7 +451,7 @@ class GraphNeuralPDESolver(AbstractOperator):
     grid_node_features_forced = []
     if self.use_tau:
       grid_node_features_forced.append(
-        jnp.tile(tau, reps=(self._num_grid_nodes_tot, batch_size, 1)))
+        jnp.tile(tau, reps=(self._num_grid_nodes_tot, 1, 1)))
     if self.use_t:
       grid_node_features_forced.append(
         jnp.tile(t_inp, reps=(self._num_grid_nodes_tot, 1, 1)))

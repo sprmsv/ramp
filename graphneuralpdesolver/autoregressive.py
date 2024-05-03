@@ -11,7 +11,7 @@ class OperatorNormalizer:
   def __init__(self, operator: AbstractOperator):
     self._apply_operator = operator.apply
 
-  def apply(self, variables, stats, specs: Array, u_inp: Array, t_inp: Array, tau: int):
+  def apply(self, variables, stats, specs: Array, u_inp: Array, t_inp: Array, tau: Array):
     """
     Normalizes raw inputs and applies the operator on it.
 
@@ -25,8 +25,8 @@ class OperatorNormalizer:
     # NOTE: The trick here is that each sample in the batch gets the statistics of its corresponding t_inp
     stats_trj_mean = stats['trj']['mean'][:, t_inp.reshape(-1)].swapaxes(0, 1)
     stats_trj_std = stats['trj']['std'][:, t_inp.reshape(-1)].swapaxes(0, 1)
-    stats_res_mean = stats['res']['mean'][(tau-1)][:, t_inp.reshape(-1)].swapaxes(0, 1)
-    stats_res_std = stats['res']['std'][(tau-1)][:, t_inp.reshape(-1)].swapaxes(0, 1)
+    stats_res_mean = stats['res']['mean'][(tau-1).reshape(-1), :, t_inp.reshape(-1)]
+    stats_res_std = stats['res']['std'][(tau-1).reshape(-1), :, t_inp.reshape(-1)]
 
     # Normalize inputs
     # TODO: Normalize specs as well
@@ -59,7 +59,7 @@ class OperatorNormalizer:
 
     return u_prd
 
-  def get_loss_inputs(self, variables, stats, specs: Array, u_inp: Array, t_inp: Array, u_tgt: Array, tau: int):
+  def get_loss_inputs(self, variables, stats, specs: Array, u_inp: Array, t_inp: Array, u_tgt: Array, tau: Array):
     """
     Calculates prediction and target variables, ready to be given as input to the loss function.
 
@@ -73,8 +73,8 @@ class OperatorNormalizer:
     # NOTE: The trick here is that each sample in the batch gets the statistics of its corresponding t_inp
     stats_trj_mean = stats['trj']['mean'][:, t_inp.reshape(-1)].swapaxes(0, 1)
     stats_trj_std = stats['trj']['std'][:, t_inp.reshape(-1)].swapaxes(0, 1)
-    stats_res_mean = stats['res']['mean'][(tau-1)][:, t_inp.reshape(-1)].swapaxes(0, 1)
-    stats_res_std = stats['res']['std'][(tau-1)][:, t_inp.reshape(-1)].swapaxes(0, 1)
+    stats_res_mean = stats['res']['mean'][(tau-1).reshape(-1), :, t_inp.reshape(-1)]
+    stats_res_std = stats['res']['std'][(tau-1).reshape(-1), :, t_inp.reshape(-1)]
 
     # Normalize inputs
     # TODO: Normalize specs as well

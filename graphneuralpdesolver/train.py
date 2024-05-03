@@ -24,7 +24,7 @@ from graphneuralpdesolver.experiments import DIR_EXPERIMENTS
 from graphneuralpdesolver.autoregressive import AutoregressivePredictor, OperatorNormalizer
 from graphneuralpdesolver.dataset import Dataset
 from graphneuralpdesolver.models.graphneuralpdesolver import GraphNeuralPDESolver, AbstractOperator
-from graphneuralpdesolver.utils import disable_logging, Array, shuffle_arrays
+from graphneuralpdesolver.utils import disable_logging, Array, shuffle_arrays, split_arrays
 from graphneuralpdesolver.metrics import mse, rel_l2_error, rel_l1_error
 
 
@@ -157,9 +157,16 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
   time_int_pre = time()
 
   # Define the permissible lead times
-  num_lead_times = num_times - unroll_offset - direct_steps
+  num_lead_times = num_times - 1 - unroll_offset
   assert num_lead_times > 0
-  lead_times = jnp.arange(unroll_offset, num_times - direct_steps)
+  assert unroll_offset + direct_steps < num_times
+  num_lead_times_full = max(0, num_times - direct_steps - unroll_offset)
+  num_lead_times_part = num_lead_times - num_lead_times_full
+  num_valid_pairs = (
+    num_lead_times_full * direct_steps
+    + (num_lead_times_part * (num_lead_times_part+1) // 2)
+  )
+  lead_times = jnp.arange(unroll_offset, num_times - 1)
 
   # Define the autoregressive predictor
   normalizer = OperatorNormalizer(operator=model)
@@ -190,10 +197,10 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
     """Loads a batch, normalizes it, updates the state based on it, and returns it."""
 
     def _update_state_per_direct_step(
-      state: TrainState, key: flax.typing.PRNGKey,
-      specs: Array, u_lag: Array, t_lag: Array, u_tgt: Array, tau: int,
+      state: TrainState,
+      specs: Array, u_lag: Array, t_lag: Array, u_tgt: Array, tau: Array,
     ) -> Tuple[TrainState, Array, PyTreeDef]:
-      # NOTE: INPUT SHAPES [batch_size_per_device * num_lead_times, ...]
+      # NOTE: INPUT SHAPES [batch_size_per_device, ...]
 
       def _get_loss_and_grads(
         params: flax.typing.Collection, specs: Array,
@@ -261,60 +268,24 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
 
         return loss, grads
 
-      # Shuffle the input/outputs along the batch axis
-      if _use_specs:
-        specs, u_lag, t_lag, u_tgt = shuffle_arrays(key, [specs, u_lag, t_lag, u_tgt])
-      else:
-        u_lag, t_lag, u_tgt = shuffle_arrays(key, [u_lag, t_lag, u_tgt])
-
-      # Split into num_lead_times chunks and get loss and gradients
-      # -> [num_lead_times, batch_size_per_device, ...]
-      specs = jnp.stack(jnp.split(specs, num_lead_times)) if _use_specs else None
-      u_lag = jnp.stack(jnp.split(u_lag, num_lead_times))
-      t_lag = jnp.stack(jnp.split(t_lag, num_lead_times))
-      u_tgt = jnp.stack(jnp.split(u_tgt, num_lead_times))
-
-      # Add loss and gradients for each mini batch
-      def _update_state_per_lead_time(i, carry):
-        # Update state, loss, and gradients
-        _state, _loss_carried, _grads_carried = carry
-        _loss_lead_time, _grads_lead_time = _get_loss_and_grads(
-          params=_state.params,
-          specs=(specs[i] if _use_specs else None),
-          u_lag=u_lag[i],
-          t_lag=t_lag[i],
-          u_tgt=u_tgt[i],
-          tau=tau,
-        )
-        # Synchronize loss and gradients
-        _loss_lead_time = jax.lax.pmean(_loss_lead_time, axis_name='device')
-        _grads_lead_time = jax.lax.pmean(_grads_lead_time, axis_name='device')
-        # Apply gradients
-        _state = _state.apply_gradients(grads=_grads_lead_time)
-        # Update the carried mean loss and gradient of the minibatch
-        _loss_updated = _loss_carried + _loss_lead_time / num_lead_times
-        _grads_updated = jax.tree_map(
-          lambda g_old, g_new: (g_old + g_new / num_lead_times),
-          _grads_carried,
-          _grads_lead_time
-        )
-
-        return _state, _loss_updated, _grads_updated
-
-      # Loop over lead_times
-      _init_state = state
-      _init_loss = 0.
-      _init_grads = jax.tree_map(lambda p: jnp.zeros_like(p), state.params)
-      state, loss, grads = jax.lax.fori_loop(
-        lower=0,
-        upper=num_lead_times,
-        body_fun=_update_state_per_lead_time,
-        init_val=(_init_state, _init_loss, _init_grads)
+      # Update state, loss, and gradients
+      _loss, _grads = _get_loss_and_grads(
+        params=state.params,
+        specs=(specs if _use_specs else None),
+        u_lag=u_lag,
+        t_lag=t_lag,
+        u_tgt=u_tgt,
+        tau=tau,
       )
+      # Synchronize loss and gradients
+      loss = jax.lax.pmean(_loss, axis_name='device')
+      grads = jax.lax.pmean(_grads, axis_name='device')
+      # Apply gradients
+      state = state.apply_gradients(grads=grads)
 
       return state, loss, grads
 
-    # Get input output pairs for all lead times
+    # Index trajectories and times and collect input/output pairs
     # -> [num_lead_times, batch_size_per_device, ...]
     u_lag_batch = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
@@ -326,35 +297,62 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
           operand=times,
           start_index=(lt-unroll_offset), slice_size=1, axis=1)
     )(lead_times)
-    u_tgt_batch = jax.vmap(
-        lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=trajs,
-          start_index=(lt+1), slice_size=direct_steps, axis=1)
-    )(lead_times)
-    specs_batch = (specs[None, :, :]
+    specs_batch = (specs[None, :, None, :]
       .repeat(repeats=num_lead_times, axis=0)
     ) if _use_specs else None
+    u_tgt_batch = jax.vmap(
+        lambda lt: jax.lax.dynamic_slice_in_dim(
+          operand=jnp.concatenate([trajs, jnp.zeros_like(trajs)], axis=1),
+          start_index=(lt+1), slice_size=direct_steps, axis=1)
+    )(lead_times)
 
-    # Concatenate lead times along the batch axis
-    # -> [batch_size_per_device * num_lead_times, ...]
-    u_lag_batch = u_lag_batch.reshape(
-        (batch_size_per_device * num_lead_times), 1, *num_grid_points, -1)
-    t_lag_batch = t_lag_batch.reshape(
-        (batch_size_per_device * num_lead_times), 1)
-    u_tgt_batch = u_tgt_batch.reshape(
-        (batch_size_per_device * num_lead_times), direct_steps, *num_grid_points, -1)
-    specs_batch = specs_batch.reshape(
-        (batch_size_per_device * num_lead_times), -1) if _use_specs else None
+    # Repeat inputs along the time axis to match with u_tgt
+    # -> [num_lead_times, batch_size_per_device, direct_steps, ...]
+    u_lag_batch = jnp.tile(u_lag_batch, reps=(1, 1, direct_steps, 1, 1, 1))
+    t_lag_batch = jnp.tile(t_lag_batch, reps=(1, 1, direct_steps, 1, 1, 1))
+    tau_batch = jnp.tile(
+      (jump_steps * jnp.arange(1, direct_steps+1)).reshape(1, 1, direct_steps, 1),
+      reps=(num_lead_times, batch_size_per_device, 1, 1)
+    )
+    specs_batch = jnp.tile(specs_batch, reps=(1, 1, direct_steps, 1)) if _use_specs else None
 
-    # Same u_lag, t_inp, and specs; loop over tau
+    # Put all pairs along the batch axis
+    # -> [batch_size_per_device * num_lead_times * direct_steps, ...]
+    u_lag_batch = u_lag_batch.reshape((num_lead_times*batch_size_per_device*direct_steps), 1, *num_grid_points, num_vars)
+    t_lag_batch = t_lag_batch.reshape((num_lead_times*batch_size_per_device*direct_steps), 1)
+    tau_batch = tau_batch.reshape((num_lead_times*batch_size_per_device*direct_steps), 1)
+    specs_batch = specs_batch.reshape((num_lead_times*batch_size_per_device*direct_steps), -1) if _use_specs else None
+    u_tgt_batch = u_tgt_batch.reshape((num_lead_times*batch_size_per_device*direct_steps), 1, *num_grid_points, num_vars)
+
+    # Remove the invalid pairs
+    # -> [batch_size_per_device * num_valid_pairs, ...]
+    offset_full_lead_times = (num_times - direct_steps - unroll_offset) * direct_steps * batch_size_per_device
+    idx_invalid_pairs = np.array([
+      (offset_full_lead_times + (_d * batch_size_per_device + _b) * direct_steps - (_n + 1))
+      for _d in range(direct_steps - 1)
+      for _b in range(1, batch_size_per_device + 1)
+      for _n in range(_d + 1)
+    ]).astype(int)
+    u_lag_batch = jnp.delete(u_lag_batch, idx_invalid_pairs, axis=0)
+    t_lag_batch = jnp.delete(t_lag_batch, idx_invalid_pairs, axis=0)
+    tau_batch = jnp.delete(tau_batch, idx_invalid_pairs, axis=0)
+    specs_batch = jnp.delete(specs_batch, idx_invalid_pairs, axis=0) if _use_specs else None
+    u_tgt_batch = jnp.delete(u_tgt_batch, idx_invalid_pairs, axis=0)
+
+    # Shuffle and split the pairs
+    # -> [num_valid_pairs, batch_size_per_device, ...]
+    num_valid_pairs = u_tgt_batch.shape[0] // batch_size_per_device
     key, subkey = jax.random.split(key)
-    subkeys = jnp.stack(jax.random.split(subkey, num=direct_steps))
-    tau_batch = jump_steps * jnp.arange(1, direct_steps+1)  # -> [direct_steps,]
-    u_tgt_batch = jnp.expand_dims(u_tgt_batch, axis=2).swapaxes(0, 1)  # -> [direct_steps, ...]
-
-    # Shuffle direct_steps
-    key, subkey = jax.random.split(key)
-    tau_batch, u_tgt_batch = shuffle_arrays(subkey, [tau_batch, u_tgt_batch])
+    if _use_specs:
+      u_lag_batch, t_lag_batch, tau_batch, specs_batch, u_tgt_batch = shuffle_arrays(
+        subkey, [u_lag_batch, t_lag_batch, tau_batch, specs_batch, u_tgt_batch])
+      u_lag_batch, t_lag_batch, tau_batch, specs_batch, u_tgt_batch = split_arrays(
+        [u_lag_batch, t_lag_batch, tau_batch, specs_batch, u_tgt_batch], size=batch_size_per_device)
+    else:
+      u_lag_batch, t_lag_batch, tau_batch, u_tgt_batch = shuffle_arrays(
+        subkey, [u_lag_batch, t_lag_batch, tau_batch, u_tgt_batch])
+      u_lag_batch, t_lag_batch, tau_batch, u_tgt_batch = split_arrays(
+        [u_lag_batch, t_lag_batch, tau_batch, u_tgt_batch], size=batch_size_per_device)
 
     # Add loss and gradients for each direct_step
     def _update_state(i, carry):
@@ -362,10 +360,9 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
       _state, _loss_carried, _grads_carried = carry
       _state, _loss_direct_step, _grads_direct_step = _update_state_per_direct_step(
         state=_state,
-        key=subkeys[i],
         specs=(specs_batch if _use_specs else None),
-        u_lag=u_lag_batch,
-        t_lag=t_lag_batch,
+        u_lag=u_lag_batch[i],
+        t_lag=t_lag_batch[i],
         u_tgt=u_tgt_batch[i],
         tau=tau_batch[i],
       )
@@ -379,13 +376,13 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
 
       return _state, _loss_updated, _grads_updated
 
-    # Loop over the direct_steps
+    # Loop over the pairs
     _init_state = state
     _init_loss = 0.
     _init_grads = jax.tree_map(lambda p: jnp.zeros_like(p), state.params)
     state, loss, grads = jax.lax.fori_loop(
       lower=0,
-      upper=direct_steps,
+      upper=num_valid_pairs,
       body_fun=_update_state,
       init_val=(_init_state, _init_loss, _init_grads)
     )
@@ -826,10 +823,10 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
         f'DRCT: {direct_steps : 02d}',
         f'URLL: {unroll_steps : 02d}',
         f'EPCH: {epochs_before + epoch : 04d}/{FLAGS.epochs : 04d}',
-        f'TIME: {time_tot : 06.1f}s',
         f'LR: {state.opt_state.hyperparams["learning_rate"][0].item() : .2e}',
-        f'RMSE: {np.sqrt(loss).item() : .2e}',
+        f'TIME: {time_tot : 06.1f}s',
         f'GRAD: {grad.item() : .2e}',
+        f'RMSE: {np.sqrt(loss).item() : .2e}',
       ]))
 
 
@@ -948,7 +945,7 @@ def main(argv):
     model_init_kwargs = dict(
       u_inp=jnp.ones(shape=(FLAGS.batch_size, 1, *num_grid_points, num_vars)),
       t_inp=jnp.zeros(shape=(FLAGS.batch_size, 1)),
-      tau=1.,
+      tau=jnp.ones(shape=(FLAGS.batch_size, 1)),
       specs=(jnp.ones_like(sample_spec).repeat(FLAGS.batch_size, axis=0)
         if (sample_spec is not None) else None),
     )
@@ -963,18 +960,28 @@ def main(argv):
   # Train the model without unrolling
   epochs_trained = 0
   num_batches = dataset.nums['train'] // FLAGS.batch_size
-  num_times = (dataset.shape[1] - 1) // FLAGS.jump_steps
+  num_times = dataset.shape[1] // FLAGS.jump_steps
   unroll_offset = FLAGS.unroll_steps * FLAGS.direct_steps
-  num_lead_times = num_times - unroll_offset - FLAGS.direct_steps
+  num_lead_times = num_times - 1 - unroll_offset
   assert num_lead_times > 0
+  num_lead_times_full = max(0, num_times - FLAGS.direct_steps - unroll_offset)
+  num_lead_times_part = num_lead_times - num_lead_times_full
+  decay_steps = 0
+  for _d in range(1, FLAGS.direct_steps+1):
+    num_valid_pairs_d = (
+      num_lead_times_full * _d
+      + (num_lead_times_part * (num_lead_times_part+1) // 2)
+    )
+    epochs_d = (epochs_u00_dff if (_d == FLAGS.direct_steps) else epochs_u00_dxx)
+    decay_steps +=  epochs_d * num_batches * FLAGS.jump_steps * num_valid_pairs_d
   lr = optax.cosine_decay_schedule(
     init_value=FLAGS.lr,
-    decay_steps=(epochs_u00 * num_batches) * FLAGS.direct_steps * num_lead_times,
+    decay_steps=decay_steps,
     alpha=FLAGS.lr_decay,
   ) if FLAGS.lr_decay else FLAGS.lr
   tx = optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-8)
   state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
-  for _d in [FLAGS.direct_steps]:
+  for _d in range(1, FLAGS.direct_steps+1):
     key, subkey = jax.random.split(key)
     epochs = (epochs_u00_dff if (_d == FLAGS.direct_steps) else epochs_u00_dxx)
     state = train(

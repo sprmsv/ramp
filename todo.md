@@ -16,6 +16,8 @@
         - Try repeating but this is physically incorrect
 
 - Experiment with direct_steps and jump_steps too
+    - Update the evaluation functions first
+    - Evaluate separately with different methods for autoregressive prediction
 
 - Data scaling experiments
     * Start with one/two dataset
@@ -23,9 +25,6 @@
     * Make sure to do one of the compressible datasets (kh and riemann_kh)
 
 ## Other
-
-- Add the ignored pairs to your training
-    - This way you can increase direct_steps even for short trajectories
 
 - Fix everything and start reproducing experiments (with repeats) for reporting in the thesis
 

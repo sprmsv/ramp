@@ -27,12 +27,18 @@ class disable_logging:
 def shuffle_arrays(key: flax.typing.PRNGKey, arrays: Sequence[Array]) -> Sequence[Array]:
   """Shuffles a set of arrays with the same random permutation along the first axis."""
 
-  size = arrays[0].shape[0]
-  assert all([arr.shape[0] == size for arr in arrays])
-  permutation = jax.random.permutation(key, size)
+  length = arrays[0].shape[0]
+  assert all([arr.shape[0] == length for arr in arrays])
+  permutation = jax.random.permutation(key, length)
 
   return [arr[permutation] for arr in arrays]
 
+def split_arrays(arrays: Sequence[Array], size: int) -> Sequence[Array]:
+
+  length = arrays[0].shape[0]
+  assert all([arr.shape[0] == length for arr in arrays])
+
+  return [jnp.stack(jnp.split(arr, length // size)) for arr in arrays]
 
 def normalize(arr: Array, shift: Array, scale: Array):
   scale = jnp.where(scale == 0., 1., scale)
