@@ -980,7 +980,7 @@ def main(argv):
   lr = optax.cosine_onecycle_schedule(
     transition_steps=transition_steps,
     peak_value=FLAGS.lr_peak,
-    pct_start=.1,
+    pct_start=.1,  # TRY: Consider .05
     div_factor=(FLAGS.lr_peak / FLAGS.lr_init),
     final_div_factor=(FLAGS.lr_peak / FLAGS.lr_final),
   ) if FLAGS.lr_final else FLAGS.lr_peak
