@@ -36,6 +36,8 @@ IDX_FN = 7
 # NOTE: With JUMP_STEPS=4, we need trajectories of length 12 after downsampling
 MAX_JUMP_STEPS = 1
 
+EVAL_FREQ = 40
+
 # FLAGS::general
 FLAGS = flags.FLAGS
 flags.DEFINE_string(name='datadir', default=None, required=True,
@@ -149,7 +151,10 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
   batch_size_per_device = (jump_steps * FLAGS.batch_size) // NUM_DEVICES
   assert len_traj % jump_steps == 0
   num_times = len_traj // jump_steps
-  evaluation_frequency = (FLAGS.epochs // 20) if (FLAGS.epochs >= 20) else 1
+  evaluation_frequency = (
+    (FLAGS.epochs // EVAL_FREQ) if (FLAGS.epochs >= EVAL_FREQ)
+    else 1
+  )
 
   # Store the initial time
   time_int_pre = time()
@@ -713,12 +718,12 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
     f'DRCT: {direct_steps : 02d}',
     f'URLL: {unroll_steps : 02d}',
     f'EPCH: {epochs_before : 04d}/{FLAGS.epochs : 04d}',
-    f'TIME: {time_tot_pre : 06.1f}s',
     f'LR: {state.opt_state.hyperparams["learning_rate"][0].item() : .2e}',
-    f'RMSE: {0. : .2e}',
+    f'TIME: {time_tot_pre : 06.1f}s',
     f'GRAD: {0. : .2e}',
+    f'RMSE: {0. : .2e}',
+    f'L2-DR-TRN: {metrics_trn.error_direct_l2 * 100 : .2f}%',
     f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
-    f'L2-RO: {metrics_val.error_rollout_l2 * 100 : .2f}%',
     f'L2-FN: {metrics_val.error_final_l2 * 100 : .2f}%',
   ]))
 
@@ -765,12 +770,12 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
         f'DRCT: {direct_steps : 02d}',
         f'URLL: {unroll_steps : 02d}',
         f'EPCH: {epochs_before + epoch : 04d}/{FLAGS.epochs : 04d}',
-        f'TIME: {time_tot : 06.1f}s',
         f'LR: {state.opt_state.hyperparams["learning_rate"][0].item() : .2e}',
-        f'RMSE: {np.sqrt(loss).item() : .2e}',
+        f'TIME: {time_tot : 06.1f}s',
         f'GRAD: {grad.item() : .2e}',
+        f'RMSE: {np.sqrt(loss).item() : .2e}',
+        f'L2-DR-TRN: {metrics_trn.error_direct_l2 * 100 : .2f}%',
         f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
-        f'L2-RO: {metrics_val.error_rollout_l2 * 100 : .2f}%',
         f'L2-FN: {metrics_val.error_final_l2 * 100 : .2f}%',
       ]))
 
@@ -876,7 +881,7 @@ def main(argv):
     preload=True,
   )
   dataset.compute_stats(
-    axes=(0,),
+    axes=(0, 1, 2, 3),
     derivs_degree=0,
     residual_steps=(FLAGS.direct_steps * FLAGS.jump_steps),
     skip_residual_steps=FLAGS.jump_steps,

@@ -1,8 +1,5 @@
 # NEXT STEPS
 
-- Check E144/E145/E146 for normalization axes
-    - Fix the axes in train.py
-
 - Check E150/E151/E152 for the new architecture
     - Add them to the report if they are interesting
     - Run further experiments if any of them works
@@ -13,6 +10,7 @@
     - Consider using BatchNorm instead of LayerNorm
     - Predict output directly instead of residuals
     - Train without downsampling the trajectories (easier dynamics)
+    - Carry out model selection
     - Try data augmentation
         - Try shifting first (approved)
         - Try repeating but this is physically incorrect
