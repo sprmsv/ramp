@@ -4,6 +4,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 from typing import Any, Union, Sequence
+from dataclasses import dataclass
 
 import numpy as np
 import jax
@@ -16,36 +17,98 @@ from graphneuralpdesolver.utils import normalize
 from graphneuralpdesolver.models.utils import compute_derivatives
 
 
-DATAGROUP = {
-  'incompressible_fluids': 'velocity',
-  'compressible_flow': 'data',
-  'compressible_flow/gravity': 'solution',
-  'reaction_diffusion': 'solution',
-  'wave_equation': 'solution',
+@dataclass
+class Metadata:
+  data_group: str
+  active_variables: Sequence[int] = None
+
+DATASET_METADATA = {
+  # incompressible_fluids
+  'incompressible_fluids/brownian_bridge': Metadata(
+    data_group='velocity',
+  ),
+  'incompressible_fluids/gaussians': Metadata(
+    data_group='velocity',
+  ),
+  'incompressible_fluids/pwc': Metadata(
+    data_group='velocity',
+  ),
+  'incompressible_fluids/shear_layer': Metadata(
+    data_group='velocity',
+  ),
+  'incompressible_fluids/sines': Metadata(
+    data_group='velocity',
+  ),
+  'incompressible_fluids/vortex_sheet': Metadata(
+    data_group='velocity',
+  ),
+  # compressible_flow
+  'compressible_flow/cloudshock': Metadata(
+    data_group='data',
+    active_variables=list(range(4))
+  ),
+  'compressible_flow/gauss': Metadata(
+    data_group='data',
+    active_variables=list(range(4))
+  ),
+  'compressible_flow/kh': Metadata(
+    data_group='data',
+    active_variables=list(range(4))
+  ),
+  'compressible_flow/richtmyer_meshkov': Metadata(
+    data_group='solution',
+    active_variables=list(range(4))
+  ),
+  'compressible_flow/riemann': Metadata(
+    data_group='data',
+    active_variables=list(range(4))
+  ),
+  'compressible_flow/riemann_curved': Metadata(
+    data_group='data',
+    active_variables=list(range(4))
+  ),
+  'compressible_flow/riemann_kh': Metadata(
+    data_group='data',
+    active_variables=list(range(4))
+  ),
+  'compressible_flow/gravity/blast': Metadata(
+    data_group='solution',
+    active_variables=list(range(4))
+  ),
+  'compressible_flow/gravity/rayleigh_taylor': Metadata(
+    data_group='solution',
+    active_variables=list(range(4))
+  ),
+  # reaction_diffusion
+  'reaction_diffusion/allen_cahn': Metadata(
+    data_group='solution',
+  ),
+  # wave_equation
+  'wave_equation/seismic_20step': Metadata(
+    data_group='solution',
+  ),
 }
 
 class Dataset:
 
   def __init__(self, key: flax.typing.PRNGKey,
-      datadir: str, subpath: str, name: str,
+      datadir: str, datapath: str,
       n_train: int = 0, n_valid: int = 0,
-      idx_vars: Union[int, Sequence] = None,
       preload: bool = False,
+      include_passive_variables: bool = False,
       downsample_factor: int = 1,
       cutoff: int = None,
     ):
 
     # Set attributes
-    self.datagroup = DATAGROUP[subpath]
-    if name == 'richtmyer_meshkov': self.datagroup = 'solution'
-    self.reader = h5py.File(Path(datadir) / subpath / f'{name}.nc', 'r')
-    self.idx_vars = [idx_vars] if isinstance(idx_vars, int) else idx_vars
+    self.data_group = DATASET_METADATA[datapath].data_group
+    self.reader = h5py.File(Path(datadir) / f'{datapath}.nc', 'r')
+    self.idx_vars = (None if include_passive_variables
+      else DATASET_METADATA[datapath].active_variables)
     self.preload = preload
     self.data = None
-    if self.preload:
-      self.length = n_train + n_valid
-    else:
-      self.length = self.reader[self.datagroup].shape[0]
+    self.length = ((n_train + n_valid) if self.preload
+      else self.reader[self.data_group].shape[0])
     self.cutoff = cutoff if (cutoff is not None) else (self._fetch(0, raw=True)[0].shape[1])
     self.downsample_factor = downsample_factor
     self.sample = self._fetch(0)
@@ -68,9 +131,9 @@ class Dataset:
     }
 
     if self.preload:
-      _len_dataset = self.reader[self.datagroup].shape[0]
-      train_data = self.reader[self.datagroup][np.arange(n_train)]
-      valid_data = self.reader[self.datagroup][np.arange(_len_dataset - n_valid, _len_dataset)]
+      _len_dataset = self.reader[self.data_group].shape[0]
+      train_data = self.reader[self.data_group][np.arange(n_train)]
+      valid_data = self.reader[self.data_group][np.arange(_len_dataset - n_valid, _len_dataset)]
       self.data = np.concatenate([train_data, valid_data], axis=0)
 
   def compute_stats(self,
@@ -141,7 +204,7 @@ class Dataset:
     if self.data is not None:
       traj = self.data[np.sort(idx)]
     else:
-      traj = self.reader[self.datagroup][np.sort(idx)]
+      traj = self.reader[self.data_group][np.sort(idx)]
     # Move axes
     if len(traj.shape) == 5:
       traj = np.moveaxis(traj, source=(2, 3, 4), destination=(4, 2, 3))

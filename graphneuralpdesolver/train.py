@@ -43,14 +43,11 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string(name='datadir', default=None, required=True,
   help='Path of the folder containing the datasets'
 )
-flags.DEFINE_string(name='params', default=None, required=False,
-  help='Path of the previous experiment containing the initial parameters'
-)
-flags.DEFINE_string(name='subpath', default=None, required=True,
+flags.DEFINE_string(name='datapath', default=None, required=True,
   help='Relative path inside the data directory'
 )
-flags.DEFINE_string(name='dataset', default=None, required=True,
-  help='Name of the dataset: {"bm", "sin", "gauss", ...}'
+flags.DEFINE_string(name='params', default=None, required=False,
+  help='Path of the previous experiment containing the initial parameters'
 )
 
 # FLAGS::training
@@ -868,13 +865,13 @@ def main(argv):
   dataset = Dataset(
     key=key,
     datadir=FLAGS.datadir,
-    subpath=FLAGS.subpath,
-    name=FLAGS.dataset,
+    datapath=FLAGS.datapath,
     n_train=FLAGS.n_train,
     n_valid=FLAGS.n_valid,
     downsample_factor=TIME_DOWNSAMPLE_FACTOR,
     cutoff=(IDX_FN + MAX_JUMP_STEPS),
     preload=True,
+    include_passive_variables=False,
   )
   dataset.compute_stats(
     axes=(0, 1, 2, 3),
