@@ -117,7 +117,7 @@ def plot_trajectory(traj, idx_time, idx_traj=0, symmetric=True, cmap=CMAP_BBR, y
 
   return fig, axs
 
-def plot_predictions(u_gtr, u_prd, u_err, idx_time=-1, idx_traj=0):
+def plot_estimations(u_gtr, u_prd, u_err, idx_time=-1, idx_traj=0):
   n_vars = u_gtr.shape[-1]
   fig, axs = plt.subplots(nrows=2, ncols=3, figsize=(10, 2.5*n_vars), sharex=True, sharey=True)
   fig.tight_layout()
@@ -125,13 +125,13 @@ def plot_predictions(u_gtr, u_prd, u_err, idx_time=-1, idx_traj=0):
   for ivar in range(n_vars):
     h = axs[ivar, 0].imshow(
       u_gtr[idx_traj, idx_time, ..., ivar],
-      cmap=CMAP_BBR,
+      cmap=CMAP_BWR,
       vmin=-np.max(u_gtr[idx_traj, idx_time, ..., ivar]),
       vmax=np.max(u_gtr[idx_traj, idx_time, ..., ivar]),
     )
     h = axs[ivar, 1].imshow(
       u_prd[idx_traj, idx_time, ..., ivar],
-      cmap=CMAP_BBR,
+      cmap=CMAP_BWR,
       vmin=-np.max(u_gtr[idx_traj, idx_time, ..., ivar]),
       vmax=np.max(u_gtr[idx_traj, idx_time, ..., ivar]),
     )
@@ -145,7 +145,7 @@ def plot_predictions(u_gtr, u_prd, u_err, idx_time=-1, idx_traj=0):
     plt.colorbar(h, ax=axs[ivar, 2], fraction=.1)
 
   axs[0, 0].set(title='Ground-truth');
-  axs[0, 1].set(title='Prediction');
+  axs[0, 1].set(title='Estimation');
   axs[0, 2].set(title='Absolute error');
 
   axs[0, 0].set(ylabel='Variable 01');
@@ -153,7 +153,7 @@ def plot_predictions(u_gtr, u_prd, u_err, idx_time=-1, idx_traj=0):
 
   return fig, axs
 
-def animate_predictions(u_gtr, u_prd, u_err, idx_traj=0):
+def animate_estimations(u_gtr, u_prd, u_err, idx_traj=0):
 
   n_vars = u_gtr.shape[-1]
   n_time = u_gtr.shape[1]
@@ -165,14 +165,14 @@ def animate_predictions(u_gtr, u_prd, u_err, idx_traj=0):
   for ivar in range(n_vars):
     h = axs[ivar, 0].imshow(
       u_gtr[idx_traj, 0, ..., ivar],
-      cmap=CMAP_BBR,
+      cmap=CMAP_BWR,
       vmin=-np.max(u_gtr[idx_traj, :, ..., ivar]),
       vmax=np.max(u_gtr[idx_traj, :, ..., ivar]),
     )
     handlers_gtr.append(h)
     h = axs[ivar, 1].imshow(
       u_prd[idx_traj, 0, ..., ivar],
-      cmap=CMAP_BBR,
+      cmap=CMAP_BWR,
       vmin=-np.max(u_gtr[idx_traj, :, ..., ivar]),
       vmax=np.max(u_gtr[idx_traj, :, ..., ivar]),
     )
@@ -188,7 +188,7 @@ def animate_predictions(u_gtr, u_prd, u_err, idx_traj=0):
     plt.colorbar(h, ax=axs[ivar, 2], fraction=.1)
 
   axs[0, 0].set(title='Ground-truth');
-  axs[0, 1].set(title='Prediction');
+  axs[0, 1].set(title='Estimation');
   axs[0, 2].set(title='Absolute error');
 
   axs[0, 0].set(ylabel='Variable 01');

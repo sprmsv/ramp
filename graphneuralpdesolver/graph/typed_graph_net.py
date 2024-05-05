@@ -248,7 +248,7 @@ def InteractionNetwork(
   # An InteractionNetwork is a GraphNetwork without globals features,
   # so we implement the InteractionNetwork as a configured GraphNetwork.
 
-  # TODO: Consider using the global features instead of keyword arguments
+  # TRY: Consider using the global features instead of keyword arguments
 
   # An InteractionNetwork edge function does not have global feature inputs,
   # so we filter the passed global argument in the GraphNetwork.

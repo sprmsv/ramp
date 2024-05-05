@@ -193,7 +193,6 @@ class AutoregressivePredictor:
       rollout = None
       return carry, rollout
 
-    # CHECK: Use flax.linen.scan for the for loops?
     forcings = None
     (u_next, t_next), _ = jax.lax.scan(f=scan_fn,
       init=(u_inp, t_inp), xs=forcings, length=num_jumps)

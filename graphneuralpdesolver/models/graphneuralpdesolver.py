@@ -307,8 +307,6 @@ class GraphNeuralPDESolver(AbstractOperator):
       (zeta_sen[s] - zeta_rec[r])
       for s, r in zip(idx_sen, idx_rec)
     ], axis=0)
-    assert np.sum(z_ij < -2) == 0  # TODO: Remove assertions
-    assert np.sum(z_ij > +2) == 0
     z_ij = np.where(z_ij < -1, z_ij + 2, z_ij)
     z_ij = np.where(z_ij >= 1, z_ij - 2, z_ij)
     d_ij = np.linalg.norm(z_ij, axis=-1, keepdims=True)
