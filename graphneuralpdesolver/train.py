@@ -36,7 +36,7 @@ IDX_FN = 7
 # NOTE: With JUMP_STEPS=4, we need trajectories of length 12 after downsampling
 MAX_JUMP_STEPS = 1
 
-EVAL_FREQ = 40
+EVAL_FREQ = 50
 
 # FLAGS::general
 FLAGS = flags.FLAGS
@@ -57,14 +57,17 @@ flags.DEFINE_integer(name='batch_size', default=4, required=False,
 flags.DEFINE_integer(name='epochs', default=20, required=False,
   help='Number of training epochs'
 )
-flags.DEFINE_float(name='lr_peak', default=1e-03, required=False,
-  help='Peak learning rate in the onecycle scheduler'
-)
-flags.DEFINE_float(name='lr_init', default=1e-04, required=False,
+flags.DEFINE_float(name='lr_init', default=1e-05, required=False,
   help='Initial learning rate in the onecycle scheduler'
 )
-flags.DEFINE_float(name='lr_final', default=1e-05, required=False,
+flags.DEFINE_float(name='lr_peak', default=1e-04, required=False,
+  help='Peak learning rate in the onecycle scheduler'
+)
+flags.DEFINE_float(name='lr_base', default=1e-05, required=False,
   help='Final learning rate in the onecycle scheduler'
+)
+flags.DEFINE_float(name='lr_lowr', default=1e-06, required=False,
+  help='Final learning rate in the exponential decay'
 )
 flags.DEFINE_integer(name='jump_steps', default=1, required=False,
   help='Factor by which the dataset time delta is multiplied in prediction'
@@ -712,7 +715,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
     f'DRCT: {direct_steps : 02d}',
     f'URLL: {unroll_steps : 02d}',
     f'EPCH: {epochs_before : 04d}/{FLAGS.epochs : 04d}',
-    f'LR: {state.opt_state.hyperparams["learning_rate"][0].item() : .2e}',
+    f'LR: {state.opt_state[-1].hyperparams["learning_rate"][0].item() : .2e}',
     f'TIME: {time_tot_pre : 06.1f}s',
     f'GRAD: {0. : .2e}',
     f'RMSE: {0. : .2e}',
@@ -764,7 +767,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
         f'DRCT: {direct_steps : 02d}',
         f'URLL: {unroll_steps : 02d}',
         f'EPCH: {epochs_before + epoch : 04d}/{FLAGS.epochs : 04d}',
-        f'LR: {state.opt_state.hyperparams["learning_rate"][0].item() : .2e}',
+        f'LR: {state.opt_state[-1].hyperparams["learning_rate"][0].item() : .2e}',
         f'TIME: {time_tot : 06.1f}s',
         f'GRAD: {grad.item() : .2e}',
         f'RMSE: {np.sqrt(loss).item() : .2e}',
@@ -823,7 +826,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
         f'DRCT: {direct_steps : 02d}',
         f'URLL: {unroll_steps : 02d}',
         f'EPCH: {epochs_before + epoch : 04d}/{FLAGS.epochs : 04d}',
-        f'LR: {state.opt_state.hyperparams["learning_rate"][0].item() : .2e}',
+        f'LR: {state.opt_state[-1].hyperparams["learning_rate"][0].item() : .2e}',
         f'TIME: {time_tot : 06.1f}s',
         f'GRAD: {grad.item() : .2e}',
         f'RMSE: {np.sqrt(loss).item() : .2e}',
@@ -974,14 +977,29 @@ def main(argv):
     )
     epochs_d = (epochs_u00_dff if (_d == FLAGS.direct_steps) else epochs_u00_dxx)
     transition_steps +=  epochs_d * num_batches * FLAGS.jump_steps * num_valid_pairs_d
-  lr = optax.cosine_onecycle_schedule(
-    transition_steps=transition_steps,
-    peak_value=FLAGS.lr_peak,
-    pct_start=.1,  # TRY: Consider .05
-    div_factor=(FLAGS.lr_peak / FLAGS.lr_init),
-    final_div_factor=(FLAGS.lr_peak / FLAGS.lr_final),
-  ) if FLAGS.lr_final else FLAGS.lr_peak
-  tx = optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-8)
+
+  pct_start = .02  # Warmup cosine onecycle
+  pct_final = .1   # Final exponential decay  # TRY: Consider .05
+  lr = optax.join_schedules(
+    schedules=[
+      optax.cosine_onecycle_schedule(
+        transition_steps=((1 - pct_final) * transition_steps),
+        peak_value=FLAGS.lr_peak,
+        pct_start=(pct_start / (1 - pct_final)),
+        div_factor=(FLAGS.lr_peak / FLAGS.lr_init),
+        final_div_factor=(FLAGS.lr_init / FLAGS.lr_base),
+      ),
+      optax.exponential_decay(
+        transition_steps=(pct_final * transition_steps),
+        init_value=FLAGS.lr_base,
+        decay_rate=(FLAGS.lr_lowr / FLAGS.lr_base) if FLAGS.lr_lowr else 1,
+      ),
+    ],
+    boundaries=[int((1 - pct_final) * transition_steps),],
+  )
+  tx = optax.chain(
+    optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-08),
+  )
   state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
   for _d in range(1, FLAGS.direct_steps+1):
     key, subkey = jax.random.split(key)
@@ -1000,7 +1018,7 @@ def main(argv):
     epochs_trained += epochs
 
   # Train the model with unrolling
-  lr = FLAGS.lr_final
+  lr = FLAGS.lr_base
   tx = optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-8)
   state = TrainState.create(apply_fn=model.apply, params=state.params, tx=tx)
   for _u in range(1, FLAGS.unroll_steps+1):
