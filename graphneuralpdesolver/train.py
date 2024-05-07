@@ -60,7 +60,7 @@ flags.DEFINE_integer(name='epochs', default=20, required=False,
 flags.DEFINE_float(name='lr_init', default=1e-05, required=False,
   help='Initial learning rate in the onecycle scheduler'
 )
-flags.DEFINE_float(name='lr_peak', default=1e-04, required=False,
+flags.DEFINE_float(name='lr_peak', default=2e-04, required=False,
   help='Peak learning rate in the onecycle scheduler'
 )
 flags.DEFINE_float(name='lr_base', default=1e-05, required=False,

@@ -1,36 +1,37 @@
 # NEXT STEPS
 
-- Check E150/E151/E152 for the new architecture
-    - Add them to the report if they are interesting
-    - Run further experiments if any of them works
+- Conclude E199 for the learning rate scheduler
+    - Fix learning rate hyperparameters
+    - If necessary, relaunch the current experiments with new learning rates
+    - Launch model selection for a compressible dataset
+    - Try weight_decay=1e-02//1e-04 with the best settings for several datasets
+
+- Data scaling experiments
+    * (E200) Start with one/two dataset:
+        - kh, shear_layer, and sines
+    * Do for riemann_kh if time permits
 
 - Invest a bit more on the compressible datasets
-    - Experiment with normalization axes on different datasets
     - Try correction again with t_inp and tau
     - Consider using BatchNorm instead of LayerNorm
+    - Experiment with normalization axes on different datasets
     - Predict output directly instead of residuals
-    - Train without downsampling the trajectories (easier dynamics)
+    - (E201) Train without downsampling the trajectories (easier dynamics)
     - Carry out model selection
     - Try data augmentation
         - Try shifting first (approved)
         - Try repeating but this is physically incorrect
 
+- Try mean squared relative error
+
+- Read the GenCast paper for uncertainty quantification
+
 - Experiment with direct_steps and jump_steps too
     - Update the evaluation functions first
     - Evaluate separately with different methods for autoregressive prediction
 
-- Data scaling experiments
-    * Start with one/two dataset
-    * Train with ALL active variables
-    * Make sure to do one of the compressible datasets (kh and riemann_kh)
-
-## Other
-
-- Try mean squared relative error
-
 - Run ablation studies with models that fully reach their potential !!
-    - Data reach regime
-    - Long trainings
+    * Data reach regime
 
 - Fix everything and start reproducing experiments (with repeats) for reporting in the thesis
 
