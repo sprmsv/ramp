@@ -34,7 +34,7 @@ STATS_COMPRESSIBLE_FLOW = {
 }
 
 DATASET_METADATA = {
-  # incompressible_fluids
+  # incompressible_fluids: [velocity, velocity]
   'incompressible_fluids/brownian_bridge': Metadata(
     data_group='velocity',
     stats=STATS_INCOMPRESSIBLE_FLUIDS,
@@ -59,7 +59,7 @@ DATASET_METADATA = {
     data_group='velocity',
     stats=STATS_INCOMPRESSIBLE_FLUIDS,
   ),
-  # compressible_flow
+  # compressible_flow: [density, velocity, velocity, pressure, energy]
   'compressible_flow/cloudshock': Metadata(
     data_group='data',
     active_variables=list(range(4)),
@@ -127,10 +127,11 @@ class Dataset:
     ):
 
     # Set attributes
-    self.data_group = DATASET_METADATA[datapath].data_group
+    self.metadata = DATASET_METADATA[datapath]
+    self.data_group = self.metadata.data_group
     self.reader = h5py.File(Path(datadir) / f'{datapath}.nc', 'r')
     self.idx_vars = (None if include_passive_variables
-      else DATASET_METADATA[datapath].active_variables)
+      else self.metadata.active_variables)
     self.preload = preload
     self.data = None
     self.length = ((n_train + n_valid) if self.preload
@@ -144,8 +145,8 @@ class Dataset:
     assert (n_train + n_valid) <= self.length
     self.nums = {'train': n_train, 'valid': n_valid}
     self.idx_modes = {
-      'train': jax.random.permutation(key, n_train),
-      'valid': np.arange((self.length - n_valid), self.length),
+      'train': jax.random.permutation(key, n_train),  # First n_train samples
+      'valid': np.arange((self.length - n_valid), self.length),  # Last n_valid samples
     }
 
     # Instantiate the dataset stats

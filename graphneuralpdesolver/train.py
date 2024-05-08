@@ -979,7 +979,7 @@ def main(argv):
     transition_steps +=  epochs_d * num_batches * FLAGS.jump_steps * num_valid_pairs_d
 
   pct_start = .02  # Warmup cosine onecycle
-  pct_final = .1   # Final exponential decay  # TRY: Consider .05
+  pct_final = .1   # Final exponential decay
   lr = optax.join_schedules(
     schedules=[
       optax.cosine_onecycle_schedule(
