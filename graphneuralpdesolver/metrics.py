@@ -42,3 +42,13 @@ def mse(predictions: Array, labels: Array) -> ScalarArray:
     """
 
     return jnp.mean(jnp.power(predictions - labels, 2))
+
+def msre(predictions: Array, labels: Array) -> ScalarArray:
+    """
+    Returns the mean squared relative error.
+    Input shapes are [batch_size, num_times_output, num_grid_points, num_outputs].
+    Output shape is [1].
+    """
+
+    eps = 1e-08
+    return jnp.mean(jnp.power((predictions - labels) / (labels + eps), 2))
