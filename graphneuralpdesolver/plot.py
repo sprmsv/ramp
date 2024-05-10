@@ -145,7 +145,7 @@ def plot_estimations(u_gtr, u_prd, u_err, idx_time=-1, idx_traj=0):
     plt.colorbar(h, ax=axs[ivar, 2], fraction=.1)
 
   axs[0, 0].set(title='Ground-truth');
-  axs[0, 1].set(title='Estimation');
+  axs[0, 1].set(title='Estimate');
   axs[0, 2].set(title='Absolute error');
 
   axs[0, 0].set(ylabel='Variable 01');
@@ -188,7 +188,7 @@ def animate_estimations(u_gtr, u_prd, u_err, idx_traj=0):
     plt.colorbar(h, ax=axs[ivar, 2], fraction=.1)
 
   axs[0, 0].set(title='Ground-truth');
-  axs[0, 1].set(title='Estimation');
+  axs[0, 1].set(title='Estimate');
   axs[0, 2].set(title='Absolute error');
 
   axs[0, 0].set(ylabel='Variable 01');
