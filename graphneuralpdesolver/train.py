@@ -25,7 +25,7 @@ from graphneuralpdesolver.autoregressive import AutoregressivePredictor, Operato
 from graphneuralpdesolver.dataset import Dataset
 from graphneuralpdesolver.models.graphneuralpdesolver import GraphNeuralPDESolver, AbstractOperator
 from graphneuralpdesolver.utils import disable_logging, Array, shuffle_arrays, split_arrays
-from graphneuralpdesolver.metrics import mse, rel_l2_error, rel_l1_error
+from graphneuralpdesolver.metrics import mse_loss, rel_l2_error, rel_l1_error
 
 
 SEED = 44
@@ -130,7 +130,7 @@ DIR = DIR_EXPERIMENTS / datetime.now().strftime('%Y%m%d-%H%M%S.%f')
 
 def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset: Dataset,
   jump_steps: int, direct_steps: int, unroll_steps: int, epochs: int,
-  epochs_before: int = 0, loss_fn: Callable = mse) -> TrainState:
+  epochs_before: int = 0, loss_fn: Callable = mse_loss) -> TrainState:
   """Trains a model and returns the state."""
 
   # Samples
