@@ -28,7 +28,6 @@ from graphneuralpdesolver.utils import disable_logging, Array, shuffle_arrays, s
 from graphneuralpdesolver.metrics import mse_loss, rel_l2_error, rel_l1_error
 
 
-SEED = 44
 NUM_DEVICES = jax.local_device_count()
 
 TIME_DOWNSAMPLE_FACTOR = 2
@@ -48,6 +47,9 @@ flags.DEFINE_string(name='datapath', default=None, required=True,
 )
 flags.DEFINE_string(name='params', default=None, required=False,
   help='Path of the previous experiment containing the initial parameters'
+)
+flags.DEFINE_integer(name='seed', default=44, required=False,
+  help='Seed for random number generator'
 )
 
 # FLAGS::training
@@ -721,8 +723,9 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
     f'RMSE: {0. : .2e}',
     f'L2-DR-TRN: {metrics_trn.error_direct_l2 * 100 : .2f}%',
     f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
-    f'L1-FN: {metrics_val.error_final_l1 * 100 : .2f}%',
+    f'L1-DR: {metrics_val.error_direct_l1 * 100 : .2f}%',
     f'L2-FN: {metrics_val.error_final_l2 * 100 : .2f}%',
+    f'L1-FN: {metrics_val.error_final_l1 * 100 : .2f}%',
   ]))
 
   # Set up the checkpoint manager
@@ -774,8 +777,9 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
         f'RMSE: {np.sqrt(loss).item() : .2e}',
         f'L2-DR-TRN: {metrics_trn.error_direct_l2 * 100 : .2f}%',
         f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
-        f'L1-FN: {metrics_val.error_final_l1 * 100 : .2f}%',
+        f'L1-DR: {metrics_val.error_direct_l1 * 100 : .2f}%',
         f'L2-FN: {metrics_val.error_final_l2 * 100 : .2f}%',
+        f'L1-FN: {metrics_val.error_final_l1 * 100 : .2f}%',
       ]))
 
       with disable_logging(level=logging.FATAL):
@@ -864,11 +868,12 @@ def main(argv):
   assert (IDX_FN % FLAGS.jump_steps) == 0
 
   # Initialize the random key
-  key = jax.random.PRNGKey(SEED)
+  key = jax.random.PRNGKey(FLAGS.seed)
 
   # Read the dataset
+  subkey, key = jax.random.split(key)
   dataset = Dataset(
-    key=key,
+    key=subkey,
     datadir=FLAGS.datadir,
     datapath=FLAGS.datapath,
     n_train=FLAGS.n_train,
@@ -943,7 +948,6 @@ def main(argv):
 
   # Initialzize the model or use the loaded parameters
   if not params:
-    subkey, key = jax.random.split(key)
     _, sample_spec = dataset.sample
     num_grid_points = dataset.shape[2:4]
     num_vars = dataset.shape[-1]
@@ -954,6 +958,7 @@ def main(argv):
       specs=(jnp.ones_like(sample_spec).repeat(FLAGS.batch_size, axis=0)
         if (sample_spec is not None) else None),
     )
+    subkey, key = jax.random.split(key)
     variables = jax.jit(model.init)(subkey, **model_init_kwargs)
     params = variables['params']
 

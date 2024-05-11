@@ -148,8 +148,8 @@ def plot_estimations(u_gtr, u_prd, u_err, idx_time=-1, idx_traj=0):
   axs[0, 1].set(title='Estimate');
   axs[0, 2].set(title='Absolute error');
 
-  axs[0, 0].set(ylabel='Variable 01');
-  axs[1, 0].set(ylabel='Variable 02');
+  for ivar in range(n_vars):
+    axs[ivar, 0].set(ylabel=f'Variable {ivar:02d}');
 
   return fig, axs
 
@@ -191,8 +191,8 @@ def animate_estimations(u_gtr, u_prd, u_err, idx_traj=0):
   axs[0, 1].set(title='Estimate');
   axs[0, 2].set(title='Absolute error');
 
-  axs[0, 0].set(ylabel='Variable 01');
-  axs[1, 0].set(ylabel='Variable 02');
+  for ivar in range(n_vars):
+    axs[ivar, 0].set(ylabel=f'Variable {ivar:02d}');
 
   def update(frame):
     fig.suptitle(f'timestep = {frame}')
