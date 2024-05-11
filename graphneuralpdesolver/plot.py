@@ -119,7 +119,7 @@ def plot_trajectory(traj, idx_time, idx_traj=0, symmetric=True, cmap=CMAP_BBR, y
 
 def plot_estimations(u_gtr, u_prd, u_err, idx_time=-1, idx_traj=0):
   n_vars = u_gtr.shape[-1]
-  fig, axs = plt.subplots(nrows=2, ncols=3, figsize=(10, 2.5*n_vars), sharex=True, sharey=True)
+  fig, axs = plt.subplots(nrows=n_vars, ncols=3, figsize=(10, 2.5*n_vars), sharex=True, sharey=True)
   fig.tight_layout()
 
   for ivar in range(n_vars):
@@ -157,7 +157,7 @@ def animate_estimations(u_gtr, u_prd, u_err, idx_traj=0):
 
   n_vars = u_gtr.shape[-1]
   n_time = u_gtr.shape[1]
-  fig, axs = plt.subplots(nrows=2, ncols=3, figsize=(5*n_vars, 3*n_vars), sharex=True, sharey=True)
+  fig, axs = plt.subplots(nrows=n_vars, ncols=3, figsize=(5*n_vars, 3*n_vars), sharex=True, sharey=True)
 
   handlers_gtr = []
   handlers_err = []
@@ -210,9 +210,10 @@ def plot_error_accumulation(u_err, idx_time, idx_traj=0):
   # Because the initial state is removed from the errors
   idx_time=[i-1 for i in idx_time]
 
-  fig, axs = plt.subplots(nrows=2, ncols=len(idx_time), figsize=(10, 5), sharex=True, sharey=True)
+  n_vars = u_err.shape[-1]
+  fig, axs = plt.subplots(nrows=n_vars, ncols=len(idx_time), figsize=(10, 1.5*n_vars+.2), sharex=True, sharey=True)
 
-  for ivar in range(2):
+  for ivar in range(n_vars):
     for icol in range(len(idx_time)):
       h = axs[ivar, icol].imshow(
         np.abs(u_err[idx_traj, idx_time[icol], ..., ivar]),
@@ -224,7 +225,7 @@ def plot_error_accumulation(u_err, idx_time, idx_traj=0):
         axs[ivar, icol].set(title=f'timestep={idx_time[icol]+1}')
   plt.colorbar(h, ax=axs, fraction=.02)
 
-  axs[0, 0].set(ylabel='Variable 01');
-  axs[1, 0].set(ylabel='Variable 02');
+  for ivar in range(n_vars):
+    axs[ivar, 0].set(ylabel=f'Variable {ivar:02d}');
 
   return fig, axs

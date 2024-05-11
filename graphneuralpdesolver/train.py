@@ -721,6 +721,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
     f'RMSE: {0. : .2e}',
     f'L2-DR-TRN: {metrics_trn.error_direct_l2 * 100 : .2f}%',
     f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
+    f'L1-FN: {metrics_val.error_final_l1 * 100 : .2f}%',
     f'L2-FN: {metrics_val.error_final_l2 * 100 : .2f}%',
   ]))
 
@@ -773,6 +774,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
         f'RMSE: {np.sqrt(loss).item() : .2e}',
         f'L2-DR-TRN: {metrics_trn.error_direct_l2 * 100 : .2f}%',
         f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
+        f'L1-FN: {metrics_val.error_final_l1 * 100 : .2f}%',
         f'L2-FN: {metrics_val.error_final_l2 * 100 : .2f}%',
       ]))
 

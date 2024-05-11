@@ -63,7 +63,7 @@ DATASET_METADATA = {
   'compressible_flow/cloudshock': Metadata(
     data_group='data',
     active_variables=list(range(4)),
-    stats=STATS_INCOMPRESSIBLE_FLUIDS,
+    stats=STATS_COMPRESSIBLE_FLOW,
   ),
   'compressible_flow/gauss': Metadata(
     data_group='data',
