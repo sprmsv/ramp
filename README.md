@@ -1,4 +1,4 @@
-# GNN-based Autoregressive PDE Solver based on GraphCast
+# GNN-based PDE Solver based on the GraphCast paper
 
 # TODO: Write readme
 

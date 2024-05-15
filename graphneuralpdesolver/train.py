@@ -1026,7 +1026,9 @@ def main(argv):
 
   # Train the model with unrolling
   lr = FLAGS.lr_base
-  tx = optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-8)
+  tx = optax.chain(
+    optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-08),
+  )
   state = TrainState.create(apply_fn=model.apply, params=state.params, tx=tx)
   for _u in range(1, FLAGS.unroll_steps+1):
     key, subkey = jax.random.split(key)
