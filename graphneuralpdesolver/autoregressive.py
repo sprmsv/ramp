@@ -11,7 +11,15 @@ class OperatorNormalizer:
   def __init__(self, operator: AbstractOperator):
     self._apply_operator = operator.apply
 
-  def apply(self, variables, stats, specs: Array, u_inp: Array, t_inp: Array, tau: Array):
+  def apply(self,
+    variables,
+    stats,
+    specs: Array,
+    u_inp: Array,
+    t_inp: Array,
+    tau: Array,
+    key: flax.typing.PRNGKey = None,
+  ):
     """
     Normalizes raw inputs and applies the operator on it.
 
@@ -45,6 +53,7 @@ class OperatorNormalizer:
       u_inp=u_inp_nrm,
       t_inp=t_inp,
       tau=tau,
+      key=key,
     )
 
     # Unnormalize predicted residuals
@@ -59,7 +68,16 @@ class OperatorNormalizer:
 
     return u_prd
 
-  def get_loss_inputs(self, variables, stats, specs: Array, u_inp: Array, t_inp: Array, u_tgt: Array, tau: Array):
+  def get_loss_inputs(self,
+    variables,
+    stats,
+    specs: Array,
+    u_inp: Array,
+    t_inp: Array,
+    u_tgt: Array,
+    tau: Array,
+    key: flax.typing.PRNGKey = None,
+  ):
     """
     Calculates prediction and target variables, ready to be given as input to the loss function.
 
@@ -93,6 +111,7 @@ class OperatorNormalizer:
       u_inp=u_inp_nrm,
       t_inp=t_inp,
       tau=tau,
+      key=key,
     )
 
     # Get target normalized residuals
@@ -113,23 +132,48 @@ class AutoregressivePredictor:
     self.num_steps_direct = num_steps_direct
     self.tau_base = tau_base
 
-  def unroll(self, variables: flax.typing.VariableDict, stats: flax.typing.VariableDict,
-    specs: Array, u_inp: Array, t_inp: Array, num_steps: int) -> Array:
+  def unroll(self,
+    variables: flax.typing.VariableDict,
+    stats: flax.typing.VariableDict,
+    specs: Array,
+    u_inp: Array,
+    t_inp: Array,
+    num_steps: int,
+    key: flax.typing.PRNGKey = None,
+  ) -> Array:
 
     batch_size = u_inp.shape[0]
     num_grid_nodes = u_inp.shape[2:4]
     num_outputs = u_inp.shape[-1]
+    random = (key is not None)
+    if not random:
+      key, _ = jax.random.split(jax.random.PRNGKey(0))  # NOTE: It won't be used
 
-    def scan_fn_direct(carry, _tau):
+    def scan_fn_direct(carry, forcing):
       u_inp, t_inp = carry
-      u_out = self._apply_operator(variables, stats, specs=specs, u_inp=u_inp, t_inp=t_inp, tau=_tau)
-      carry = (u_inp, t_inp)  # NOTE: the input is the same for all _tau
+      tau = forcing[0]
+      subkey = forcing[-2:].astype('uint32') if random else None
+      u_out = self._apply_operator(
+        variables,
+        stats,
+        specs=specs,
+        u_inp=u_inp,
+        t_inp=t_inp,
+        tau=tau,
+        key=subkey,
+      )
+      carry = (u_inp, t_inp)  # NOTE: The input is the same for all tau
       return carry, u_out
 
     def scan_fn_autoregressive(carry, forcing):
       u_inp, t_inp = carry
+      tau = forcing[:-2]
+      key = forcing[-2:].astype('uint32')
+      _num_direct_steps = tau.shape[0]
+      keys = jax.random.split(key, num=_num_direct_steps)
+      forcing = jnp.concatenate([tau.reshape(-1, 1), keys], axis=-1)
       _, u_out = jax.lax.scan(f=scan_fn_direct,
-        init=(u_inp, t_inp), xs=forcing, length=forcing.shape[0])
+        init=(u_inp, t_inp), xs=forcing, length=_num_direct_steps)
       u_out = jnp.squeeze(u_out, axis=2).swapaxes(0, 1)
       u_next = u_out[:, -1:]
       t_next = t_inp + self.tau_base * self.num_steps_direct
@@ -141,10 +185,13 @@ class AutoregressivePredictor:
     tau_tiled = self.tau_base * jnp.tile(
       jnp.arange(1, self.num_steps_direct+1), reps=(num_jumps, 1)
     ).reshape(num_jumps, self.num_steps_direct)
+    key, subkey = jax.random.split(key)
+    keys = jax.random.split(subkey, num=num_jumps)
+    forcings = jnp.concatenate([tau_tiled, keys], axis=-1)
     (u_next, t_next), rollout_full = jax.lax.scan(
       f=scan_fn_autoregressive,
       init=(u_inp, t_inp),
-      xs=tau_tiled,
+      xs=forcings,
       length=num_jumps,
     )
     rollout_full = rollout_full.swapaxes(0, 1)
@@ -156,10 +203,13 @@ class AutoregressivePredictor:
     num_steps_rem = num_steps % self.num_steps_direct
     if num_steps_rem:
       tau_tiled = self.tau_base * jnp.arange(1, num_steps_rem+1).reshape(1, num_steps_rem)
+      key, subkey = jax.random.split(key, num=2)
+      keys = subkey.reshape(1, 2)
+      forcings = jnp.concatenate([tau_tiled, keys], axis=-1)
       (u_next, t_next), rollout_part = jax.lax.scan(
         f=scan_fn_autoregressive,
         init=(u_next, t_next),
-        xs=tau_tiled,
+        xs=forcings,
         length=1
       )
       rollout_part = rollout_part.swapaxes(0, 1)
@@ -172,12 +222,24 @@ class AutoregressivePredictor:
 
     return rollout, u_next
 
-  def jump(self, variables: flax.typing.VariableDict, stats: flax.typing.VariableDict,
-    specs: Array, u_inp: Array, t_inp: Array, num_jumps: int) -> Array:
+  def jump(self,
+    variables: flax.typing.VariableDict,
+    stats: flax.typing.VariableDict,
+    specs: Array,
+    u_inp: Array,
+    t_inp: Array,
+    num_jumps: int,
+    key: flax.typing.PRNGKey = None,
+  ) -> Array:
     """Takes num_jumps large steps, each of length num_steps_direct."""
+
+    random = (key is not None)
+    if not random:
+      key, _ = jax.random.split(jax.random.PRNGKey(0))  # Won't be used
 
     def scan_fn(carry, forcing):
       u_inp, t_inp = carry
+      subkey = forcing if random else None
       tau = self.tau_base * self.num_steps_direct
       u_out = self._apply_operator(
         variables,
@@ -186,6 +248,7 @@ class AutoregressivePredictor:
         u_inp=u_inp,
         t_inp=t_inp,
         tau=tau,
+        key=subkey,
       )
       u_inp_next = u_out
       t_inp_next = t_inp + tau
@@ -193,8 +256,13 @@ class AutoregressivePredictor:
       rollout = None
       return carry, rollout
 
-    forcings = None
-    (u_next, t_next), _ = jax.lax.scan(f=scan_fn,
-      init=(u_inp, t_inp), xs=forcings, length=num_jumps)
+    keys = jax.random.split(key, num=num_jumps)
+    forcings = keys
+    (u_next, t_next), _ = jax.lax.scan(
+      f=scan_fn,
+      init=(u_inp, t_inp),
+      xs=forcings,
+      length=num_jumps,
+    )
 
     return u_next

@@ -117,14 +117,17 @@ DATASET_METADATA = {
 
 class Dataset:
 
-  def __init__(self, key: flax.typing.PRNGKey,
-      datadir: str, datapath: str,
-      n_train: int = 0, n_valid: int = 0,
-      preload: bool = False,
-      include_passive_variables: bool = False,
-      downsample_factor: int = 1,
-      cutoff: int = None,
-    ):
+  def __init__(self,
+    key: flax.typing.PRNGKey,
+    datadir: str,
+    datapath: str,
+    n_train: int = 0,
+    n_valid: int = 0,
+    preload: bool = False,
+    include_passive_variables: bool = False,
+    downsample_factor: int = 1,
+    cutoff: int = None,
+  ):
 
     # Set attributes
     self.metadata = DATASET_METADATA[datapath]

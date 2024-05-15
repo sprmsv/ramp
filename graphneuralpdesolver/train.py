@@ -118,6 +118,12 @@ flags.DEFINE_integer(name='num_message_passing_steps', default=6, required=False
 flags.DEFINE_integer(name='num_message_passing_steps_grid', default=6, required=False,
   help='Number of message-passing steps in the decoder'
 )
+flags.DEFINE_float(name='p_dropout_edges_grid2mesh', default=0., required=False,
+  help='Probability of dropping out edges of grid2mesh'
+)
+flags.DEFINE_float(name='p_dropout_edges_mesh2grid', default=0., required=False,
+  help='Probability of dropping out edges of mesh2grid'
+)
 
 @dataclass
 class EvalMetrics:
@@ -130,9 +136,18 @@ class EvalMetrics:
 
 DIR = DIR_EXPERIMENTS / datetime.now().strftime('%Y%m%d-%H%M%S.%f')
 
-def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset: Dataset,
-  jump_steps: int, direct_steps: int, unroll_steps: int, epochs: int,
-  epochs_before: int = 0, loss_fn: Callable = mse_loss) -> TrainState:
+def train(
+  key: flax.typing.PRNGKey,
+  model: nn.Module,
+  state: TrainState,
+  dataset: Dataset,
+  jump_steps: int,
+  direct_steps: int,
+  unroll_steps: int,
+  epochs: int,
+  epochs_before: int = 0,
+  loss_fn: Callable = mse_loss
+) -> TrainState:
   """Trains a model and returns the state."""
 
   # Samples
@@ -197,29 +212,54 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
 
   @functools.partial(jax.pmap, axis_name='device')
   def _train_one_batch(
-    state: TrainState, stats: dict, trajs: Array, times: Array, specs: Array,
-    key: flax.typing.PRNGKey) -> Tuple[TrainState, Array, Array]:
+    key: flax.typing.PRNGKey,
+    state: TrainState,
+    stats: dict,
+    trajs: Array,
+    times: Array,
+    specs: Array,
+  ) -> Tuple[TrainState, Array, Array]:
     """Loads a batch, normalizes it, updates the state based on it, and returns it."""
 
-    def _update_state_per_direct_step(
+    def _update_state_per_subbatch(
+      key: flax.typing.PRNGKey,
       state: TrainState,
-      specs: Array, u_lag: Array, t_lag: Array, u_tgt: Array, tau: Array,
+      specs: Array,
+      u_lag: Array,
+      t_lag: Array,
+      u_tgt: Array,
+      tau: Array,
     ) -> Tuple[TrainState, Array, PyTreeDef]:
       # NOTE: INPUT SHAPES [batch_size_per_device, ...]
 
       def _get_loss_and_grads(
-        params: flax.typing.Collection, specs: Array,
-        u_lag: Array, t_lag: Array, u_tgt: Array, tau: int) -> Tuple[Array, PyTreeDef]:
+        key: flax.typing.PRNGKey,
+        params: flax.typing.Collection,
+        specs: Array,
+        u_lag: Array,
+        t_lag: Array,
+        u_tgt: Array,
+        tau: int,
+      ) -> Tuple[Array, PyTreeDef]:
         """
         Computes the loss and the gradients of the loss w.r.t the parameters.
         """
 
-        def _compute_loss(params: flax.typing.Collection,
-          specs: Array, u_lag: Array, t_lag: Array, tau: int, u_tgt: Array, num_steps_autoreg: int) -> Array:
+        def _compute_loss(
+          params: flax.typing.Collection,
+          specs: Array,
+          u_lag: Array,
+          t_lag: Array,
+          tau: int,
+          u_tgt: Array,
+          num_steps_autoreg: int,
+          key: flax.typing.PRNGKey,
+        ) -> Array:
           """Computes the prediction of the model and returns its loss."""
 
           variables = {'params': params}
           # Apply autoregressive steps
+          key, subkey = jax.random.split(key)
           u_inp = predictor.jump(
             variables=variables,
             stats=stats,
@@ -227,10 +267,12 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
             u_inp=u_lag,
             t_inp=t_lag,
             num_jumps=num_steps_autoreg,
+            key=subkey,
           )
           t_inp = t_lag + num_steps_autoreg * jump_steps * direct_steps
 
           # Get the output
+          key, subkey = jax.random.split(key)
           _loss_inputs = normalizer.get_loss_inputs(
             variables=variables,
             stats=stats,
@@ -239,12 +281,18 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
             t_inp=t_inp,
             u_tgt=u_tgt,
             tau=tau,
+            key=subkey,
           )
 
           return loss_fn(*_loss_inputs)
 
         def _get_noisy_input(
-          specs: Array, u_lag: Array, t_lag: Array, num_steps_autoreg: int) -> Array:
+          specs: Array,
+          u_lag: Array,
+          t_lag: Array,
+          num_steps_autoreg: int,
+          key: flax.typing.PRNGKey,
+        ) -> Array:
           """Apply the model to the lagged input to get a noisy input."""
 
           variables = {'params': params}
@@ -255,6 +303,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
             u_inp=u_lag,
             t_inp=t_lag,
             num_jumps=num_steps_autoreg,
+            key=key,
           )
 
           return u_inp_noisy
@@ -264,17 +313,20 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
         grads_steps = unroll_steps - noise_steps
 
         # Get noisy input
+        key, subkey = jax.random.split(key)
         u_inp = _get_noisy_input(
-          specs, u_lag, t_lag, num_steps_autoreg=noise_steps)
+          specs, u_lag, t_lag, num_steps_autoreg=noise_steps, key=subkey)
         t_inp = t_lag + noise_steps * jump_steps * direct_steps
         # Use noisy input and compute gradients
+        key, subkey = jax.random.split(key)
         loss, grads = jax.value_and_grad(_compute_loss)(
-          params, specs, u_inp, t_inp, tau, u_tgt, num_steps_autoreg=grads_steps)
+          params, specs, u_inp, t_inp, tau, u_tgt, num_steps_autoreg=grads_steps, key=subkey)
 
         return loss, grads
 
       # Update state, loss, and gradients
       _loss, _grads = _get_loss_and_grads(
+        key=key,
         params=state.params,
         specs=(specs if _use_specs else None),
         u_lag=u_lag,
@@ -359,11 +411,13 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
       u_lag_batch, t_lag_batch, tau_batch, u_tgt_batch = split_arrays(
         [u_lag_batch, t_lag_batch, tau_batch, u_tgt_batch], size=batch_size_per_device)
 
-    # Add loss and gradients for each direct_step
+    # Add loss and gradients for each subbatch
     def _update_state(i, carry):
       # Update state, loss, and gradients
-      _state, _loss_carried, _grads_carried = carry
-      _state, _loss_direct_step, _grads_direct_step = _update_state_per_direct_step(
+      _state, _loss_carried, _grads_carried, _key_carried = carry
+      _key_updated, _subkey = jax.random.split(_key_carried)
+      _state, _loss_subbatch, _grads_subbatch = _update_state_per_subbatch(
+        key=_subkey,
         state=_state,
         specs=(specs_batch if _use_specs else None),
         u_lag=u_lag_batch[i],
@@ -371,25 +425,26 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
         u_tgt=u_tgt_batch[i],
         tau=tau_batch[i],
       )
-      # Update the carried loss and gradients of the minibatch
-      _loss_updated = _loss_carried + _loss_direct_step / direct_steps
+      # Update the carried loss and gradients of the subbatch
+      _loss_updated = _loss_carried + _loss_subbatch / num_valid_pairs
       _grads_updated = jax.tree_map(
-        lambda g_old, g_new: (g_old + g_new / direct_steps),
+        lambda g_old, g_new: (g_old + g_new / num_valid_pairs),
         _grads_carried,
-        _grads_direct_step,
+        _grads_subbatch,
       )
 
-      return _state, _loss_updated, _grads_updated
+      return _state, _loss_updated, _grads_updated, _key_updated
 
     # Loop over the pairs
     _init_state = state
     _init_loss = 0.
     _init_grads = jax.tree_map(lambda p: jnp.zeros_like(p), state.params)
-    state, loss, grads = jax.lax.fori_loop(
+    key, _init_key = jax.random.split(key)
+    state, loss, grads, _ = jax.lax.fori_loop(
       lower=0,
       upper=num_valid_pairs,
       body_fun=_update_state,
-      init_val=(_init_state, _init_loss, _init_grads)
+      init_val=(_init_state, _init_loss, _init_grads, _init_key)
     )
 
     # Synchronize loss and gradients
@@ -400,8 +455,10 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
     return state, loss, grads
 
   def train_one_epoch(
-    state: TrainState, batches: Iterable[Tuple[Array, Array]],
-    key: flax.typing.PRNGKey) -> Tuple[TrainState, Array, Array]:
+    key: flax.typing.PRNGKey,
+    state: TrainState,
+    batches: Iterable[Tuple[Array, Array]],
+  ) -> Tuple[TrainState, Array, Array]:
     """Updates the state based on accumulated losses and gradients."""
 
     # Loop over the batches
@@ -448,7 +505,7 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
       # Get loss and updated state
       subkey, key = jax.random.split(key)
       subkey = shard_prng_key(subkey)
-      state, loss, grads = _train_one_batch(state, stats, trajs, times, specs, subkey)
+      state, loss, grads = _train_one_batch(subkey, state, stats, trajs, times, specs)
       # NOTE: Using the first element of replicated loss and grads
       loss_epoch += loss[0] * FLAGS.batch_size / num_samples_trn
       grad_epoch += np.mean(jax.tree_util.tree_flatten(
@@ -458,7 +515,12 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
 
   @jax.pmap
   def _evaluate_direct_prediction(
-    state: TrainState, stats, trajs: Array, times: Array, specs: Array) -> Tuple[Array, Array]:
+    state: TrainState,
+    stats,
+    trajs: Array,
+    times: Array,
+    specs: Array,
+  ) -> Tuple[Array, Array]:
 
     # Inputs are of shape [batch_size_per_device, ...]
 
@@ -501,7 +563,9 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
         return (tau+jump_steps), u_prd
       _, u_prd = jax.lax.scan(
         f=get_direct_prediction,
-        init=jump_steps, xs=None, length=direct_steps,
+        init=jump_steps,
+        xs=None,
+        length=direct_steps,
       )
       u_prd = u_prd.squeeze(axis=2).swapaxes(0, 1)
       err_l1_mean += jnp.sqrt(jnp.sum(jnp.power(rel_l1_error(u_prd, u_tgt[lt]), 2), axis=1)) / num_lead_times
@@ -524,8 +588,12 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
 
   @jax.pmap
   def _evaluate_rollout_prediction(
-      state: TrainState, stats, trajs: Array, times: Array, specs: Array
-    ) -> Array:
+    state: TrainState,
+    stats,
+    trajs: Array,
+    times: Array,
+    specs: Array,
+  ) -> Array:
     """
     Predicts the trajectories autoregressively.
     The input dataset must be raw (not normalized).
@@ -556,8 +624,12 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
 
   @jax.pmap
   def _evaluate_final_prediction(
-      state: TrainState, stats, trajs: Array, times: Array, specs: Array
-    ) -> Array:
+    state: TrainState,
+    stats,
+    trajs: Array,
+    times: Array,
+    specs: Array,
+  ) -> Array:
 
     # Set input and target
     u_inp = trajs[:, :1]
@@ -593,7 +665,9 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
     return err_l1, err_l2
 
   def evaluate(
-    state: TrainState, batches: Iterable[Tuple[Array, Array]]) -> EvalMetrics:
+    state: TrainState,
+    batches: Iterable[Tuple[Array, Array]],
+  ) -> EvalMetrics:
     """Evaluates the model on a dataset based on multiple trajectory lengths."""
 
     error_dr_l1 = []
@@ -749,9 +823,9 @@ def train(key: flax.typing.PRNGKey, model: nn.Module, state: TrainState, dataset
     # Train one epoch
     subkey_0, subkey_1, key = jax.random.split(key, num=3)
     state, loss, grad = train_one_epoch(
+      key=subkey_1,
       state=state,
       batches=dataset.batches(mode='train', batch_size=FLAGS.batch_size, key=subkey_0),
-      key=subkey_1
     )
 
     if (epoch % evaluation_frequency) == 0:
@@ -910,6 +984,8 @@ def main(argv):
       num_outputs=dataset.shape[-1],
       num_grid_nodes=dataset.shape[2:4],
       num_mesh_nodes=(FLAGS.num_mesh_nodes, FLAGS.num_mesh_nodes),
+      use_tau=True,
+      use_t=True,
       deriv_degree=FLAGS.deriv_degree,
       latent_size=FLAGS.latent_size,
       num_mlp_hidden_layers=FLAGS.num_mlp_hidden_layers,
@@ -919,8 +995,8 @@ def main(argv):
       overlap_factor_mesh2grid=FLAGS.overlap_factor_mesh2grid,
       num_multimesh_levels=FLAGS.num_multimesh_levels,
       node_coordinate_freqs=FLAGS.node_coordinate_freqs,
-      use_tau=True,
-      use_t=True,
+      p_dropout_edges_grid2mesh= FLAGS.p_dropout_edges_grid2mesh,
+      p_dropout_edges_mesh2grid = FLAGS.p_dropout_edges_grid2mesh,
     )
   model = get_model(model_kwargs)
 

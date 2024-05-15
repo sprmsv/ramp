@@ -2,14 +2,16 @@ from typing import Sequence, Tuple, Union
 
 import numpy as np
 import jax.numpy as jnp
+import jax.random
 from flax import linen as nn
+import flax.typing
 
 from graphneuralpdesolver.graph.typed_graph import (
     TypedGraph, EdgeSet, EdgeSetKey,
     EdgesIndices, NodeSet, Context)
 from graphneuralpdesolver.models.deep_typed_graph_net import DeepTypedGraphNet
 from graphneuralpdesolver.models.utils import compute_derivatives
-from graphneuralpdesolver.utils import Array, normalize
+from graphneuralpdesolver.utils import Array, normalize, shuffle_arrays
 
 
 class AbstractOperator(nn.Module):
@@ -34,6 +36,8 @@ class GraphNeuralPDESolver(AbstractOperator):
   num_outputs: int
   num_grid_nodes: Sequence[int]
   num_mesh_nodes: Sequence[int]
+  use_t: bool = True
+  use_tau: bool = True
   deriv_degree: int = 0
   latent_size: int = 128
   num_mlp_hidden_layers: int = 2
@@ -43,8 +47,8 @@ class GraphNeuralPDESolver(AbstractOperator):
   overlap_factor_mesh2grid: float = 1.
   num_multimesh_levels: int = 1
   node_coordinate_freqs: int = 1
-  use_tau: bool = True
-  use_t: bool = True
+  p_dropout_edges_grid2mesh: int = 0.
+  p_dropout_edges_mesh2grid: int = 0.
 
   def setup(self):
 
@@ -402,7 +406,13 @@ class GraphNeuralPDESolver(AbstractOperator):
 
     return graph
 
-  def __call__(self, u_inp: Array, t_inp: Array = None, tau: Union[float, int] = None, specs: jnp.ndarray = None):
+  def __call__(self,
+    u_inp: Array,
+    t_inp: Array = None,
+    tau: Union[float, int] = None,
+    specs: Array = None,
+    key: flax.typing.PRNGKey = None,
+  ) -> Array:
     """
     Inputs must be of shape (batch_size, 1, num_grid_nodes_0, num_grid_nodes_1, num_inputs)
     """
@@ -461,15 +471,18 @@ class GraphNeuralPDESolver(AbstractOperator):
 
     # Transfer data for the grid to the mesh
     # -> [num_mesh_nodes, batch_size, latent_size], [num_grid_nodes, batch_size, latent_size]
-    (latent_mesh_nodes, latent_grid_nodes) = self._run_grid2mesh_gnn(grid_node_features, tau)
+    subkey, key = jax.random.split(key) if (key is not None) else (None, None)
+    (latent_mesh_nodes, latent_grid_nodes) = self._run_grid2mesh_gnn(grid_node_features, tau, key=subkey)
 
     # Run message-passing in the multimesh.
     # -> [num_mesh_nodes, batch_size, latent_size]
+    # TRY: Add edge dropout
     updated_latent_mesh_nodes = self._run_mesh_gnn(latent_mesh_nodes, tau)
 
     # Transfer data from the mesh to the grid.
     # -> [num_grid_nodes, batch_size, latent_size]
-    updated_latent_grid_nodes = self._run_mesh2grid_gnn(updated_latent_mesh_nodes, latent_grid_nodes, tau)
+    subkey, key = jax.random.split(key) if (key is not None) else (None, None)
+    updated_latent_grid_nodes = self._run_mesh2grid_gnn(updated_latent_mesh_nodes, latent_grid_nodes, tau, key=subkey)
 
     # Run message passing in the grid.
     # -> [num_grid_nodes, batch_size, num_outputs]
@@ -486,7 +499,11 @@ class GraphNeuralPDESolver(AbstractOperator):
 
     return output
 
-  def _run_grid2mesh_gnn(self, grid_node_features: jnp.ndarray, tau: float) -> tuple[jnp.ndarray, jnp.ndarray]:
+  def _run_grid2mesh_gnn(self,
+    grid_node_features: jnp.ndarray,
+    tau: float,
+    key: flax.typing.PRNGKey = None,
+  ) -> tuple[jnp.ndarray, jnp.ndarray]:
     """Runs the grid2mesh_gnn, extracting latent mesh and grid nodes."""
 
     bsz = grid_node_features.shape[1]
@@ -516,12 +533,34 @@ class GraphNeuralPDESolver(AbstractOperator):
       ], axis=-1)
     )
 
-    # Broadcast edge structural features to the required batch size.
+    # Get edges
     grid2mesh_edges_key = grid2mesh_graph.edge_key_by_name('grid2mesh')
     edges = grid2mesh_graph.edges[grid2mesh_edges_key]
-    new_edges = edges._replace(
-      features=_add_batch_second_axis(
-        edges.features.astype(dummy_mesh_node_features.dtype), bsz)
+    # Drop out edges randomly with the given probability
+    if key is not None:
+      n_edges_after = int((1 - self.p_dropout_edges_grid2mesh) * edges.features.shape[0])
+      [new_edge_features, new_edge_senders, new_edge_receivers] = shuffle_arrays(
+        key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers])
+      new_edge_features = new_edge_features[:n_edges_after]
+      new_edge_senders = new_edge_senders[:n_edges_after]
+      new_edge_receivers = new_edge_receivers[:n_edges_after]
+    else:
+      n_edges_after = edges.features.shape[0]
+      new_edge_features = edges.features
+      new_edge_senders = edges.indices.senders
+      new_edge_receivers = edges.indices.receivers
+    # Change edge feature dtype
+    new_edge_features = new_edge_features.astype(dummy_mesh_node_features.dtype)
+    # Broadcast edge structural features to the required batch size
+    new_edge_features = _add_batch_second_axis(new_edge_features, bsz)
+    # Build new edge set
+    new_edges = EdgeSet(
+      n_edge=jnp.array([n_edges_after]),
+      indices=EdgesIndices(
+        senders=new_edge_senders,
+        receivers=new_edge_receivers,
+      ),
+      features=new_edge_features,
     )
 
     input_graph = grid2mesh_graph._replace(
@@ -538,7 +577,10 @@ class GraphNeuralPDESolver(AbstractOperator):
 
     return latent_mesh_nodes, latent_grid_nodes
 
-  def _run_mesh_gnn(self, latent_mesh_nodes: jnp.ndarray, tau: float) -> jnp.ndarray:
+  def _run_mesh_gnn(self,
+    latent_mesh_nodes: Array,
+    tau: float
+  ) -> Array:
     """Runs the mesh_gnn, extracting updated latent mesh nodes."""
 
     bsz = latent_mesh_nodes.shape[1]
@@ -576,8 +618,12 @@ class GraphNeuralPDESolver(AbstractOperator):
 
     return output_mesh_nodes
 
-  def _run_mesh2grid_gnn(self, updated_latent_mesh_nodes: jnp.ndarray,
-                        latent_grid_nodes: jnp.ndarray, tau: float) -> jnp.ndarray:
+  def _run_mesh2grid_gnn(self,
+    updated_latent_mesh_nodes: Array,
+    latent_grid_nodes: Array,
+    tau: float,
+    key: flax.typing.PRNGKey = None,
+  ) -> Array:
     """Runs the mesh2grid_gnn, extracting the output grid nodes."""
 
     bsz = updated_latent_mesh_nodes.shape[1]
@@ -590,18 +636,39 @@ class GraphNeuralPDESolver(AbstractOperator):
     new_mesh_nodes = mesh_nodes._replace(features=updated_latent_mesh_nodes)
     new_grid_nodes = grid_nodes._replace(features=latent_grid_nodes)
 
-    # Add the structural edge features of this graph.
-    # NOTE: We need the structural edge features, because it is the first time we
-    # are seeing this particular set of edges.
-    mesh2grid_key = mesh2grid_graph.edge_key_by_name('mesh2grid')
-    edges = mesh2grid_graph.edges[mesh2grid_key]
-    new_edges = edges._replace(
-      features=_add_batch_second_axis(
-        edges.features.astype(latent_grid_nodes.dtype), bsz))
+    # Get edges
+    mesh2grid_edges_key = mesh2grid_graph.edge_key_by_name('mesh2grid')
+    edges = mesh2grid_graph.edges[mesh2grid_edges_key]
+    # Drop out edges randomly with the given probability
+    if key is not None:
+      n_edges_after = int((1 - self.p_dropout_edges_mesh2grid) * edges.features.shape[0])
+      [new_edge_features, new_edge_senders, new_edge_receivers] = shuffle_arrays(
+        key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers])
+      new_edge_features = new_edge_features[:n_edges_after]
+      new_edge_senders = new_edge_senders[:n_edges_after]
+      new_edge_receivers = new_edge_receivers[:n_edges_after]
+    else:
+      n_edges_after = edges.features.shape[0]
+      new_edge_features = edges.features
+      new_edge_senders = edges.indices.senders
+      new_edge_receivers = edges.indices.receivers
+    # Change edge feature dtype
+    new_edge_features = new_edge_features.astype(latent_grid_nodes.dtype)
+    # Broadcast edge structural features to the required batch size
+    new_edge_features = _add_batch_second_axis(new_edge_features, bsz)
+    # Build new edge set
+    new_edges = EdgeSet(
+      n_edge=jnp.array([n_edges_after]),
+      indices=EdgesIndices(
+        senders=new_edge_senders,
+        receivers=new_edge_receivers,
+      ),
+      features=new_edge_features,
+    )
 
     # Build the new graph
     input_graph = mesh2grid_graph._replace(
-      edges={mesh2grid_key: new_edges},
+      edges={mesh2grid_edges_key: new_edges},
       nodes={
         'mesh_nodes': new_mesh_nodes,
         'grid_nodes': new_grid_nodes
@@ -613,8 +680,11 @@ class GraphNeuralPDESolver(AbstractOperator):
 
     return output_grid_nodes
 
-  def _run_grid2grid_gnn(self, latent_grid_nodes: jnp.ndarray,
-                         initial_latent_grid_nodes: jnp.ndarray, tau: float) -> jnp.ndarray:
+  def _run_grid2grid_gnn(self,
+    latent_grid_nodes: Array,
+    initial_latent_grid_nodes: Array,
+    tau: float,
+  ) -> Array:
     """Runs the grid2grid_gnn, extracting updated latent grid nodes."""
 
     bsz = latent_grid_nodes.shape[1]
