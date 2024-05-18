@@ -22,6 +22,7 @@ class Metadata:
   data_group: str
   active_variables: Sequence[int] = None
   stats: dict[str, Sequence[float]] = None
+  signed: Union[bool, Sequence[bool]] = True
 
 STATS_INCOMPRESSIBLE_FLUIDS = {
   'mean': [0., 0.],
@@ -38,80 +39,97 @@ DATASET_METADATA = {
   'incompressible_fluids/brownian_bridge': Metadata(
     data_group='velocity',
     stats=STATS_INCOMPRESSIBLE_FLUIDS,
+    signed=True,
   ),
   'incompressible_fluids/gaussians': Metadata(
     data_group='velocity',
     stats=STATS_INCOMPRESSIBLE_FLUIDS,
+    signed=True,
   ),
   'incompressible_fluids/pwc': Metadata(
     data_group='velocity',
     stats=STATS_INCOMPRESSIBLE_FLUIDS,
+    signed=True,
   ),
   'incompressible_fluids/shear_layer': Metadata(
     data_group='velocity',
     stats=STATS_INCOMPRESSIBLE_FLUIDS,
+    signed=True,
   ),
   'incompressible_fluids/sines': Metadata(
     data_group='velocity',
     stats=STATS_INCOMPRESSIBLE_FLUIDS,
+    signed=True,
   ),
   'incompressible_fluids/vortex_sheet': Metadata(
     data_group='velocity',
     stats=STATS_INCOMPRESSIBLE_FLUIDS,
+    signed=True,
   ),
   # compressible_flow: [density, velocity, velocity, pressure, energy]
   'compressible_flow/cloudshock': Metadata(
     data_group='data',
     active_variables=list(range(4)),
     stats=STATS_COMPRESSIBLE_FLOW,
+    signed=[False, True, True, False, False],
   ),
   'compressible_flow/gauss': Metadata(
     data_group='data',
     active_variables=list(range(4)),
     stats=STATS_COMPRESSIBLE_FLOW,
+    signed=[False, True, True, False, False],
   ),
   'compressible_flow/kh': Metadata(
     data_group='data',
     active_variables=list(range(4)),
     stats=STATS_COMPRESSIBLE_FLOW,
+    signed=[False, True, True, False, False],
   ),
   'compressible_flow/richtmyer_meshkov': Metadata(
     data_group='solution',
     active_variables=list(range(4)),
     stats=STATS_COMPRESSIBLE_FLOW,
+    signed=[False, True, True, False, False],
   ),
   'compressible_flow/riemann': Metadata(
     data_group='data',
     active_variables=list(range(4)),
     stats=STATS_COMPRESSIBLE_FLOW,
+    signed=[False, True, True, False, False],
   ),
   'compressible_flow/riemann_curved': Metadata(
     data_group='data',
     active_variables=list(range(4)),
     stats=STATS_COMPRESSIBLE_FLOW,
+    signed=[False, True, True, False, False],
   ),
   'compressible_flow/riemann_kh': Metadata(
     data_group='data',
     active_variables=list(range(4)),
     stats=STATS_COMPRESSIBLE_FLOW,
+    signed=[False, True, True, False, False],
   ),
   'compressible_flow/gravity/blast': Metadata(
     data_group='solution',
     active_variables=list(range(4)),
     stats=STATS_COMPRESSIBLE_FLOW,
+    signed=[False, True, True, False, False],
   ),
   'compressible_flow/gravity/rayleigh_taylor': Metadata(
     data_group='solution',
     active_variables=list(range(4)),
     stats=STATS_COMPRESSIBLE_FLOW,
+    signed=[False, True, True, False, False],
   ),
   # reaction_diffusion
   'reaction_diffusion/allen_cahn': Metadata(
     data_group='solution',
+    signed=True,
   ),
   # wave_equation
   'wave_equation/seismic_20step': Metadata(
     data_group='solution',
+    signed=True,
   ),
 }
 

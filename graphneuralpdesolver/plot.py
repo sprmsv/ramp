@@ -29,7 +29,6 @@ CMAP_WRB = matplotlib.colors.LinearSegmentedColormap.from_list(
   N=200,
 )
 
-
 def animate(trajs, idx_traj=0, symmetric=True, cmaps=CMAP_BBR, vertical=True):
 
   if not isinstance(trajs, list):
@@ -48,9 +47,15 @@ def animate(trajs, idx_traj=0, symmetric=True, cmaps=CMAP_BBR, vertical=True):
   n_time = trajs[0].shape[1]
 
   if vertical:
-    fig, axs = plt.subplots(nrows=n_vars, ncols=n_trjs, figsize=(5*n_trjs, 4*n_vars))
+    fig, axs = plt.subplots(
+      nrows=n_vars, ncols=n_trjs,
+      figsize=(5*n_trjs, 4*n_vars)
+    )
   else:
-    fig, axs = plt.subplots(nrows=n_trjs, ncols=n_vars, figsize=(5*n_vars, 4*n_trjs))
+    fig, axs = plt.subplots(
+      nrows=n_trjs, ncols=n_vars,
+      figsize=(5*n_vars, 4*n_trjs)
+    )
 
   handlers = []
   for i in range(n_vars):
@@ -82,20 +87,33 @@ def animate(trajs, idx_traj=0, symmetric=True, cmaps=CMAP_BBR, vertical=True):
 
   return ani, (fig, axs)
 
-def plot_trajectory(traj, idx_time, idx_traj=0, symmetric=True, cmap=CMAP_BBR, ylabels=None):
+def plot_trajectory(traj, idx_time, idx_traj=0, symmetric=True, ylabels=None):
+
+  _HEIGHT_PER_ROW = 1.5
+  _HEIGHT_MARGIN = .2
+  _WIDTH_PER_COL = 1.5
+  _WIDTH_MARGIN = .2
 
   n_vars = traj[0].shape[-1]
+  if isinstance(symmetric, bool):
+    symmetric = [symmetric] * n_vars
 
-  fig, axs = plt.subplots(nrows=n_vars, ncols=len(idx_time), figsize=(8, 1.5*n_vars+.2), sharex=True, sharey=True)
+  fig, axs = plt.subplots(
+    nrows=n_vars, ncols=len(idx_time),
+    figsize=(_WIDTH_PER_COL*len(idx_time)+_WIDTH_MARGIN, _HEIGHT_PER_ROW*n_vars+_HEIGHT_MARGIN),
+    sharex=True, sharey=True,
+  )
   if (n_vars == 1) and len(idx_time) == 1:
     axs = np.array(axs)
   axs = axs.reshape(n_vars, len(idx_time))
 
   for ivar in range(n_vars):
-    if symmetric:
+    if symmetric[ivar]:
+      cmap = CMAP_BWR
       vmax = np.max(np.abs(traj[idx_traj, idx_time, ..., ivar]))
       vmin = -vmax
     else:
+      cmap = CMAP_WRB
       vmax = None
       vmin = None
 
@@ -117,23 +135,35 @@ def plot_trajectory(traj, idx_time, idx_traj=0, symmetric=True, cmap=CMAP_BBR, y
 
   return fig, axs
 
-def plot_estimations(u_gtr, u_prd, u_err, idx_time=-1, idx_traj=0):
+def plot_estimations(u_gtr, u_prd, u_err, idx_time=-1, idx_traj=0, symmetric=True):
+
+  _HEIGHT_PER_ROW = 2.5
+  _HEIGHT_MARGIN = .2
+
   n_vars = u_gtr.shape[-1]
-  fig, axs = plt.subplots(nrows=n_vars, ncols=3, figsize=(10, 2.5*n_vars), sharex=True, sharey=True)
-  fig.tight_layout()
+  if isinstance(symmetric, bool):
+    symmetric = [symmetric] * n_vars
+
+  fig, axs = plt.subplots(
+    nrows=n_vars, ncols=3,
+    figsize=(10, _HEIGHT_PER_ROW*n_vars+_HEIGHT_MARGIN),
+    sharex=True, sharey=True,
+  )
 
   for ivar in range(n_vars):
+    vmax_gtr = np.max(np.abs(u_gtr[idx_traj, idx_time, ..., ivar]))
+
     h = axs[ivar, 0].imshow(
       u_gtr[idx_traj, idx_time, ..., ivar],
-      cmap=CMAP_BWR,
-      vmin=-np.max(u_gtr[idx_traj, idx_time, ..., ivar]),
-      vmax=np.max(u_gtr[idx_traj, idx_time, ..., ivar]),
+      cmap=(CMAP_BWR if symmetric[ivar] else CMAP_WRB),
+      vmax=(vmax_gtr if symmetric[ivar] else None),
+      vmin=(-vmax_gtr if symmetric[ivar] else None),
     )
     h = axs[ivar, 1].imshow(
       u_prd[idx_traj, idx_time, ..., ivar],
-      cmap=CMAP_BWR,
-      vmin=-np.max(u_gtr[idx_traj, idx_time, ..., ivar]),
-      vmax=np.max(u_gtr[idx_traj, idx_time, ..., ivar]),
+      cmap=(CMAP_BWR if symmetric[ivar] else CMAP_WRB),
+      vmax=(vmax_gtr if symmetric[ivar] else None),
+      vmin=(-vmax_gtr if symmetric[ivar] else None),
     )
     plt.colorbar(h, ax=axs[ivar, :2], fraction=.05)
     h = axs[ivar, 2].imshow(
@@ -142,7 +172,7 @@ def plot_estimations(u_gtr, u_prd, u_err, idx_time=-1, idx_traj=0):
       vmin=0,
       vmax=np.max(np.abs(u_err[idx_traj, idx_time, ..., ivar])),
     )
-    plt.colorbar(h, ax=axs[ivar, 2], fraction=.1)
+    plt.colorbar(h, ax=axs[ivar, 2], fraction=.05)
 
   axs[0, 0].set(title='Ground-truth');
   axs[0, 1].set(title='Estimate');
@@ -154,10 +184,18 @@ def plot_estimations(u_gtr, u_prd, u_err, idx_time=-1, idx_traj=0):
   return fig, axs
 
 def animate_estimations(u_gtr, u_prd, u_err, idx_traj=0):
+  _HEIGHT_PER_ROW = 1.5
+  _HEIGHT_MARGIN = .2
+  _WIDTH_PER_COL = 1.5
+  _WIDTH_MARGIN = .2
 
   n_vars = u_gtr.shape[-1]
   n_time = u_gtr.shape[1]
-  fig, axs = plt.subplots(nrows=n_vars, ncols=3, figsize=(5*n_vars, 3*n_vars), sharex=True, sharey=True)
+  fig, axs = plt.subplots(
+    nrows=n_vars, ncols=3,
+    figsize=(_WIDTH_PER_COL*n_vars+_WIDTH_MARGIN, _HEIGHT_PER_ROW*3+_HEIGHT_MARGIN),
+    sharex=True, sharey=True,
+  )
 
   handlers_gtr = []
   handlers_err = []
@@ -177,7 +215,7 @@ def animate_estimations(u_gtr, u_prd, u_err, idx_traj=0):
       vmax=np.max(u_gtr[idx_traj, :, ..., ivar]),
     )
     handlers_prd.append(h)
-    plt.colorbar(h, ax=axs[ivar, :2], fraction=.05)
+    plt.colorbar(h, ax=axs[ivar, :2], fraction=.1)
     h = axs[ivar, 2].imshow(
       np.abs(u_err[idx_traj, 0, ..., ivar]),
       cmap=CMAP_WRB,
@@ -185,7 +223,7 @@ def animate_estimations(u_gtr, u_prd, u_err, idx_traj=0):
       vmax=np.max(np.abs(u_err[idx_traj, :, ..., ivar])),
     )
     handlers_err.append(h)
-    plt.colorbar(h, ax=axs[ivar, 2], fraction=.1)
+    plt.colorbar(h, ax=axs[ivar, 2], fraction=.2)
 
   axs[0, 0].set(title='Ground-truth');
   axs[0, 1].set(title='Estimate');
@@ -206,12 +244,20 @@ def animate_estimations(u_gtr, u_prd, u_err, idx_traj=0):
   return ani, (fig, axs)
 
 def plot_error_accumulation(u_err, idx_time, idx_traj=0):
+  _HEIGHT_PER_ROW = 1.5
+  _HEIGHT_MARGIN = .2
+  _WIDTH_PER_COL = 1.5
+  _WIDTH_MARGIN = .2
 
   # Because the initial state is removed from the errors
   idx_time=[i-1 for i in idx_time]
 
   n_vars = u_err.shape[-1]
-  fig, axs = plt.subplots(nrows=n_vars, ncols=len(idx_time), figsize=(10, 1.5*n_vars+.2), sharex=True, sharey=True)
+  fig, axs = plt.subplots(
+    nrows=n_vars, ncols=len(idx_time),
+    figsize=(_WIDTH_PER_COL*len(idx_time)+_WIDTH_MARGIN, _HEIGHT_PER_ROW*n_vars+_HEIGHT_MARGIN),
+    sharex=True, sharey=True,
+  )
 
   for ivar in range(n_vars):
     for icol in range(len(idx_time)):
