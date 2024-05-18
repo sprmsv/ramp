@@ -39,6 +39,9 @@ EVAL_FREQ = 50
 
 # FLAGS::general
 FLAGS = flags.FLAGS
+flags.DEFINE_string(name='exp', default='000', required=False,
+  help='Name of the experiment'
+)
 flags.DEFINE_string(name='datadir', default=None, required=True,
   help='Path of the folder containing the datasets'
 )
@@ -803,7 +806,7 @@ def train(
   ]))
 
   # Set up the checkpoint manager
-  DIR = DIR_EXPERIMENTS / FLAGS.datapath / DATETIME_BEGIN
+  DIR = DIR_EXPERIMENTS / f'E{FLAGS.exp}' / FLAGS.datapath / DATETIME_BEGIN
   with disable_logging(level=logging.FATAL):
     (DIR / 'metrics').mkdir(exist_ok=True)
     checkpointer = orbax.checkpoint.PyTreeCheckpointer()
@@ -1002,7 +1005,7 @@ def main(argv):
   model = get_model(model_kwargs)
 
   # Store the configurations
-  DIR = DIR_EXPERIMENTS / FLAGS.datapath / DATETIME_BEGIN
+  DIR = DIR_EXPERIMENTS / f'E{FLAGS.exp}' / FLAGS.datapath / DATETIME_BEGIN
   DIR.mkdir(parents=True)
   logging.info(f'Experiment stored in {DIR.relative_to(DIR_EXPERIMENTS).as_posix()}')
   flags = {f: FLAGS.get_flag_value(f, default=None) for f in FLAGS}
