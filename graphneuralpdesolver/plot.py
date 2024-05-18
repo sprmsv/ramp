@@ -135,7 +135,7 @@ def plot_trajectory(traj, idx_time, idx_traj=0, symmetric=True, ylabels=None):
 
   return fig, axs
 
-def plot_estimations(u_gtr, u_prd, u_err, idx_time=-1, idx_traj=0, symmetric=True):
+def plot_estimations(u_gtr, u_prd, idx_time=-1, idx_traj=0, symmetric=True):
 
   _HEIGHT_PER_ROW = 2.5
   _HEIGHT_MARGIN = .2
@@ -149,6 +149,8 @@ def plot_estimations(u_gtr, u_prd, u_err, idx_time=-1, idx_traj=0, symmetric=Tru
     figsize=(10, _HEIGHT_PER_ROW*n_vars+_HEIGHT_MARGIN),
     sharex=True, sharey=True,
   )
+
+  u_err = (u_gtr - u_prd)
 
   for ivar in range(n_vars):
     vmax_gtr = np.max(np.abs(u_gtr[idx_traj, idx_time, ..., ivar]))
@@ -270,6 +272,59 @@ def plot_error_accumulation(u_err, idx_time, idx_traj=0):
       if ivar == 0:
         axs[ivar, icol].set(title=f'timestep={idx_time[icol]+1}')
   plt.colorbar(h, ax=axs, fraction=.02)
+
+  for ivar in range(n_vars):
+    axs[ivar, 0].set(ylabel=f'Variable {ivar:02d}');
+
+  return fig, axs
+
+def plot_ensemble(u_gtr, u_prd, idx_time=-1, idx_traj=0, symmetric=True):
+
+  _HEIGHT_PER_ROW = 2.5
+  _HEIGHT_MARGIN = .2
+
+  n_vars = u_prd.shape[-1]
+  if isinstance(symmetric, bool):
+    symmetric = [symmetric] * n_vars
+
+  fig, axs = plt.subplots(
+    nrows=n_vars, ncols=3,
+    figsize=(10, _HEIGHT_PER_ROW*n_vars+_HEIGHT_MARGIN),
+    sharex=True, sharey=True,
+  )
+
+  u_prd_mean = np.mean(u_prd, axis=0)
+  u_prd_std = np.std(u_prd, axis=0)
+  u_err = (u_gtr - u_prd_mean)
+
+  for ivar in range(n_vars):
+    vmax = np.max(np.abs(u_prd_mean[idx_traj, idx_time, ..., ivar]))
+
+    h = axs[ivar, 0].imshow(
+      u_prd_mean[idx_traj, idx_time, ..., ivar],
+      cmap=(CMAP_BWR if symmetric[ivar] else CMAP_WRB),
+      vmax=(vmax if symmetric[ivar] else None),
+      vmin=(-vmax if symmetric[ivar] else None),
+    )
+    plt.colorbar(h, ax=axs[ivar, 0], fraction=.05)
+    h = axs[ivar, 1].imshow(
+      u_prd_std[idx_traj, idx_time, ..., ivar],
+      cmap=CMAP_WRB,
+      vmin=0,
+      vmax=None,
+    )
+    plt.colorbar(h, ax=axs[ivar, 1], fraction=.05)
+    h = axs[ivar, 2].imshow(
+      np.abs(u_err[idx_traj, idx_time, ..., ivar]),
+      cmap=CMAP_WRB,
+      vmin=0,
+      vmax=None,
+    )
+    plt.colorbar(h, ax=axs[ivar, 2], fraction=.05)
+
+  axs[0, 0].set(title='Ensemble Mean');
+  axs[0, 1].set(title='Estimate Std');
+  axs[0, 2].set(title='Absolute error');
 
   for ivar in range(n_vars):
     axs[ivar, 0].set(ylabel=f'Variable {ivar:02d}');

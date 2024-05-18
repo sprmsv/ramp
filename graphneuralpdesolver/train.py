@@ -134,7 +134,7 @@ class EvalMetrics:
   error_final_l1: float = None
   error_final_l2: float = None
 
-DIR = DIR_EXPERIMENTS / datetime.now().strftime('%Y%m%d-%H%M%S.%f')
+DATETIME_BEGIN = datetime.now().strftime('%Y%m%d-%H%M%S.%f')
 
 def train(
   key: flax.typing.PRNGKey,
@@ -803,6 +803,7 @@ def train(
   ]))
 
   # Set up the checkpoint manager
+  DIR = DIR_EXPERIMENTS / FLAGS.datapath / DATETIME_BEGIN
   with disable_logging(level=logging.FATAL):
     (DIR / 'metrics').mkdir(exist_ok=True)
     checkpointer = orbax.checkpoint.PyTreeCheckpointer()
@@ -996,12 +997,13 @@ def main(argv):
       num_multimesh_levels=FLAGS.num_multimesh_levels,
       node_coordinate_freqs=FLAGS.node_coordinate_freqs,
       p_dropout_edges_grid2mesh= FLAGS.p_dropout_edges_grid2mesh,
-      p_dropout_edges_mesh2grid = FLAGS.p_dropout_edges_grid2mesh,
+      p_dropout_edges_mesh2grid = FLAGS.p_dropout_edges_mesh2grid,
     )
   model = get_model(model_kwargs)
 
   # Store the configurations
-  DIR.mkdir()
+  DIR = DIR_EXPERIMENTS / FLAGS.datapath / DATETIME_BEGIN
+  DIR.mkdir(parents=True)
   logging.info(f'Experiment stored in {DIR.relative_to(DIR_EXPERIMENTS).as_posix()}')
   flags = {f: FLAGS.get_flag_value(f, default=None) for f in FLAGS}
   with open(DIR / 'configs.json', 'w') as f:
