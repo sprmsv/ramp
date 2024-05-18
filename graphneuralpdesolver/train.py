@@ -42,6 +42,9 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string(name='exp', default='000', required=False,
   help='Name of the experiment'
 )
+flags.DEFINE_string(name='datetime', default=None, required=False,
+  help='A string representing the current datetime'
+)
 flags.DEFINE_string(name='datadir', default=None, required=True,
   help='Path of the folder containing the datasets'
 )
@@ -136,8 +139,6 @@ class EvalMetrics:
   error_rollout_l2: float = None
   error_final_l1: float = None
   error_final_l2: float = None
-
-DATETIME_BEGIN = datetime.now().strftime('%Y%m%d-%H%M%S.%f')
 
 def train(
   key: flax.typing.PRNGKey,
@@ -806,7 +807,7 @@ def train(
   ]))
 
   # Set up the checkpoint manager
-  DIR = DIR_EXPERIMENTS / f'E{FLAGS.exp}' / FLAGS.datapath / DATETIME_BEGIN
+  DIR = DIR_EXPERIMENTS / f'E{FLAGS.exp}' / FLAGS.datapath / FLAGS.datetime
   with disable_logging(level=logging.FATAL):
     (DIR / 'metrics').mkdir(exist_ok=True)
     checkpointer = orbax.checkpoint.PyTreeCheckpointer()
@@ -942,6 +943,8 @@ def main(argv):
   assert process_count == 1
 
   # Check the inputs
+  if not FLAGS.datetime:
+    FLAGS.datetime = datetime.now().strftime('%Y%m%d-%H%M%S')
   assert FLAGS.jump_steps <= MAX_JUMP_STEPS
   assert (IDX_FN % FLAGS.jump_steps) == 0
 
@@ -1005,7 +1008,7 @@ def main(argv):
   model = get_model(model_kwargs)
 
   # Store the configurations
-  DIR = DIR_EXPERIMENTS / f'E{FLAGS.exp}' / FLAGS.datapath / DATETIME_BEGIN
+  DIR = DIR_EXPERIMENTS / f'E{FLAGS.exp}' / FLAGS.datapath / FLAGS.datetime
   DIR.mkdir(parents=True)
   logging.info(f'Experiment stored in {DIR.relative_to(DIR_EXPERIMENTS).as_posix()}')
   flags = {f: FLAGS.get_flag_value(f, default=None) for f in FLAGS}
