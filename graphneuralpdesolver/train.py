@@ -313,7 +313,7 @@ def train(
           return u_inp_noisy
 
         # Split the unrolling steps randomly to cut the gradients along the way
-        noise_steps = unroll_steps  # TRY: Choose randomly
+        noise_steps = 0  # NOTE: Makes the training unstable
         grads_steps = unroll_steps - noise_steps
 
         # Get noisy input

@@ -149,6 +149,7 @@ def plot_estimations(u_gtr, u_prd, idx_time=-1, idx_traj=0, symmetric=True):
     figsize=(10, _HEIGHT_PER_ROW*n_vars+_HEIGHT_MARGIN),
     sharex=True, sharey=True,
   )
+  axs = axs.reshape(n_vars, 3)
 
   u_err = (u_gtr - u_prd)
 
@@ -322,8 +323,8 @@ def plot_ensemble(u_gtr, u_prd, idx_time=-1, idx_traj=0, symmetric=True):
     )
     plt.colorbar(h, ax=axs[ivar, 2], fraction=.05)
 
-  axs[0, 0].set(title='Ensemble Mean');
-  axs[0, 1].set(title='Estimate Std');
+  axs[0, 0].set(title='Ensemble mean');
+  axs[0, 1].set(title='Ensemble std');
   axs[0, 2].set(title='Absolute error');
 
   for ivar in range(n_vars):
