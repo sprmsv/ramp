@@ -86,10 +86,10 @@ flags.DEFINE_integer(name='direct_steps', default=1, required=False,
 flags.DEFINE_integer(name='unroll_steps', default=0, required=False,
   help='Number of steps for getting a noisy input and applying the model autoregressively'
 )
-flags.DEFINE_integer(name='n_train', default=(2**10), required=False,
+flags.DEFINE_integer(name='n_train', default=(2**9), required=False,
   help='Number of training samples'
 )
-flags.DEFINE_integer(name='n_valid', default=(2**9), required=False,
+flags.DEFINE_integer(name='n_valid', default=(2**8), required=False,
   help='Number of validation samples'
 )
 
@@ -97,7 +97,7 @@ flags.DEFINE_integer(name='n_valid', default=(2**9), required=False,
 flags.DEFINE_integer(name='num_mesh_nodes', default=64, required=False,
   help='Number of mesh nodes in each dimension'
 )
-flags.DEFINE_integer(name='deriv_degree', default=0, required=False,
+flags.DEFINE_integer(name='deriv_degree', default=2, required=False,
   help='Maximum degree of auxiliary partial derivatives'
 )
 flags.DEFINE_float(name='overlap_factor_grid2mesh', default=2.0, required=False,
@@ -109,22 +109,22 @@ flags.DEFINE_float(name='overlap_factor_mesh2grid', default=2.0, required=False,
 flags.DEFINE_integer(name='num_multimesh_levels', default=4, required=False,
   help='Number of multimesh connection levels (processor)'
 )
-flags.DEFINE_integer(name='node_coordinate_freqs', default=1, required=False,
+flags.DEFINE_integer(name='node_coordinate_freqs', default=2, required=False,
   help='Number of frequencies for encoding periodic node coordinates'
 )
 flags.DEFINE_integer(name='latent_size', default=128, required=False,
   help='Size of latent node and edge features'
 )
-flags.DEFINE_integer(name='num_mlp_hidden_layers', default=2, required=False,
+flags.DEFINE_integer(name='num_mlp_hidden_layers', default=1, required=False,
   help='Number of hidden layers of all MLPs'
 )
-flags.DEFINE_integer(name='num_message_passing_steps', default=6, required=False,
+flags.DEFINE_integer(name='num_message_passing_steps', default=18, required=False,
   help='Number of message-passing steps in the processor'
 )
-flags.DEFINE_integer(name='num_message_passing_steps_grid', default=6, required=False,
+flags.DEFINE_integer(name='num_message_passing_steps_grid', default=2, required=False,
   help='Number of message-passing steps in the decoder'
 )
-flags.DEFINE_float(name='p_dropout_edges_grid2mesh', default=0., required=False,
+flags.DEFINE_float(name='p_dropout_edges_grid2mesh', default=0.5, required=False,
   help='Probability of dropping out edges of grid2mesh'
 )
 flags.DEFINE_float(name='p_dropout_edges_mesh2grid', default=0., required=False,
