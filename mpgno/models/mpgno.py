@@ -6,12 +6,12 @@ import jax.random
 from flax import linen as nn
 import flax.typing
 
-from graphneuralpdesolver.graph.typed_graph import (
+from mpgno.graph.typed_graph import (
     TypedGraph, EdgeSet, EdgeSetKey,
     EdgesIndices, NodeSet, Context)
-from graphneuralpdesolver.models.deep_typed_graph_net import DeepTypedGraphNet
-from graphneuralpdesolver.models.utils import compute_derivatives
-from graphneuralpdesolver.utils import Array, normalize, shuffle_arrays
+from mpgno.models.deep_typed_graph_net import DeepTypedGraphNet
+from mpgno.models.utils import compute_derivatives
+from mpgno.utils import Array, normalize, shuffle_arrays
 
 
 class AbstractOperator(nn.Module):
@@ -29,7 +29,7 @@ class AbstractOperator(nn.Module):
     }
     return configs
 
-class GraphNeuralPDESolver(AbstractOperator):
+class MPGNO(AbstractOperator):
   """TODO: Add docstrings"""
   # NOTE: Only fixed dx is supported for now
 

@@ -12,9 +12,9 @@ import jax.lax
 import jax.numpy as jnp
 import flax.typing
 
-from graphneuralpdesolver.utils import Array
-from graphneuralpdesolver.utils import normalize
-from graphneuralpdesolver.models.utils import compute_derivatives
+from mpgno.utils import Array
+from mpgno.utils import normalize
+from mpgno.models.utils import compute_derivatives
 
 
 @dataclass

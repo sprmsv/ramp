@@ -1,5 +1,5 @@
 import jax.numpy as jnp
-from graphneuralpdesolver.utils import Array, ScalarArray
+from mpgno.utils import Array, ScalarArray
 
 
 def rel_l1_error(predictions: Array, labels: Array) -> Array:

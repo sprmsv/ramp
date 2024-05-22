@@ -20,12 +20,12 @@ from flax.training.common_utils import shard, shard_prng_key
 from flax.jax_utils import replicate, unreplicate
 import orbax.checkpoint
 
-from graphneuralpdesolver.experiments import DIR_EXPERIMENTS
-from graphneuralpdesolver.autoregressive import AutoregressivePredictor, OperatorNormalizer
-from graphneuralpdesolver.dataset import Dataset
-from graphneuralpdesolver.models.graphneuralpdesolver import GraphNeuralPDESolver, AbstractOperator
-from graphneuralpdesolver.utils import disable_logging, Array, shuffle_arrays, split_arrays
-from graphneuralpdesolver.metrics import mse_loss, rel_l2_error, rel_l1_error
+from mpgno.experiments import DIR_EXPERIMENTS
+from mpgno.autoregressive import AutoregressivePredictor, OperatorNormalizer
+from mpgno.dataset import Dataset
+from mpgno.models.mpgno import MPGNO, AbstractOperator
+from mpgno.utils import disable_logging, Array, shuffle_arrays, split_arrays
+from mpgno.metrics import mse_loss, rel_l2_error, rel_l1_error
 
 
 NUM_DEVICES = jax.local_device_count()
@@ -922,7 +922,7 @@ def train(
 
 def get_model(model_configs: Mapping[str, Any]) -> AbstractOperator:
 
-  model = GraphNeuralPDESolver(
+  model = MPGNO(
     **model_configs,
   )
 

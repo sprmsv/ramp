@@ -32,9 +32,9 @@ import jax.numpy as jnp
 import flax.linen as nn
 import jraph
 
-from graphneuralpdesolver.graph.typed_graph import TypedGraph
-from graphneuralpdesolver.graph.typed_graph_net import GraphMapFeatures, InteractionNetwork
-from graphneuralpdesolver.models.utils import AugmentedMLP
+from mpgno.graph.typed_graph import TypedGraph
+from mpgno.graph.typed_graph_net import GraphMapFeatures, InteractionNetwork
+from mpgno.models.utils import AugmentedMLP
 
 
 class DeepTypedGraphNet(nn.Module):

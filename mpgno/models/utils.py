@@ -6,7 +6,7 @@ import jax.numpy as jnp
 import jax.tree_util as tree
 import flax.linen as nn
 
-from graphneuralpdesolver.utils import Array, calculate_fd_derivative
+from mpgno.utils import Array, calculate_fd_derivative
 
 
 def concatenate_args(args, kwargs, axis: int = -1):
