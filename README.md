@@ -3,7 +3,7 @@
 MPGNO is a graph-based neural network framework for operator learning. Once trained, it can be applied autoregressively on the initial condition of a time-dependant partial differential equation (PDE) to estimate the solution of the PDE at a later time.
 
 Here is a schematic of the graph structure used in MPGNO for a 1D problem with periodic boundary conditions, although it has been primarily developed and validated on 2D problems:
-<p align="center"> <img src="assets/multimesh-periodic.png" alt="multimesh-periodic" width="500"/> </p>
+<p align="center"> <img src="assets/multimesh-periodic.svg" alt="multimesh-periodic" width="500"/> </p>
 
 
 ## Setup
