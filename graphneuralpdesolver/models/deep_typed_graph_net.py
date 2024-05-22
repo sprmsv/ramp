@@ -1,6 +1,7 @@
 # Adopted from https://github.com/google-deepmind/graphcast
 # Accessed on 16 February 2024, commit 8debd7289bb2c498485f79dbd98d8b4933bfc6a7
 # Codes are slightly modified to be compatible with Flax
+
 """JAX implementation of Graph Networks Simulator.
 
 Generalization to TypedGraphs of the deep Graph Neural Network from:

@@ -993,6 +993,7 @@ def main(argv):
       num_mesh_nodes=(FLAGS.num_mesh_nodes, FLAGS.num_mesh_nodes),
       use_tau=True,
       use_t=True,
+      use_learned_correction=False,
       deriv_degree=FLAGS.deriv_degree,
       latent_size=FLAGS.latent_size,
       num_mlp_hidden_layers=FLAGS.num_mlp_hidden_layers,

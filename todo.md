@@ -1,9 +1,8 @@
 # NEXT STEPS
 
-- Check distributions of ensemble training (E221) and compare with edge masking
-
 - use_learned_correction=True (compare with E200)
-    - Relaunch.. They STALL for some reason!!
+    - Technical problem with jobs..
+    - First, check E225 if AAAAAAA is printed !!
     - If it works, experiment with direct_steps again
 
 - Try data augmentation
@@ -11,6 +10,7 @@
     - Try repeating (physically incorrect)
 
 - Start reproducing experiments (with 5 repeats) for reporting in the thesis
+
 
 ## Sequential data
 - Implement and try the LSTM idea from presentation-240315-updates

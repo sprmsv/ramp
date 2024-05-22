@@ -1,6 +1,4 @@
-# GNN-based PDE Solver based on the GraphCast paper
-
-# TODO: Write readme
+# MPGNO: Message Passing Graph Neural Operator
 
 Build and activate the environment (Check [JAX compatibility](https://jax.readthedocs.io/en/latest/installation.html) first):
 ```bash

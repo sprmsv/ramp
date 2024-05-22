@@ -38,6 +38,7 @@ class GraphNeuralPDESolver(AbstractOperator):
   num_mesh_nodes: Sequence[int]
   use_t: bool = True
   use_tau: bool = True
+  use_learned_correction: bool = False
   deriv_degree: int = 0
   latent_size: int = 128
   num_mlp_hidden_layers: int = 2
@@ -167,7 +168,7 @@ class GraphNeuralPDESolver(AbstractOperator):
       mlp_num_hidden_layers=self.num_mlp_hidden_layers,
       num_message_passing_steps=1,
       use_layer_norm=True,
-      use_learned_correction=False,
+      use_learned_correction=self.use_learned_correction,
       include_sent_messages_in_node_update=False,
       activation='swish',
       f32_aggregation=True,
@@ -186,7 +187,7 @@ class GraphNeuralPDESolver(AbstractOperator):
       mlp_num_hidden_layers=self.num_mlp_hidden_layers,
       num_message_passing_steps=self.num_message_passing_steps,
       use_layer_norm=True,
-      use_learned_correction=False,
+      use_learned_correction=self.use_learned_correction,
       include_sent_messages_in_node_update=False,
       activation='swish',
       f32_aggregation=False,
@@ -205,7 +206,7 @@ class GraphNeuralPDESolver(AbstractOperator):
       mlp_num_hidden_layers=self.num_mlp_hidden_layers,
       num_message_passing_steps=1,
       use_layer_norm=True,
-      use_learned_correction=False,
+      use_learned_correction=self.use_learned_correction,
       include_sent_messages_in_node_update=False,
       activation='swish',
       f32_aggregation=False,
@@ -226,7 +227,7 @@ class GraphNeuralPDESolver(AbstractOperator):
       mlp_num_hidden_layers=self.num_mlp_hidden_layers,
       num_message_passing_steps=self.num_message_passing_steps_grid,
       use_layer_norm=True,
-      use_learned_correction=False,
+      use_learned_correction=self.use_learned_correction,
       include_sent_messages_in_node_update=False,
       activation='swish',
       f32_aggregation=False,
