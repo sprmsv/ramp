@@ -1,16 +1,31 @@
 # NEXT STEPS
 
-- Check E224/E225
+- Check E224/E225 (use_learned_correction=True)
+- Invest on time conditioning
+    - Try conditioning only on t
+    - Try larger latent size
+    - Try larger output size
+- Check E223: Testing use_learned_correction=False with 2 GPUs
+
+- Start reproducing experiments (with 5 repeats) for reporting in the thesis
+
+- Evaluate time interpolation
+
+- Get space-continuous outputs
+    - Evaluate space inter- and extrapolation
+
+## Other
+- Add uncertainty to the errors
+    * No need to retrain anything, just use edge masking
+    - Separate the evaluation script
+
+- Combine initial conditions
+    * Foundation model
+    * Different state domains
 
 - Try data augmentation
     - Try shifting first (approved)
     - Try repeating (physically incorrect)
-
-- Start reproducing experiments (with 5 repeats) for reporting in the thesis
-
-- Add uncertainty to the errors
-    * No need to retrain anything
-    - Separate the evaluation script
 
 ## Sequential data
 - Implement and try the LSTM idea from presentation-240315-updates

@@ -110,7 +110,7 @@ class DeepTypedGraphNet(nn.Module):
   edge_output_size: Optional[Mapping[str, int]] = None
   include_sent_messages_in_node_update: bool = False
   use_layer_norm: bool = True
-  use_learned_correction: bool = False
+  conditional_normalization: bool = False
   activation: str = 'relu'
   f32_aggregation: bool = False
   aggregate_edges_for_nodes_fn: str = 'segment_sum'
@@ -133,7 +133,7 @@ class DeepTypedGraphNet(nn.Module):
           ),
           activation=self._activation,
           use_layer_norm=self.use_layer_norm,
-          use_learned_correction=self.use_learned_correction,
+          use_learned_correction=self.conditional_normalization,
           name=f'encoder_edges_{edge_set_name}',
         )
         for edge_set_name in self.edge_latent_size.keys()
@@ -149,7 +149,7 @@ class DeepTypedGraphNet(nn.Module):
           ),
           activation=self._activation,
           use_layer_norm=self.use_layer_norm,
-          use_learned_correction=self.use_learned_correction,
+          use_learned_correction=self.conditional_normalization,
           name=f'encoder_nodes_{node_set_name}',
         )
         for node_set_name in self.node_latent_size.keys()
@@ -193,7 +193,7 @@ class DeepTypedGraphNet(nn.Module):
             ),
             activation=self._activation,
             use_layer_norm=self.use_layer_norm,
-            use_learned_correction=self.use_learned_correction,
+            use_learned_correction=self.conditional_normalization,
             name=f'processor_{step_i}_edges_{edge_set_name}',
           )
           for edge_set_name in self.edge_latent_size.keys()
@@ -206,7 +206,7 @@ class DeepTypedGraphNet(nn.Module):
             ),
             activation=self._activation,
             use_layer_norm=self.use_layer_norm,
-            use_learned_correction=self.use_learned_correction,
+            use_learned_correction=self.conditional_normalization,
             name=f'processor_{step_i}_nodes_{node_set_name}',
           )
           for node_set_name in self.node_latent_size.keys()
@@ -248,13 +248,13 @@ class DeepTypedGraphNet(nn.Module):
     )
     self._output_network = GraphMapFeatures(**output_kwargs)
 
-  def __call__(self, input_graph: TypedGraph, correction: float) -> TypedGraph:
+  def __call__(self, input_graph: TypedGraph, condition: float) -> TypedGraph:
     """Forward pass of the learnable dynamics model."""
     # Embed input features (if applicable).
-    latent_graph_0 = self._embed(input_graph, c=correction)
+    latent_graph_0 = self._embed(input_graph, c=condition)
 
     # Do `m` message passing steps in the latent graphs.
-    latent_graph_m = self._process(latent_graph_0, c=correction)
+    latent_graph_m = self._process(latent_graph_0, c=condition)
 
     # Compute outputs from the last latent graph (if applicable).
     return self._output(latent_graph_m, c=None)

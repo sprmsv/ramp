@@ -38,7 +38,7 @@ class MPGNO(AbstractOperator):
   num_mesh_nodes: Sequence[int]
   use_t: bool = True
   use_tau: bool = True
-  use_learned_correction: bool = False
+  conditional_normalization: bool = False
   deriv_degree: int = 0
   latent_size: int = 128
   num_mlp_hidden_layers: int = 2
@@ -168,7 +168,7 @@ class MPGNO(AbstractOperator):
       mlp_num_hidden_layers=self.num_mlp_hidden_layers,
       num_message_passing_steps=1,
       use_layer_norm=True,
-      use_learned_correction=self.use_learned_correction,
+      conditional_normalization=self.conditional_normalization,
       include_sent_messages_in_node_update=False,
       activation='swish',
       f32_aggregation=True,
@@ -187,7 +187,7 @@ class MPGNO(AbstractOperator):
       mlp_num_hidden_layers=self.num_mlp_hidden_layers,
       num_message_passing_steps=self.num_message_passing_steps,
       use_layer_norm=True,
-      use_learned_correction=self.use_learned_correction,
+      conditional_normalization=self.conditional_normalization,
       include_sent_messages_in_node_update=False,
       activation='swish',
       f32_aggregation=False,
@@ -206,7 +206,7 @@ class MPGNO(AbstractOperator):
       mlp_num_hidden_layers=self.num_mlp_hidden_layers,
       num_message_passing_steps=1,
       use_layer_norm=True,
-      use_learned_correction=self.use_learned_correction,
+      conditional_normalization=self.conditional_normalization,
       include_sent_messages_in_node_update=False,
       activation='swish',
       f32_aggregation=False,
@@ -227,11 +227,10 @@ class MPGNO(AbstractOperator):
       mlp_num_hidden_layers=self.num_mlp_hidden_layers,
       num_message_passing_steps=self.num_message_passing_steps_grid,
       use_layer_norm=True,
-      use_learned_correction=self.use_learned_correction,
+      conditional_normalization=self.conditional_normalization,
       include_sent_messages_in_node_update=False,
       activation='swish',
       f32_aggregation=False,
-      # NOTE: segment_mean because number of edges is not balanced
       aggregate_edges_for_nodes_fn='segment_mean',
       name='grid2grid_gnn',
     )
@@ -572,7 +571,7 @@ class MPGNO(AbstractOperator):
       })
 
     # Run the GNN.
-    grid2mesh_out = self._grid2mesh_gnn(input_graph, correction=tau)
+    grid2mesh_out = self._grid2mesh_gnn(input_graph, condition=tau)
     latent_mesh_nodes = grid2mesh_out.nodes['mesh_nodes'].features
     latent_grid_nodes = grid2mesh_out.nodes['grid_nodes'].features
 
@@ -614,7 +613,7 @@ class MPGNO(AbstractOperator):
     )
 
     # Run the GNN
-    output_graph = self._mesh_gnn(input_graph, correction=tau)
+    output_graph = self._mesh_gnn(input_graph, condition=tau)
     output_mesh_nodes = output_graph.nodes['mesh_nodes'].features
 
     return output_mesh_nodes
@@ -676,7 +675,7 @@ class MPGNO(AbstractOperator):
       })
 
     # Run the GNN
-    output_graph = self._mesh2grid_gnn(input_graph, correction=tau)
+    output_graph = self._mesh2grid_gnn(input_graph, condition=tau)
     output_grid_nodes = output_graph.nodes['grid_nodes'].features
 
     return output_grid_nodes
@@ -715,7 +714,7 @@ class MPGNO(AbstractOperator):
     )
 
     # Run the GNN
-    output_graph = self._grid2grid_gnn(input_graph, correction=tau)
+    output_graph = self._grid2grid_gnn(input_graph, condition=tau)
     output_grid_nodes = output_graph.nodes['grid_nodes'].features
 
     return output_grid_nodes
