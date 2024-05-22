@@ -1,11 +1,38 @@
+from dataclasses import dataclass
+
 import jax.numpy as jnp
+
 from mpgno.utils import Array, ScalarArray
 
+
+@dataclass
+class EvalMetrics:
+  error_direct_ms: float = None
+  error_direct_l1: float = None
+  error_direct_l2: float = None
+  error_rollout_ms: float = None
+  error_rollout_l1: float = None
+  error_rollout_l2: float = None
+  error_final_ms: float = None
+  error_final_l1: float = None
+  error_final_l2: float = None
+
+def mse_error(predictions: Array, labels: Array) -> Array:
+    """
+    Returns the mean squared error per variable.
+    All input shapes are [batch_size, num_times_output,
+        num_grid_points_0, num_grid_points_1, num_outputs]
+    Output shape is [batch_size, num_outputs].
+    """
+
+    mean_err_per_var_squared = jnp.mean(jnp.power(predictions - labels, 2), axis=(1, 2, 3))
+
+    return mean_err_per_var_squared
 
 def rel_l1_error(predictions: Array, labels: Array) -> Array:
     """
     Returns the relative L1-norm of the error per variable.
-    ALl input shapes are [batch_size, num_times_output,
+    All input shapes are [batch_size, num_times_output,
         num_grid_points_0, num_grid_points_1, num_outputs]
     Output shape is [batch_size, num_outputs].
     """
@@ -19,7 +46,7 @@ def rel_l1_error(predictions: Array, labels: Array) -> Array:
 def rel_l2_error(predictions: Array, labels: Array) -> Array:
     """
     Returns the relative L2-norm of the error per variable.
-    ALl input shapes are [batch_size, num_times_output,
+    All input shapes are [batch_size, num_times_output,
         num_grid_points_0, num_grid_points_1, num_outputs]
     Output shape is [batch_size, num_outputs].
     """

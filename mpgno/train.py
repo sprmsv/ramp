@@ -4,7 +4,6 @@ from time import time
 from typing import Tuple, Any, Mapping, Iterable, Callable
 import json
 import pickle
-from dataclasses import dataclass
 
 from absl import app, flags, logging
 import jax
@@ -25,7 +24,8 @@ from mpgno.autoregressive import AutoregressivePredictor, OperatorNormalizer
 from mpgno.dataset import Dataset
 from mpgno.models.mpgno import MPGNO, AbstractOperator
 from mpgno.utils import disable_logging, Array, shuffle_arrays, split_arrays
-from mpgno.metrics import mse_loss, rel_l2_error, rel_l1_error
+from mpgno.metrics import mse_loss
+from mpgno.metrics import EvalMetrics, mse_error, rel_l2_error, rel_l1_error
 
 
 NUM_DEVICES = jax.local_device_count()
@@ -130,15 +130,6 @@ flags.DEFINE_float(name='p_dropout_edges_grid2mesh', default=0., required=False,
 flags.DEFINE_float(name='p_dropout_edges_mesh2grid', default=0., required=False,
   help='Probability of dropping out edges of mesh2grid'
 )
-
-@dataclass
-class EvalMetrics:
-  error_direct_l1: float = None
-  error_direct_l2: float = None
-  error_rollout_l1: float = None
-  error_rollout_l2: float = None
-  error_final_l1: float = None
-  error_final_l2: float = None
 
 def train(
   key: flax.typing.PRNGKey,
@@ -554,7 +545,7 @@ def train(
     ) if _use_specs else None
 
     def get_direct_errors(lt, carry):
-      err_l1_mean, err_l2_mean = carry
+      err_ms_mean, err_l1_mean, err_l2_mean = carry
       def get_direct_prediction(tau, forcing):
         u_prd = normalizer.apply(
           variables={'params': state.params},
@@ -572,23 +563,25 @@ def train(
         length=direct_steps,
       )
       u_prd = u_prd.squeeze(axis=2).swapaxes(0, 1)
+      err_ms_mean += jnp.sqrt(jnp.sum(jnp.power(mse_error(u_prd, u_tgt[lt]), 2), axis=1)) / num_lead_times
       err_l1_mean += jnp.sqrt(jnp.sum(jnp.power(rel_l1_error(u_prd, u_tgt[lt]), 2), axis=1)) / num_lead_times
       err_l2_mean += jnp.sqrt(jnp.sum(jnp.power(rel_l2_error(u_prd, u_tgt[lt]), 2), axis=1)) / num_lead_times
 
-      return err_l1_mean, err_l2_mean
+      return err_ms_mean, err_l1_mean, err_l2_mean
 
     # Get mean errors per each sample in the batch
-    err_l1_mean, err_l2_mean = jax.lax.fori_loop(
+    err_ms_mean, err_l1_mean, err_l2_mean = jax.lax.fori_loop(
       body_fun=get_direct_errors,
       lower=0,
       upper=num_lead_times,
       init_val=(
         jnp.zeros(shape=(batch_size_per_device,)),
         jnp.zeros(shape=(batch_size_per_device,)),
+        jnp.zeros(shape=(batch_size_per_device,)),
       )
     )
 
-    return err_l1_mean, err_l2_mean
+    return err_ms_mean, err_l1_mean, err_l2_mean
 
   @jax.pmap
   def _evaluate_rollout_prediction(
@@ -621,10 +614,11 @@ def train(
     )
 
     # Calculate the errors
+    err_ms = jnp.sqrt(jnp.sum(jnp.power(mse_error(u_prd, u_tgt), 2), axis=1))
     err_l1 = jnp.sqrt(jnp.sum(jnp.power(rel_l1_error(u_prd, u_tgt), 2), axis=1))
     err_l2 = jnp.sqrt(jnp.sum(jnp.power(rel_l2_error(u_prd, u_tgt), 2), axis=1))
 
-    return err_l1, err_l2
+    return err_ms, err_l1, err_l2
 
   @jax.pmap
   def _evaluate_final_prediction(
@@ -663,10 +657,11 @@ def train(
       )
 
     # Calculate the errors
+    err_ms = jnp.sqrt(jnp.sum(jnp.power(mse_error(u_prd, u_tgt), 2), axis=1))
     err_l1 = jnp.sqrt(jnp.sum(jnp.power(rel_l1_error(u_prd, u_tgt), 2), axis=1))
     err_l2 = jnp.sqrt(jnp.sum(jnp.power(rel_l2_error(u_prd, u_tgt), 2), axis=1))
 
-    return err_l1, err_l2
+    return err_ms, err_l1, err_l2
 
   def evaluate(
     state: TrainState,
@@ -674,10 +669,13 @@ def train(
   ) -> EvalMetrics:
     """Evaluates the model on a dataset based on multiple trajectory lengths."""
 
+    error_dr_ms = []
     error_dr_l1 = []
     error_dr_l2 = []
+    error_ro_ms = []
     error_ro_l1 = []
     error_ro_l2 = []
+    error_fn_ms = []
     error_fn_l1 = []
     error_fn_l2 = []
 
@@ -720,24 +718,28 @@ def train(
       specs = shard(specs) if _use_specs else None
 
       # Evaluate direct prediction
-      _error_dr_l1_batch, _error_dr_l2_batch = _evaluate_direct_prediction(
+      _error_dr_ms_batch, _error_dr_l1_batch, _error_dr_l2_batch = _evaluate_direct_prediction(
         state, stats, trajs, times, specs,
       )
       # Re-arrange the sub-batches gotten from each device
+      _error_dr_ms_batch = _error_dr_ms_batch.reshape(batch_size_per_device * NUM_DEVICES, 1)
       _error_dr_l1_batch = _error_dr_l1_batch.reshape(batch_size_per_device * NUM_DEVICES, 1)
       _error_dr_l2_batch = _error_dr_l2_batch.reshape(batch_size_per_device * NUM_DEVICES, 1)
       # Append the errors to the list
+      error_dr_ms.append(_error_dr_ms_batch)
       error_dr_l1.append(_error_dr_l1_batch)
       error_dr_l2.append(_error_dr_l2_batch)
 
       # Evaluate rollout prediction
-      _error_ro_l1_batch, _error_ro_l2_batch = _evaluate_rollout_prediction(
+      _error_ro_ms_batch, _error_ro_l1_batch, _error_ro_l2_batch = _evaluate_rollout_prediction(
         state, stats, trajs, times, specs
       )
       # Re-arrange the sub-batches gotten from each device
+      _error_ro_ms_batch = _error_ro_ms_batch.reshape(batch_size_per_device * NUM_DEVICES, 1)
       _error_ro_l1_batch = _error_ro_l1_batch.reshape(batch_size_per_device * NUM_DEVICES, 1)
       _error_ro_l2_batch = _error_ro_l2_batch.reshape(batch_size_per_device * NUM_DEVICES, 1)
       # Compute and store metrics
+      error_ro_ms.append(_error_ro_ms_batch)
       error_ro_l1.append(_error_ro_l1_batch)
       error_ro_l2.append(_error_ro_l2_batch)
 
@@ -749,30 +751,38 @@ def train(
 
       # Evaluate final prediction
       assert IDX_FN < trajs.shape[2]
-      _error_fn_l1_batch, _error_fn_l2_batch = _evaluate_final_prediction(
+      _error_fn_ms_batch, _error_fn_l1_batch, _error_fn_l2_batch = _evaluate_final_prediction(
         state, stats, trajs, times, specs,
       )
       # Re-arrange the sub-batches gotten from each device
+      _error_fn_ms_batch = _error_fn_ms_batch.reshape(batch_size_per_device * (NUM_DEVICES // jump_steps), 1)
       _error_fn_l1_batch = _error_fn_l1_batch.reshape(batch_size_per_device * (NUM_DEVICES // jump_steps), 1)
       _error_fn_l2_batch = _error_fn_l2_batch.reshape(batch_size_per_device * (NUM_DEVICES // jump_steps), 1)
       # Append the errors to the list
+      error_fn_ms.append(_error_fn_ms_batch)
       error_fn_l1.append(_error_fn_l1_batch)
       error_fn_l2.append(_error_fn_l2_batch)
 
     # Aggregate over the batch dimension and compute norm per variable
+    error_dr_ms = jnp.median(jnp.concatenate(error_dr_ms), axis=0).item()
     error_dr_l1 = jnp.median(jnp.concatenate(error_dr_l1), axis=0).item()
     error_dr_l2 = jnp.median(jnp.concatenate(error_dr_l2), axis=0).item()
+    error_ro_ms = jnp.median(jnp.concatenate(error_ro_ms), axis=0).item()
     error_ro_l1 = jnp.median(jnp.concatenate(error_ro_l1), axis=0).item()
     error_ro_l2 = jnp.median(jnp.concatenate(error_ro_l2), axis=0).item()
+    error_fn_ms = jnp.median(jnp.concatenate(error_fn_ms), axis=0).item()
     error_fn_l1 = jnp.median(jnp.concatenate(error_fn_l1), axis=0).item()
     error_fn_l2 = jnp.median(jnp.concatenate(error_fn_l2), axis=0).item()
 
     # Build the metrics object
     metrics = EvalMetrics(
+      error_direct_ms=error_dr_ms,
       error_direct_l1=error_dr_l1,
       error_direct_l2=error_dr_l2,
+      error_rollout_ms=error_ro_ms,
       error_rollout_l1=error_ro_l1,
       error_rollout_l2=error_ro_l2,
+      error_final_ms=error_fn_ms,
       error_final_l1=error_fn_l1,
       error_final_l2=error_fn_l2,
     )
@@ -800,10 +810,12 @@ def train(
     f'GRAD: {0. : .2e}',
     f'RMSE: {0. : .2e}',
     f'L2-DR-TRN: {metrics_trn.error_direct_l2 * 100 : .2f}%',
-    f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
+    f'MS-DR: {metrics_val.error_direct_ms * 100 : .2f}%',
     f'L1-DR: {metrics_val.error_direct_l1 * 100 : .2f}%',
-    f'L2-FN: {metrics_val.error_final_l2 * 100 : .2f}%',
+    f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
+    f'MS-FN: {metrics_val.error_final_ms * 100 : .2f}%',
     f'L1-FN: {metrics_val.error_final_l1 * 100 : .2f}%',
+    f'L2-FN: {metrics_val.error_final_l2 * 100 : .2f}%',
   ]))
 
   # Set up the checkpoint manager
@@ -855,10 +867,12 @@ def train(
         f'GRAD: {grad.item() : .2e}',
         f'RMSE: {np.sqrt(loss).item() : .2e}',
         f'L2-DR-TRN: {metrics_trn.error_direct_l2 * 100 : .2f}%',
-        f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
+        f'MS-DR: {metrics_val.error_direct_ms * 100 : .2f}%',
         f'L1-DR: {metrics_val.error_direct_l1 * 100 : .2f}%',
-        f'L2-FN: {metrics_val.error_final_l2 * 100 : .2f}%',
+        f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
+        f'MS-FN: {metrics_val.error_final_ms * 100 : .2f}%',
         f'L1-FN: {metrics_val.error_final_l1 * 100 : .2f}%',
+        f'L2-FN: {metrics_val.error_final_l2 * 100 : .2f}%',
       ]))
 
       with disable_logging(level=logging.FATAL):
