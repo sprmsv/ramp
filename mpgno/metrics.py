@@ -84,7 +84,7 @@ def rel_l1_loss(predictions: Array, labels: Array) -> ScalarArray:
     """
 
     rel_err_per_var = rel_l1_error(predictions, labels)
-    rel_err_agg = jnp.sqrt(jnp.sum(jnp.power(rel_err_per_var, 2), axis=-1))
+    rel_err_agg = jnp.linalg.norm(rel_err_per_var, axis=-1)
 
     return jnp.mean(rel_err_agg)
 
@@ -96,6 +96,6 @@ def rel_l2_loss(predictions: Array, labels: Array) -> ScalarArray:
     """
 
     rel_err_per_var = rel_l2_error(predictions, labels)
-    rel_err_agg = jnp.sqrt(jnp.sum(jnp.power(rel_err_per_var, 2), axis=-1))
+    rel_err_agg = jnp.linalg.norm(rel_err_per_var, axis=-1)
 
     return jnp.mean(rel_err_agg)

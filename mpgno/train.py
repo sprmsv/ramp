@@ -563,9 +563,9 @@ def train(
         length=direct_steps,
       )
       u_prd = u_prd.squeeze(axis=2).swapaxes(0, 1)
-      err_ms_mean += jnp.sqrt(jnp.sum(jnp.power(mse_error(u_prd, u_tgt[lt]), 2), axis=1)) / num_lead_times
-      err_l1_mean += jnp.sqrt(jnp.sum(jnp.power(rel_l1_error(u_prd, u_tgt[lt]), 2), axis=1)) / num_lead_times
-      err_l2_mean += jnp.sqrt(jnp.sum(jnp.power(rel_l2_error(u_prd, u_tgt[lt]), 2), axis=1)) / num_lead_times
+      err_ms_mean += jnp.linalg.norm(mse_error(u_prd, u_tgt[lt]), axis=1) / num_lead_times
+      err_l1_mean += jnp.linalg.norm(rel_l1_error(u_prd, u_tgt[lt]), axis=1) / num_lead_times
+      err_l2_mean += jnp.linalg.norm(rel_l2_error(u_prd, u_tgt[lt]), axis=1) / num_lead_times
 
       return err_ms_mean, err_l1_mean, err_l2_mean
 
@@ -614,9 +614,9 @@ def train(
     )
 
     # Calculate the errors
-    err_ms = jnp.sqrt(jnp.sum(jnp.power(mse_error(u_prd, u_tgt), 2), axis=1))
-    err_l1 = jnp.sqrt(jnp.sum(jnp.power(rel_l1_error(u_prd, u_tgt), 2), axis=1))
-    err_l2 = jnp.sqrt(jnp.sum(jnp.power(rel_l2_error(u_prd, u_tgt), 2), axis=1))
+    err_ms = jnp.linalg.norm(mse_error(u_prd, u_tgt), axis=1)
+    err_l1 = jnp.linalg.norm(rel_l1_error(u_prd, u_tgt), axis=1)
+    err_l2 = jnp.linalg.norm(rel_l2_error(u_prd, u_tgt), axis=1)
 
     return err_ms, err_l1, err_l2
 
@@ -657,9 +657,9 @@ def train(
       )
 
     # Calculate the errors
-    err_ms = jnp.sqrt(jnp.sum(jnp.power(mse_error(u_prd, u_tgt), 2), axis=1))
-    err_l1 = jnp.sqrt(jnp.sum(jnp.power(rel_l1_error(u_prd, u_tgt), 2), axis=1))
-    err_l2 = jnp.sqrt(jnp.sum(jnp.power(rel_l2_error(u_prd, u_tgt), 2), axis=1))
+    err_ms = jnp.linalg.norm(mse_error(u_prd, u_tgt), axis=1)
+    err_l1 = jnp.linalg.norm(rel_l1_error(u_prd, u_tgt), axis=1)
+    err_l2 = jnp.linalg.norm(rel_l2_error(u_prd, u_tgt), axis=1)
 
     return err_ms, err_l1, err_l2
 

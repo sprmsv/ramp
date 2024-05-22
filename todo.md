@@ -1,9 +1,6 @@
 # NEXT STEPS
 
-- use_learned_correction=True (compare with E200)
-    - Technical problem with jobs..
-    - First, check E225 if AAAAAAA is printed !!
-    - If it works, experiment with direct_steps again
+- Check E224/E225
 
 - Try data augmentation
     - Try shifting first (approved)
@@ -11,6 +8,9 @@
 
 - Start reproducing experiments (with 5 repeats) for reporting in the thesis
 
+- Add uncertainty to the errors
+    * No need to retrain anything
+    - Separate the evaluation script
 
 ## Sequential data
 - Implement and try the LSTM idea from presentation-240315-updates
