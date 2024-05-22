@@ -24,7 +24,7 @@ from mpgno.autoregressive import AutoregressivePredictor, OperatorNormalizer
 from mpgno.dataset import Dataset
 from mpgno.models.mpgno import MPGNO, AbstractOperator
 from mpgno.utils import disable_logging, Array, shuffle_arrays, split_arrays
-from mpgno.metrics import mse_loss
+from mpgno.metrics import mse_loss, rel_l1_loss
 from mpgno.metrics import EvalMetrics, mse_error, rel_l2_error, rel_l1_error
 
 
@@ -141,7 +141,7 @@ def train(
   unroll_steps: int,
   epochs: int,
   epochs_before: int = 0,
-  loss_fn: Callable = mse_loss
+  loss_fn: Callable = rel_l1_loss,
 ) -> TrainState:
   """Trains a model and returns the state."""
 

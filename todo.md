@@ -1,15 +1,20 @@
 # NEXT STEPS
 
+- Check E223: Testing use_learned_correction=False with 2 GPUs
 - Check E224/E225 (use_learned_correction=True)
 - Invest on time conditioning
     - Try conditioning only on t
     - Try larger latent size
     - Try larger output size
-- Check E223: Testing use_learned_correction=False with 2 GPUs
+- Check E226/E227: D=4 with and without scheduling direct_steps
 
 - Start reproducing experiments (with 5 repeats) for reporting in the thesis
+    * pull the latest version
+    * 1000 epochs
 
 - Evaluate time interpolation
+    * Needs direct_steps
+    * With or without scheduling direct_steps?
 
 - Get space-continuous outputs
     - Evaluate space inter- and extrapolation
