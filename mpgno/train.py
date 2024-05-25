@@ -810,10 +810,8 @@ def train(
     f'GRAD: {0. : .2e}',
     f'RMSE: {0. : .2e}',
     f'L2-DR-TRN: {metrics_trn.error_direct_l2 * 100 : .2f}%',
-    f'MS-DR: {metrics_val.error_direct_ms * 100 : .2f}%',
     f'L1-DR: {metrics_val.error_direct_l1 * 100 : .2f}%',
     f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
-    f'MS-FN: {metrics_val.error_final_ms * 100 : .2f}%',
     f'L1-FN: {metrics_val.error_final_l1 * 100 : .2f}%',
     f'L2-FN: {metrics_val.error_final_l2 * 100 : .2f}%',
   ]))
@@ -867,10 +865,8 @@ def train(
         f'GRAD: {grad.item() : .2e}',
         f'RMSE: {np.sqrt(loss).item() : .2e}',
         f'L2-DR-TRN: {metrics_trn.error_direct_l2 * 100 : .2f}%',
-        f'MS-DR: {metrics_val.error_direct_ms * 100 : .2f}%',
         f'L1-DR: {metrics_val.error_direct_l1 * 100 : .2f}%',
         f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
-        f'MS-FN: {metrics_val.error_final_ms * 100 : .2f}%',
         f'L1-FN: {metrics_val.error_final_l1 * 100 : .2f}%',
         f'L2-FN: {metrics_val.error_final_l2 * 100 : .2f}%',
       ]))

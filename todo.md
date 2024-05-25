@@ -1,23 +1,37 @@
 # NEXT STEPS
 
-- Check E223: Testing use_learned_correction=False with 2 GPUs
-- Check E224/E225 (use_learned_correction=True)
-- Invest on time conditioning
-    - Try conditioning only on t
-    - Try larger latent size
-    - Try larger output size
-- Check E226/E227: D=4 with and without scheduling direct_steps
+- Add Bogdan's metric (make sure to normalize)
 
-- Start reproducing experiments (with 5 repeats) for reporting in the thesis
-    * pull the latest version
-    * 1000 epochs
+- Add your current experiments to the thesis
+
+- Experiment with wave_gauss, wave_layer, and allen_cahn
+
+- The results with `direct_steps` are strange: think about it and recheck the codes
+    - Inspect the performance of E226/E227
 
 - Evaluate time interpolation
-    * Needs direct_steps
-    * With or without scheduling direct_steps?
+    * Needs `direct_steps`
+    * With or without scheduling `direct_steps`?
+    * Try `conditional_normalization` with different latent_sizes?
+
+- Evaluate time extrapolation
+
+- Noise control
+    * train with clean data
+    * Infer with noisy data (1%)
+    * Compare with clean ground-truth
 
 - Get space-continuous outputs
     - Evaluate space inter- and extrapolation
+
+- adapt for unstructured grids
+
+- adapt for time-independent problems
+
+- Reproduce experiments for reporting in the thesis
+    * pull the latest version
+    * 1000 epochs
+
 
 ## Other
 - Add uncertainty to the errors

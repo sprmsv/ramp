@@ -235,7 +235,6 @@ class MPGNO(AbstractOperator):
       name='grid2grid_gnn',
     )
 
-  # TODO: Support 1D
   def _get_connections_by_mesh_node(self,
     idx_mesh_node_flat: int, overlap_factor: float = 1.0,
     ord_distance: int = 2) -> Tuple[np.ndarray, np.ndarray]:
