@@ -6,6 +6,7 @@
 
 - The results with `direct_steps` are strange: think about it and recheck the codes
     - Inspect the performance of E226/E227
+    - Check with allen_cahn
 
 - Evaluate time interpolation
     * Needs `direct_steps`

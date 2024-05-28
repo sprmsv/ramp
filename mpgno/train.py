@@ -723,6 +723,9 @@ def train(
   def evaluate(
     state: TrainState,
     batches: Iterable[Tuple[Array, Array]],
+    direct: bool = True,
+    rollout: bool = False,
+    final: bool = True,
   ) -> EvalMetrics:
     """Evaluates the model on a dataset based on multiple trajectory lengths."""
 
@@ -769,24 +772,27 @@ def train(
       specs = shard(specs) if _use_specs else None
 
       # Evaluate direct prediction
-      batch_metrics_direct = _evaluate_direct_prediction(
-        state, stats, trajs, times, specs,
-      )
-      batch_metrics_direct = BatchMetrics(**batch_metrics_direct)
-      # Re-arrange the sub-batches gotten from each device
-      batch_metrics_direct.reshape(shape=(batch_size_per_device * NUM_DEVICES, 1))
-      # Append the metrics to the list
-      metrics_direct.append(batch_metrics_direct)
+      if direct:
+        batch_metrics_direct = _evaluate_direct_prediction(
+          state, stats, trajs, times, specs,
+        )
+        batch_metrics_direct = BatchMetrics(**batch_metrics_direct)
+        # Re-arrange the sub-batches gotten from each device
+        batch_metrics_direct.reshape(shape=(batch_size_per_device * NUM_DEVICES, 1))
+        # Append the metrics to the list
+        metrics_direct.append(batch_metrics_direct)
 
       # Evaluate rollout prediction
-      batch_metrics_rollout = _evaluate_rollout_prediction(
-        state, stats, trajs, times, specs
-      )
-      batch_metrics_rollout = BatchMetrics(**batch_metrics_rollout)
-      # Re-arrange the sub-batches gotten from each device
-      batch_metrics_rollout.reshape(shape=(batch_size_per_device * NUM_DEVICES, 1))
-      # Compute and store metrics
-      metrics_rollout.append(batch_metrics_rollout)
+      if rollout:
+        batch_metrics_rollout = _evaluate_rollout_prediction(
+          state, stats, trajs, times, specs
+        )
+        batch_metrics_rollout = BatchMetrics(**batch_metrics_rollout)
+        # Re-arrange the sub-batches gotten from each device
+        batch_metrics_rollout.reshape(shape=(batch_size_per_device * NUM_DEVICES, 1))
+        # Compute and store metrics
+        metrics_rollout.append(batch_metrics_rollout)
+
       # Split the batch between devices
       # -> [NUM_DEVICES, batch_size/NUM_DEVICES, ...]
       trajs = shard(trajs_raw)
@@ -794,15 +800,16 @@ def train(
       specs = shard(specs_raw) if _use_specs else None
 
       # Evaluate final prediction
-      assert IDX_FN < trajs.shape[2]
-      batch_metrics_final = _evaluate_final_prediction(
-        state, stats, trajs, times, specs,
-      )
-      batch_metrics_final = BatchMetrics(**batch_metrics_final)
-      # Re-arrange the sub-batches gotten from each device
-      batch_metrics_final.reshape(shape=(batch_size_per_device * (NUM_DEVICES // jump_steps), 1))
-      # Append the errors to the list
-      metrics_final.append(batch_metrics_final)
+      if final:
+        assert IDX_FN < trajs.shape[2]
+        batch_metrics_final = _evaluate_final_prediction(
+          state, stats, trajs, times, specs,
+        )
+        batch_metrics_final = BatchMetrics(**batch_metrics_final)
+        # Re-arrange the sub-batches gotten from each device
+        batch_metrics_final.reshape(shape=(batch_size_per_device * (NUM_DEVICES // jump_steps), 1))
+        # Append the errors to the list
+        metrics_final.append(batch_metrics_final)
 
     # Aggregate over the batch dimension and compute norm per variable
     metrics_direct = Metrics(
@@ -811,27 +818,27 @@ def train(
       l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_direct]), axis=0).item(),
       l1_alt=jnp.median(jnp.concatenate([m.l1_alt for m in metrics_direct]), axis=0).item(),
       l2_alt=jnp.median(jnp.concatenate([m.l2_alt for m in metrics_direct]), axis=0).item(),
-    )
+    ) if direct else None
     metrics_rollout = Metrics(
       mse=jnp.median(jnp.concatenate([m.mse for m in metrics_rollout]), axis=0).item(),
       l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_rollout]), axis=0).item(),
       l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_rollout]), axis=0).item(),
       l1_alt=jnp.median(jnp.concatenate([m.l1_alt for m in metrics_rollout]), axis=0).item(),
       l2_alt=jnp.median(jnp.concatenate([m.l2_alt for m in metrics_rollout]), axis=0).item(),
-    )
+    ) if rollout else None
     metrics_final = Metrics(
       mse=jnp.median(jnp.concatenate([m.mse for m in metrics_final]), axis=0).item(),
       l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_final]), axis=0).item(),
       l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_final]), axis=0).item(),
       l1_alt=jnp.median(jnp.concatenate([m.l1_alt for m in metrics_final]), axis=0).item(),
       l2_alt=jnp.median(jnp.concatenate([m.l2_alt for m in metrics_final]), axis=0).item(),
-    )
+    ) if final else None
 
     # Build the metrics object
     metrics = EvalMetrics(
-      direct=metrics_direct,
-      rollout=metrics_rollout,
-      final=metrics_final,
+      direct=(metrics_direct if direct else Metrics()),
+      rollout=(metrics_rollout if rollout else Metrics()),
+      final=(metrics_final if final else Metrics()),
     )
 
     return metrics
