@@ -1,7 +1,5 @@
 # NEXT STEPS
 
-- Add Bogdan's metric (make sure to normalize)
-
 - Add your current experiments to the thesis
 
 - Experiment with wave_gauss, wave_layer, and allen_cahn

@@ -23,9 +23,11 @@ from mpgno.experiments import DIR_EXPERIMENTS
 from mpgno.autoregressive import AutoregressivePredictor, OperatorNormalizer
 from mpgno.dataset import Dataset
 from mpgno.models.mpgno import MPGNO, AbstractOperator
-from mpgno.utils import disable_logging, Array, shuffle_arrays, split_arrays
+from mpgno.utils import disable_logging, Array, shuffle_arrays, split_arrays, normalize
 from mpgno.metrics import mse_loss, rel_l1_loss
-from mpgno.metrics import EvalMetrics, mse_error, rel_l2_error, rel_l1_error
+from mpgno.metrics import BatchMetrics, Metrics, EvalMetrics
+from mpgno.metrics import mse_error, rel_l2_error, rel_l1_error
+from mpgno.metrics import rel_l1_error_sum_vars, rel_l2_error_sum_vars
 
 
 NUM_DEVICES = jax.local_device_count()
@@ -515,7 +517,7 @@ def train(
     trajs: Array,
     times: Array,
     specs: Array,
-  ) -> Tuple[Array, Array]:
+  ) -> Mapping:
 
     # Inputs are of shape [batch_size_per_device, ...]
 
@@ -545,7 +547,7 @@ def train(
     ) if _use_specs else None
 
     def get_direct_errors(lt, carry):
-      err_ms_mean, err_l1_mean, err_l2_mean = carry
+      carry = BatchMetrics(**carry)
       def get_direct_prediction(tau, forcing):
         u_prd = normalizer.apply(
           variables={'params': state.params},
@@ -563,25 +565,48 @@ def train(
         length=direct_steps,
       )
       u_prd = u_prd.squeeze(axis=2).swapaxes(0, 1)
-      err_ms_mean += jnp.linalg.norm(mse_error(u_prd, u_tgt[lt]), axis=1) / num_lead_times
-      err_l1_mean += jnp.linalg.norm(rel_l1_error(u_prd, u_tgt[lt]), axis=1) / num_lead_times
-      err_l2_mean += jnp.linalg.norm(rel_l2_error(u_prd, u_tgt[lt]), axis=1) / num_lead_times
 
-      return err_ms_mean, err_l1_mean, err_l2_mean
+      # Get target variables (velocities) and normalize using global statistics
+      _vel_prd = normalize(
+        arr=u_prd[..., dataset.metadata.target_variables],
+        shift=dataset.metadata.stats_target_variables['mean'],
+        scale=dataset.metadata.stats_target_variables['std'],
+      )
+      _vel_tgt = normalize(
+        arr=u_tgt[lt][..., dataset.metadata.target_variables],
+        shift=dataset.metadata.stats_target_variables['mean'],
+        scale=dataset.metadata.stats_target_variables['std'],
+      )
+
+      # Compute metrics
+      batch_metrics = BatchMetrics(
+        mse=(jnp.linalg.norm(mse_error(u_prd, u_tgt[lt]), axis=1) / num_lead_times),
+        l1=(jnp.linalg.norm(rel_l1_error(u_prd, u_tgt[lt]), axis=1) / num_lead_times),
+        l2=(jnp.linalg.norm(rel_l2_error(u_prd, u_tgt[lt]), axis=1) / num_lead_times),
+        l1_alt=(rel_l1_error_sum_vars(_vel_prd, _vel_tgt) / num_lead_times),
+        l2_alt=(rel_l2_error_sum_vars(_vel_prd, _vel_tgt) / num_lead_times),
+      )
+
+      carry += batch_metrics
+
+      return carry.__dict__
 
     # Get mean errors per each sample in the batch
-    err_ms_mean, err_l1_mean, err_l2_mean = jax.lax.fori_loop(
+    init_metrics = BatchMetrics(
+      mse=jnp.zeros(shape=(batch_size_per_device,)),
+      l1=jnp.zeros(shape=(batch_size_per_device,)),
+      l2=jnp.zeros(shape=(batch_size_per_device,)),
+      l1_alt=jnp.zeros(shape=(batch_size_per_device,)),
+      l2_alt=jnp.zeros(shape=(batch_size_per_device,)),
+    )
+    batch_metrics_mean = jax.lax.fori_loop(
       body_fun=get_direct_errors,
       lower=0,
       upper=num_lead_times,
-      init_val=(
-        jnp.zeros(shape=(batch_size_per_device,)),
-        jnp.zeros(shape=(batch_size_per_device,)),
-        jnp.zeros(shape=(batch_size_per_device,)),
-      )
+      init_val=init_metrics.__dict__,
     )
 
-    return err_ms_mean, err_l1_mean, err_l2_mean
+    return batch_metrics_mean
 
   @jax.pmap
   def _evaluate_rollout_prediction(
@@ -590,7 +615,7 @@ def train(
     trajs: Array,
     times: Array,
     specs: Array,
-  ) -> Array:
+  ) -> Mapping:
     """
     Predicts the trajectories autoregressively.
     The input dataset must be raw (not normalized).
@@ -613,12 +638,28 @@ def train(
       num_steps=num_times,
     )
 
-    # Calculate the errors
-    err_ms = jnp.linalg.norm(mse_error(u_prd, u_tgt), axis=1)
-    err_l1 = jnp.linalg.norm(rel_l1_error(u_prd, u_tgt), axis=1)
-    err_l2 = jnp.linalg.norm(rel_l2_error(u_prd, u_tgt), axis=1)
+    # Get target variables (velocities) and normalize using global statistics
+    _vel_prd = normalize(
+      arr=u_prd[..., dataset.metadata.target_variables],
+      shift=dataset.metadata.stats_target_variables['mean'],
+      scale=dataset.metadata.stats_target_variables['std'],
+    )
+    _vel_tgt = normalize(
+      arr=u_tgt[..., dataset.metadata.target_variables],
+      shift=dataset.metadata.stats_target_variables['mean'],
+      scale=dataset.metadata.stats_target_variables['std'],
+    )
 
-    return err_ms, err_l1, err_l2
+    # Calculate the errors
+    batch_metrics = BatchMetrics(
+      mse=jnp.linalg.norm(mse_error(u_prd, u_tgt), axis=1),
+      l1=jnp.linalg.norm(rel_l1_error(u_prd, u_tgt), axis=1),
+      l2=jnp.linalg.norm(rel_l2_error(u_prd, u_tgt), axis=1),
+      l1_alt=rel_l1_error_sum_vars(_vel_prd, _vel_tgt),
+      l2_alt=rel_l2_error_sum_vars(_vel_prd, _vel_tgt),
+    )
+
+    return batch_metrics.__dict__
 
   @jax.pmap
   def _evaluate_final_prediction(
@@ -627,7 +668,7 @@ def train(
     trajs: Array,
     times: Array,
     specs: Array,
-  ) -> Array:
+  ) -> Mapping:
 
     # Set input and target
     u_inp = trajs[:, :1]
@@ -656,12 +697,28 @@ def train(
         num_steps=_num_direct_steps,
       )
 
-    # Calculate the errors
-    err_ms = jnp.linalg.norm(mse_error(u_prd, u_tgt), axis=1)
-    err_l1 = jnp.linalg.norm(rel_l1_error(u_prd, u_tgt), axis=1)
-    err_l2 = jnp.linalg.norm(rel_l2_error(u_prd, u_tgt), axis=1)
+    # Get target variables (velocities) and normalize using global statistics
+    _vel_prd = normalize(
+      arr=u_prd[..., dataset.metadata.target_variables],
+      shift=dataset.metadata.stats_target_variables['mean'],
+      scale=dataset.metadata.stats_target_variables['std'],
+    )
+    _vel_tgt = normalize(
+      arr=u_tgt[..., dataset.metadata.target_variables],
+      shift=dataset.metadata.stats_target_variables['mean'],
+      scale=dataset.metadata.stats_target_variables['std'],
+    )
 
-    return err_ms, err_l1, err_l2
+    # Calculate the errors
+    batch_metrics = BatchMetrics(
+      mse=jnp.linalg.norm(mse_error(u_prd, u_tgt), axis=1),
+      l1=jnp.linalg.norm(rel_l1_error(u_prd, u_tgt), axis=1),
+      l2=jnp.linalg.norm(rel_l2_error(u_prd, u_tgt), axis=1),
+      l1_alt=rel_l1_error_sum_vars(_vel_prd, _vel_tgt),
+      l2_alt=rel_l2_error_sum_vars(_vel_prd, _vel_tgt),
+    )
+
+    return batch_metrics.__dict__
 
   def evaluate(
     state: TrainState,
@@ -669,15 +726,9 @@ def train(
   ) -> EvalMetrics:
     """Evaluates the model on a dataset based on multiple trajectory lengths."""
 
-    error_dr_ms = []
-    error_dr_l1 = []
-    error_dr_l2 = []
-    error_ro_ms = []
-    error_ro_l1 = []
-    error_ro_l2 = []
-    error_fn_ms = []
-    error_fn_l1 = []
-    error_fn_l2 = []
+    metrics_direct: list[BatchMetrics] = []
+    metrics_rollout: list[BatchMetrics] = []
+    metrics_final: list[BatchMetrics] = []
 
     for batch in batches:
       # Unwrap the batch
@@ -718,31 +769,24 @@ def train(
       specs = shard(specs) if _use_specs else None
 
       # Evaluate direct prediction
-      _error_dr_ms_batch, _error_dr_l1_batch, _error_dr_l2_batch = _evaluate_direct_prediction(
+      batch_metrics_direct = _evaluate_direct_prediction(
         state, stats, trajs, times, specs,
       )
+      batch_metrics_direct = BatchMetrics(**batch_metrics_direct)
       # Re-arrange the sub-batches gotten from each device
-      _error_dr_ms_batch = _error_dr_ms_batch.reshape(batch_size_per_device * NUM_DEVICES, 1)
-      _error_dr_l1_batch = _error_dr_l1_batch.reshape(batch_size_per_device * NUM_DEVICES, 1)
-      _error_dr_l2_batch = _error_dr_l2_batch.reshape(batch_size_per_device * NUM_DEVICES, 1)
-      # Append the errors to the list
-      error_dr_ms.append(_error_dr_ms_batch)
-      error_dr_l1.append(_error_dr_l1_batch)
-      error_dr_l2.append(_error_dr_l2_batch)
+      batch_metrics_direct.reshape(shape=(batch_size_per_device * NUM_DEVICES, 1))
+      # Append the metrics to the list
+      metrics_direct.append(batch_metrics_direct)
 
       # Evaluate rollout prediction
-      _error_ro_ms_batch, _error_ro_l1_batch, _error_ro_l2_batch = _evaluate_rollout_prediction(
+      batch_metrics_rollout = _evaluate_rollout_prediction(
         state, stats, trajs, times, specs
       )
+      batch_metrics_rollout = BatchMetrics(**batch_metrics_rollout)
       # Re-arrange the sub-batches gotten from each device
-      _error_ro_ms_batch = _error_ro_ms_batch.reshape(batch_size_per_device * NUM_DEVICES, 1)
-      _error_ro_l1_batch = _error_ro_l1_batch.reshape(batch_size_per_device * NUM_DEVICES, 1)
-      _error_ro_l2_batch = _error_ro_l2_batch.reshape(batch_size_per_device * NUM_DEVICES, 1)
+      batch_metrics_rollout.reshape(shape=(batch_size_per_device * NUM_DEVICES, 1))
       # Compute and store metrics
-      error_ro_ms.append(_error_ro_ms_batch)
-      error_ro_l1.append(_error_ro_l1_batch)
-      error_ro_l2.append(_error_ro_l2_batch)
-
+      metrics_rollout.append(batch_metrics_rollout)
       # Split the batch between devices
       # -> [NUM_DEVICES, batch_size/NUM_DEVICES, ...]
       trajs = shard(trajs_raw)
@@ -751,40 +795,43 @@ def train(
 
       # Evaluate final prediction
       assert IDX_FN < trajs.shape[2]
-      _error_fn_ms_batch, _error_fn_l1_batch, _error_fn_l2_batch = _evaluate_final_prediction(
+      batch_metrics_final = _evaluate_final_prediction(
         state, stats, trajs, times, specs,
       )
+      batch_metrics_final = BatchMetrics(**batch_metrics_final)
       # Re-arrange the sub-batches gotten from each device
-      _error_fn_ms_batch = _error_fn_ms_batch.reshape(batch_size_per_device * (NUM_DEVICES // jump_steps), 1)
-      _error_fn_l1_batch = _error_fn_l1_batch.reshape(batch_size_per_device * (NUM_DEVICES // jump_steps), 1)
-      _error_fn_l2_batch = _error_fn_l2_batch.reshape(batch_size_per_device * (NUM_DEVICES // jump_steps), 1)
+      batch_metrics_final.reshape(shape=(batch_size_per_device * (NUM_DEVICES // jump_steps), 1))
       # Append the errors to the list
-      error_fn_ms.append(_error_fn_ms_batch)
-      error_fn_l1.append(_error_fn_l1_batch)
-      error_fn_l2.append(_error_fn_l2_batch)
+      metrics_final.append(batch_metrics_final)
 
     # Aggregate over the batch dimension and compute norm per variable
-    error_dr_ms = jnp.median(jnp.concatenate(error_dr_ms), axis=0).item()
-    error_dr_l1 = jnp.median(jnp.concatenate(error_dr_l1), axis=0).item()
-    error_dr_l2 = jnp.median(jnp.concatenate(error_dr_l2), axis=0).item()
-    error_ro_ms = jnp.median(jnp.concatenate(error_ro_ms), axis=0).item()
-    error_ro_l1 = jnp.median(jnp.concatenate(error_ro_l1), axis=0).item()
-    error_ro_l2 = jnp.median(jnp.concatenate(error_ro_l2), axis=0).item()
-    error_fn_ms = jnp.median(jnp.concatenate(error_fn_ms), axis=0).item()
-    error_fn_l1 = jnp.median(jnp.concatenate(error_fn_l1), axis=0).item()
-    error_fn_l2 = jnp.median(jnp.concatenate(error_fn_l2), axis=0).item()
+    metrics_direct = Metrics(
+      mse=jnp.median(jnp.concatenate([m.mse for m in metrics_direct]), axis=0).item(),
+      l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_direct]), axis=0).item(),
+      l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_direct]), axis=0).item(),
+      l1_alt=jnp.median(jnp.concatenate([m.l1_alt for m in metrics_direct]), axis=0).item(),
+      l2_alt=jnp.median(jnp.concatenate([m.l2_alt for m in metrics_direct]), axis=0).item(),
+    )
+    metrics_rollout = Metrics(
+      mse=jnp.median(jnp.concatenate([m.mse for m in metrics_rollout]), axis=0).item(),
+      l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_rollout]), axis=0).item(),
+      l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_rollout]), axis=0).item(),
+      l1_alt=jnp.median(jnp.concatenate([m.l1_alt for m in metrics_rollout]), axis=0).item(),
+      l2_alt=jnp.median(jnp.concatenate([m.l2_alt for m in metrics_rollout]), axis=0).item(),
+    )
+    metrics_final = Metrics(
+      mse=jnp.median(jnp.concatenate([m.mse for m in metrics_final]), axis=0).item(),
+      l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_final]), axis=0).item(),
+      l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_final]), axis=0).item(),
+      l1_alt=jnp.median(jnp.concatenate([m.l1_alt for m in metrics_final]), axis=0).item(),
+      l2_alt=jnp.median(jnp.concatenate([m.l2_alt for m in metrics_final]), axis=0).item(),
+    )
 
     # Build the metrics object
     metrics = EvalMetrics(
-      error_direct_ms=error_dr_ms,
-      error_direct_l1=error_dr_l1,
-      error_direct_l2=error_dr_l2,
-      error_rollout_ms=error_ro_ms,
-      error_rollout_l1=error_ro_l1,
-      error_rollout_l2=error_ro_l2,
-      error_final_ms=error_fn_ms,
-      error_final_l1=error_fn_l1,
-      error_final_l2=error_fn_l2,
+      direct=metrics_direct,
+      rollout=metrics_rollout,
+      final=metrics_final,
     )
 
     return metrics
@@ -809,11 +856,11 @@ def train(
     f'TIME: {time_tot_pre : 06.1f}s',
     f'GRAD: {0. : .2e}',
     f'RMSE: {0. : .2e}',
-    f'L2-DR-TRN: {metrics_trn.error_direct_l2 * 100 : .2f}%',
-    f'L1-DR: {metrics_val.error_direct_l1 * 100 : .2f}%',
-    f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
-    f'L1-FN: {metrics_val.error_final_l1 * 100 : .2f}%',
-    f'L2-FN: {metrics_val.error_final_l2 * 100 : .2f}%',
+    f'L2-DR-TRN: {metrics_trn.direct.l2 * 100 : .2f}%',
+    f'L1-DR: {metrics_val.direct.l1 * 100 : .2f}%',
+    f'L2-DR: {metrics_val.direct.l2 * 100 : .2f}%',
+    f'L1-FN: {metrics_val.final.l1 * 100 : .2f}%',
+    f'L2-FN: {metrics_val.final.l2 * 100 : .2f}%',
   ]))
 
   # Set up the checkpoint manager
@@ -864,44 +911,18 @@ def train(
         f'TIME: {time_tot : 06.1f}s',
         f'GRAD: {grad.item() : .2e}',
         f'RMSE: {np.sqrt(loss).item() : .2e}',
-        f'L2-DR-TRN: {metrics_trn.error_direct_l2 * 100 : .2f}%',
-        f'L1-DR: {metrics_val.error_direct_l1 * 100 : .2f}%',
-        f'L2-DR: {metrics_val.error_direct_l2 * 100 : .2f}%',
-        f'L1-FN: {metrics_val.error_final_l1 * 100 : .2f}%',
-        f'L2-FN: {metrics_val.error_final_l2 * 100 : .2f}%',
+        f'L2-DR-TRN: {metrics_trn.direct.l2 * 100 : .2f}%',
+        f'L1-DR: {metrics_val.direct.l1 * 100 : .2f}%',
+        f'L2-DR: {metrics_val.direct.l2 * 100 : .2f}%',
+        f'L1-FN: {metrics_val.final.l1 * 100 : .2f}%',
+        f'L2-FN: {metrics_val.final.l2 * 100 : .2f}%',
       ]))
 
       with disable_logging(level=logging.FATAL):
         checkpoint_metrics = {
           'loss': loss.item(),
-          'train': {
-            'direct': {
-              'l1': metrics_trn.error_direct_l1,
-              'l2': metrics_trn.error_direct_l2,
-            },
-            'rollout': {
-              'l1': metrics_trn.error_rollout_l1,
-              'l2': metrics_trn.error_rollout_l2,
-            },
-            'final': {
-              'l1': metrics_trn.error_final_l1,
-              'l2': metrics_trn.error_final_l2,
-            },
-          },
-          'valid': {
-            'direct': {
-              'l1': metrics_val.error_direct_l1,
-              'l2': metrics_val.error_direct_l2,
-            },
-            'rollout': {
-              'l1': metrics_val.error_rollout_l1,
-              'l2': metrics_val.error_rollout_l2,
-            },
-            'final': {
-              'l1': metrics_val.error_final_l1,
-              'l2': metrics_val.error_final_l2,
-            },
-          },
+          'train': metrics_trn.to_dict(),
+          'valid': metrics_val.to_dict(),
         }
         # Store the state and the metrics
         step = epochs_before + epoch
