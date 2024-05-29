@@ -180,6 +180,13 @@ DATASET_METADATA = {
     stats=STATS_WAVE_EQUATION,
     signed=True,
   ),
+  'wave_equation/gaussians_15step': Metadata(
+    data_group='solution',
+    active_variables=[0],
+    target_variables=[0],
+    stats=STATS_WAVE_EQUATION,
+    signed=True,
+  ),
 }
 
 class Dataset:
@@ -198,6 +205,8 @@ class Dataset:
 
     # Set attributes
     self.metadata = DATASET_METADATA[datapath]
+    if isinstance(self.metadata.signed, bool):
+      self.metadata.signed = [self.metadata.signed]
     self.data_group = self.metadata.data_group
     self.reader = h5py.File(Path(datadir) / f'{datapath}.nc', 'r')
     self.idx_vars = (None if include_passive_variables

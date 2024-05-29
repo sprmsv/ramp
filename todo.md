@@ -2,12 +2,8 @@
 
 - Add your current experiments to the thesis
 
-- Experiment with wave_gauss, wave_layer, and allen_cahn
-    - poisson_equation
-    - poseidon-data
-
 - The results with `direct_steps` are strange
-    - Inspect the performance of E228-E231
+    - Inspect the performance of E228-E233
     - Recheck the codes
 
 - Evaluate time interpolation
@@ -22,6 +18,8 @@
     * train with clean data
     * Infer with noisy data (1%)
     * Compare with clean ground-truth
+
+- Adapt for other boundary conditions (e.g., open, Robin)
 
 - Get space-continuous outputs
     - Evaluate space inter- and extrapolation
