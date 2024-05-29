@@ -3,14 +3,17 @@
 - Add your current experiments to the thesis
 
 - Experiment with wave_gauss, wave_layer, and allen_cahn
+    - poisson_equation
+    - poseidon-data
 
-- The results with `direct_steps` are strange: think about it and recheck the codes
-    - Inspect the performance of E226/E227
-    - Check with allen_cahn
+- The results with `direct_steps` are strange
+    - Inspect the performance of E228-E231
+    - Recheck the codes
 
 - Evaluate time interpolation
     * Needs `direct_steps`
     * With or without scheduling `direct_steps`?
+        - For now, with scheduling
     * Try `conditional_normalization` with different latent_sizes?
 
 - Evaluate time extrapolation

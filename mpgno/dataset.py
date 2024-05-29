@@ -243,6 +243,7 @@ class Dataset:
     # Check inputs
     assert residual_steps >= 0
     assert residual_steps < self.shape[1]
+    assert 1 in axes  # NOTE: Otherwise we cannot extrapolate in time
 
     # Get all trajectories
     trj, _ = self.train(np.arange(self.nums['train']))
@@ -261,34 +262,16 @@ class Dataset:
     # Compute statistics of the residuals
     # TRY: Compute statistics of residuals of normalized trajectories
     _get_res = lambda s, trj: trj[:, (s):] - trj[:, :-(s)]
-    self.stats['res']['mean'] = []
-    self.stats['res']['std'] = []
+    residuals = []
     for s in range(1, residual_steps+1):
       if (s % skip_residual_steps):
-        self.stats['res']['mean'].append(np.zeros(shape=(1, *self.shape[1:])))
-        self.stats['res']['std'].append(np.ones(shape=(1, *self.shape[1:])))
+        continue
       res = _get_res(s, trj)
-      res_mean = np.mean(res, axis=axes, keepdims=True)
-      res_std = np.std(res, axis=axes, keepdims=True)
-      # Fill the time axis so that all stats have the same shape
-      if 1 not in axes:
-        fill_shape = [1 if (ax in axes) else self.shape[ax] for ax in range(len(self.shape))]
-        fill_shape[1] = s
-        res_mean = np.concatenate([res_mean, np.zeros(shape=fill_shape)], axis=1)
-        res_std = np.concatenate([res_std, np.ones(shape=fill_shape)], axis=1)
-      self.stats['res']['mean'].append(res_mean)
-      self.stats['res']['std'].append(res_std)
+      residuals.append(res)
+    residuals = np.concatenate(residuals, axis=1)
 
-    # Repeat along the time axis
-    if 1 in axes:
-      reps = (1, self.shape[1], 1, 1, 1)
-      self.stats['trj']['mean'] = np.tile(self.stats['trj']['mean'], reps=reps)
-      self.stats['trj']['std'] = np.tile(self.stats['trj']['std'], reps=reps)
-      if derivs_degree > 0:
-        self.stats['der']['mean'] = np.tile(self.stats['der']['mean'], reps=reps)
-        self.stats['der']['std'] = np.tile(self.stats['der']['std'], reps=reps)
-      self.stats['res']['mean'] = [np.tile(stat, reps=reps) for stat in self.stats['res']['mean']]
-      self.stats['res']['std'] = [np.tile(stat, reps=reps) for stat in self.stats['res']['std']]
+    self.stats['res']['mean'] = np.mean(residuals, axis=axes, keepdims=True)
+    self.stats['res']['std'] = np.std(residuals, axis=axes, keepdims=True)
 
   def _fetch(self, idx: Union[int, Sequence], raw: bool = False):
     """Fetches a sample from the dataset, given its global index."""

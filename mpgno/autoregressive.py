@@ -28,16 +28,13 @@ class OperatorNormalizer:
     """
 
     # Get the corresponding the global statistics
-    # NOTE: Swap axes is necessary because we will have statistics of shape (1, bsz, ...)
-    # NOTE:   and we want shape (bsz, 1, ...), same as u_inp
-    # NOTE: The trick here is that each sample in the batch gets the statistics of its corresponding t_inp
-    stats_trj_mean = stats['trj']['mean'][:, t_inp.reshape(-1)].swapaxes(0, 1)
-    stats_trj_std = stats['trj']['std'][:, t_inp.reshape(-1)].swapaxes(0, 1)
-    stats_res_mean = stats['res']['mean'][(tau-1).reshape(-1), :, t_inp.reshape(-1)]
-    stats_res_std = stats['res']['std'][(tau-1).reshape(-1), :, t_inp.reshape(-1)]
+    stats_trj_mean = stats['trj']['mean']
+    stats_trj_std = stats['trj']['std']
+    stats_res_mean = stats['res']['mean']
+    stats_res_std = stats['res']['std']
 
     # Normalize inputs
-    # TODO: Normalize specs as well
+    # TODO: Normalize specs
     u_inp_nrm = normalize(
       u_inp,
       shift=stats_trj_mean,
@@ -86,16 +83,13 @@ class OperatorNormalizer:
     """
 
     # Get the corresponding the global statistics
-    # NOTE: Swap axes is necessary because we will have statistics of shape (1, bsz, ...)
-    # NOTE:   and we want shape (bsz, 1, ...), same as u_inp
-    # NOTE: The trick here is that each sample in the batch gets the statistics of its corresponding t_inp
-    stats_trj_mean = stats['trj']['mean'][:, t_inp.reshape(-1)].swapaxes(0, 1)
-    stats_trj_std = stats['trj']['std'][:, t_inp.reshape(-1)].swapaxes(0, 1)
-    stats_res_mean = stats['res']['mean'][(tau-1).reshape(-1), :, t_inp.reshape(-1)]
-    stats_res_std = stats['res']['std'][(tau-1).reshape(-1), :, t_inp.reshape(-1)]
+    stats_trj_mean = stats['trj']['mean']
+    stats_trj_std = stats['trj']['std']
+    stats_res_mean = stats['res']['mean']
+    stats_res_std = stats['res']['std']
 
     # Normalize inputs
-    # TODO: Normalize specs as well
+    # TODO: Normalize specs
     u_inp_nrm = normalize(
       u_inp,
       shift=stats_trj_mean,
