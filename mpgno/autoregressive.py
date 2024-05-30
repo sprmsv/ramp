@@ -120,7 +120,7 @@ class OperatorNormalizer:
 
 class AutoregressivePredictor:
 
-  def __init__(self, normalizer: OperatorNormalizer, num_steps_direct: int = 1, tau_base: int = 1):
+  def __init__(self, normalizer: OperatorNormalizer, num_steps_direct: int = 1, tau_base: float = 1.):
     # FIXME: Maybe we can benefit from checkpointing scan_fn instead
     self._apply_operator = jax.checkpoint(normalizer.apply)
     self.num_steps_direct = num_steps_direct

@@ -55,8 +55,8 @@ class AugmentedMLP(nn.Module):
       use_bias=True,
     ) if self.use_layer_norm else None
     self.correction = LearnedCorrection(
-      latent_size=4,  # TRY: other sizes
-      correction_size=1,  # TRY: self.layer_sizes[-1]
+      latent_size=self.layer_sizes[-1],
+      correction_size=self.layer_sizes[-1],
     ) if self.use_learned_correction else None
 
   def __call__(self, *args, c = None, **kwargs):

@@ -12,6 +12,10 @@
         - For now, with scheduling
     * Try `conditional_normalization` with different latent_sizes
 
+- Try `direct_steps` again with the new changes
+    - Compare the final performance with `direct_steps=1`
+    - Try scheduling `direct_steps`
+
 - Evaluate time inter- and extrapolation
     * Use `conditional_normalization`
     * use_t
