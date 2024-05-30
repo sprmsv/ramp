@@ -40,28 +40,28 @@ class OperatorNormalizer:
       shift=stats_trj_mean,
       scale=stats_trj_std,
     )
-    tau = tau / stats['time']['max']
-    t_inp = t_inp / stats['time']['max']
+    tau_nrm = tau / stats['time']['max']
+    t_inp_nrm = t_inp / stats['time']['max']
 
-    # Get predicted normalized residuals
-    r_prd_nrm = self._apply_operator(
+    # Get predicted normalized derivative
+    d_prd_nrm = self._apply_operator(
       variables,
       specs=specs,
       u_inp=u_inp_nrm,
-      t_inp=t_inp,
-      tau=tau,
+      t_inp=t_inp_nrm,
+      tau=tau_nrm,
       key=key,
     )
 
     # Unnormalize predicted residuals
-    r_prd = unnormalize(
-      r_prd_nrm,
+    d_prd = unnormalize(
+      d_prd_nrm,
       mean=stats_res_mean,
       std=stats_res_std,
     )
 
     # Get predicted output
-    u_prd = u_inp + r_prd
+    u_prd = u_inp + (d_prd * tau)
 
     return u_prd
 
@@ -95,28 +95,28 @@ class OperatorNormalizer:
       shift=stats_trj_mean,
       scale=stats_trj_std,
     )
-    tau = tau / stats['time']['max']
-    t_inp = t_inp / stats['time']['max']
+    tau_nrm = tau / stats['time']['max']
+    t_inp_nrm = t_inp / stats['time']['max']
 
     # Get predicted normalized residuals
-    r_prd_nrm = self._apply_operator(
+    d_prd_nrm = self._apply_operator(
       variables,
       specs=specs,
       u_inp=u_inp_nrm,
-      t_inp=t_inp,
-      tau=tau,
+      t_inp=t_inp_nrm,
+      tau=tau_nrm,
       key=key,
     )
 
     # Get target normalized residuals
-    r_tgt = u_tgt - u_inp
-    r_tgt_nrm = normalize(
-      r_tgt,
+    d_tgt = (u_tgt - u_inp) / tau
+    d_tgt_nrm = normalize(
+      d_tgt,
       shift=stats_res_mean,
       scale=stats_res_std,
     )
 
-    return (r_prd_nrm, r_tgt_nrm)
+    return (d_prd_nrm, d_tgt_nrm)
 
 class AutoregressivePredictor:
 

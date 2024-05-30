@@ -270,8 +270,9 @@ class Dataset:
 
     # Compute statistics of the residuals
     # TRY: Compute statistics of residuals of normalized trajectories
-    _get_res = lambda s, trj: trj[:, (s):] - trj[:, :-(s)]
+    _get_res = lambda s, trj: (trj[:, (s):] - trj[:, :-(s)]) / s
     residuals = []
+    # TMP TODO: Add longer residuals to the statistics !! (might be better for generalization)
     for s in range(1, residual_steps+1):
       if (s % skip_residual_steps):
         continue

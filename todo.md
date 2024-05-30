@@ -1,23 +1,21 @@
 # NEXT STEPS
 
 - Add your current experiments to the thesis
+    - Check E234 for wave_equation
 
 - The results with `direct_steps` are strange
     - Inspect the performance of E228-E233
     - Recheck the codes
 
 - Evaluate time interpolation
-    * Needs `direct_steps`
     * With or without scheduling `direct_steps`?
         - For now, with scheduling
-    * Try `conditional_normalization` with different latent_sizes?
+    * Try `conditional_normalization` with different latent_sizes
 
-- Evaluate time extrapolation
-
-- Noise control
-    * train with clean data
-    * Infer with noisy data (1%)
-    * Compare with clean ground-truth
+- Evaluate time inter- and extrapolation
+    * Use `conditional_normalization`
+    * use_t
+    * use_tau
 
 - Adapt for other boundary conditions (e.g., open, Robin)
 
