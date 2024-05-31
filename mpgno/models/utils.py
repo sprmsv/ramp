@@ -43,21 +43,36 @@ class AugmentedMLP(nn.Module):
   layer_sizes: Sequence[int]
   activation: Callable
   use_layer_norm: bool = False
-  use_learned_correction: bool = False
+  use_conditional_norm: bool = False
+  conditional_norm_latent_size: int = 4
+  conditional_norm_unique: bool = True
+  conditional_norm_nonlinear: bool = True
   concatenate_axis: int = -1
 
   def setup(self):
+    # Set up layers
     self.layers = [nn.Dense(features) for features in self.layer_sizes]
+
+    # Set up normalization layer
     self.layernorm = nn.LayerNorm(
       reduction_axes=-1,
       feature_axes=-1,
       use_scale=True,
       use_bias=True,
     ) if self.use_layer_norm else None
-    self.correction = LearnedCorrection(
-      latent_size=self.layer_sizes[-1],
-      correction_size=self.layer_sizes[-1],
-    ) if self.use_learned_correction else None
+
+    # Set conditional normalization layer
+    self.correction = None
+    if self.use_conditional_norm:
+      if self.conditional_norm_nonlinear:
+        self.correction = LearnedCorrection(
+          latent_size=self.conditional_norm_latent_size,
+          correction_size=(1 if self.conditional_norm_unique else self.layer_sizes[-1]),
+        )
+      else:
+        self.correction = LinearLearnedCorrection(
+          correction_size=(1 if self.conditional_norm_unique else self.layer_sizes[-1]),
+        )
 
   def __call__(self, *args, c = None, **kwargs):
     x = concatenate_args(args=args, kwargs=kwargs, axis=self.concatenate_axis)
@@ -89,8 +104,7 @@ class LearnedCorrection(nn.Module):
                  kernel_init=nn.initializers.normal(stddev=.01)),
         nn.sigmoid,
         nn.Dense(self.correction_size,
-                 kernel_init=nn.initializers.normal(stddev=.01),
-                 bias_init=nn.initializers.constant(1.))
+                 kernel_init=nn.initializers.normal(stddev=.01)),
       ])
     self.mlp_bias = nn.Sequential(
       layers=[
@@ -98,11 +112,38 @@ class LearnedCorrection(nn.Module):
                  kernel_init=nn.initializers.normal(stddev=.01)),
         nn.sigmoid,
         nn.Dense(self.correction_size,
-                 kernel_init=nn.initializers.normal(stddev=.01))
+                 kernel_init=nn.initializers.normal(stddev=.01)),
+      ])
+
+  def __call__(self, c, x):
+    scale = 1 + c * self.mlp_scale(c)
+    bias = c * self.mlp_bias(c)
+    return x * scale + bias
+
+class LinearLearnedCorrection(nn.Module):
+  """
+  Learned correction layer is designed to be applied after a normalization layer.
+  Based on an input (e.g., time delta), it shifts and scales the distribution of its input.
+  correction_size must either be 1 or the same as one of the input dimensions (broadcastable).
+  """
+
+  correction_size: int = 1
+
+  def setup(self):
+    self.mlp_scale = nn.Sequential(
+      layers=[
+        nn.Dense(self.correction_size,
+                 kernel_init=nn.initializers.normal(stddev=.01),
+                 bias_init=nn.initializers.constant(1.))
+      ])
+    self.mlp_bias = nn.Sequential(
+      layers=[
+        nn.Dense(self.correction_size,
+                 kernel_init=nn.initializers.normal(stddev=.01),
+                 bias_init=nn.initializers.constant(0.))
       ])
 
   def __call__(self, c, x):
     scale = self.mlp_scale(c)
     bias = self.mlp_bias(c)
-
     return x * scale + bias

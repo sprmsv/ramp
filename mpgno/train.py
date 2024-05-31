@@ -1032,6 +1032,9 @@ def main(argv):
       use_tau=True,
       use_t=True,
       conditional_normalization=False,
+      conditional_norm_latent_size=4,
+      conditional_norm_unique=True,
+      conditional_norm_nonlinear=True,
       deriv_degree=FLAGS.deriv_degree,
       latent_size=FLAGS.latent_size,
       num_mlp_hidden_layers=FLAGS.num_mlp_hidden_layers,
@@ -1041,8 +1044,8 @@ def main(argv):
       overlap_factor_mesh2grid=FLAGS.overlap_factor_mesh2grid,
       num_multimesh_levels=FLAGS.num_multimesh_levels,
       node_coordinate_freqs=FLAGS.node_coordinate_freqs,
-      p_dropout_edges_grid2mesh= FLAGS.p_dropout_edges_grid2mesh,
-      p_dropout_edges_mesh2grid = FLAGS.p_dropout_edges_mesh2grid,
+      p_dropout_edges_grid2mesh=FLAGS.p_dropout_edges_grid2mesh,
+      p_dropout_edges_mesh2grid=FLAGS.p_dropout_edges_mesh2grid,
     )
   model = get_model(model_kwargs)
 
@@ -1091,6 +1094,7 @@ def main(argv):
   logging.info(f'Total number of trainable paramters: {n_model_parameters}')
 
   # Train the model without unrolling
+  schedule_direct_steps = False
   epochs_trained = 0
   num_batches = dataset.nums['train'] // FLAGS.batch_size
   num_times = dataset.shape[1] // FLAGS.jump_steps
@@ -1100,12 +1104,15 @@ def main(argv):
   num_lead_times_full = max(0, num_times - FLAGS.direct_steps - unroll_offset)
   num_lead_times_part = num_lead_times - num_lead_times_full
   transition_steps = 0
-  for _d in range(1, FLAGS.direct_steps+1):
+  for _d in (range(1, FLAGS.direct_steps+1) if schedule_direct_steps else [FLAGS.direct_steps]):
     num_valid_pairs_d = (
       num_lead_times_full * _d
       + (num_lead_times_part * (num_lead_times_part+1) // 2)
     )
-    epochs_d = (epochs_u00_dff if (_d == FLAGS.direct_steps) else epochs_u00_dxx)
+    if schedule_direct_steps:
+      epochs_d = (epochs_u00_dff if (_d == FLAGS.direct_steps) else epochs_u00_dxx)
+    else:
+      epochs_d = epochs_u00
     transition_steps +=  epochs_d * num_batches * FLAGS.jump_steps * num_valid_pairs_d
 
   pct_start = .02  # Warmup cosine onecycle
@@ -1131,9 +1138,12 @@ def main(argv):
     optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-08),
   )
   state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
-  for _d in range(1, FLAGS.direct_steps+1):
+  for _d in (range(1, FLAGS.direct_steps+1) if schedule_direct_steps else [FLAGS.direct_steps]):
     key, subkey = jax.random.split(key)
-    epochs = (epochs_u00_dff if (_d == FLAGS.direct_steps) else epochs_u00_dxx)
+    if schedule_direct_steps:
+      epochs = (epochs_u00_dff if (_d == FLAGS.direct_steps) else epochs_u00_dxx)
+    else:
+      epochs = epochs_u00
     state = train(
       key=subkey,
       model=model,

@@ -1,25 +1,31 @@
 # NEXT STEPS
 
-- Add your current experiments to the thesis
-    - Check E234 for wave_equation
+- Experiment with the baseline models
+    - GNO, brandstetter, MeshGraphNets, (FNO), (U-Net), (CNO), (GNOT), (CNN)
 
-- The results with `direct_steps` are strange
-    - Inspect the performance of E228-E233
-    - Recheck the codes
+- Evaluate time inter- and extrapolation::
+    - Pick the conditional normalization mode
+        * No cond_norm
+        * Nonlinear + unique output
+        * Nonlinear + non-unique output
+        * Linear + unique output
+        * Linear + non-unique output
 
-- Evaluate time interpolation
+    - Prune the use of conditional normalization
+        * Turn off at encoder/processor/decoder
+        * Switch off at message/aggregation MLPs
+        * Tune latent_size
+        * Try use_t=off and/or use_tau=off
+        * Try concatenating tau to the edges
+
+- Evaluate the effect of `direct_steps` on the final error
+    * Compare the final performance with `direct_steps=1`
     * With or without scheduling `direct_steps`?
-        - For now, with scheduling
-    * Try `conditional_normalization` with different latent_sizes
+    * As a data augmentation technique
 
-- Try `direct_steps` again with the new changes
-    - Compare the final performance with `direct_steps=1`
-    - Try scheduling `direct_steps`
-
-- Evaluate time inter- and extrapolation
-    * Use `conditional_normalization`
-    * use_t
-    * use_tau
+- Reproduce experiments for reporting in the thesis
+    * pull the latest version
+    * 1000 epochs
 
 - Adapt for other boundary conditions (e.g., open, Robin)
 
@@ -29,10 +35,6 @@
 - adapt for unstructured grids
 
 - adapt for time-independent problems
-
-- Reproduce experiments for reporting in the thesis
-    * pull the latest version
-    * 1000 epochs
 
 
 ## Other
