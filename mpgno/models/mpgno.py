@@ -286,7 +286,8 @@ class MPGNO(AbstractOperator):
 
   @staticmethod
   def _init_structural_features(
-    zeta_sen: np.ndarray, zeta_rec: np.ndarray, idx_sen: list[int], idx_rec: list[int], node_freqs: int,
+    zeta_sen: np.ndarray, zeta_rec: np.ndarray, idx_sen: list[int], idx_rec: list[int],
+    node_freqs: int, max_edge_length: float,
   ) -> Tuple[EdgeSet, NodeSet, NodeSet]:
     # NOTE: All inputs must be flattened: [num_nodes, num_dims]
 
@@ -301,6 +302,7 @@ class MPGNO(AbstractOperator):
     phi_rec = np.pi * (zeta_rec + 1)  # [0, 2pi]
 
     # Define node features
+    # NOTE: Sinusoidal features don't need normalization
     sender_node_feats = np.concatenate([
         np.concatenate([np.sin((k+1) * phi_sen), np.cos((k+1) * phi_sen)], axis=-1)
         for k in range(node_freqs)
@@ -328,9 +330,10 @@ class MPGNO(AbstractOperator):
     z_ij = np.where(z_ij < -1, z_ij + 2, z_ij)
     z_ij = np.where(z_ij >= 1, z_ij - 2, z_ij)
     d_ij = np.linalg.norm(z_ij, axis=-1, keepdims=True)
+    # Normalize and concatenate edge features
+    z_ij = z_ij / max_edge_length
+    d_ij = d_ij / max_edge_length
     edge_feats = np.concatenate([z_ij, d_ij], axis=-1)
-    # Normalize edge features
-    edge_feats = edge_feats / np.max(np.abs(edge_feats), axis=0, keepdims=True)
 
     # Build edge set
     edge_set = EdgeSet(
@@ -347,12 +350,14 @@ class MPGNO(AbstractOperator):
   def _init_grid2mesh_graph(self) -> TypedGraph:
     """Build Grid2Mesh graph."""
 
+    r_min = np.linalg.norm(self.dz_mesh, ord=2) / 2
     edge_set, grid_node_set, mesh_node_set = self._init_structural_features(
       zeta_sen=self.zeta_grid.reshape(self._num_grid_nodes_tot, -1),
       zeta_rec=self.zeta_mesh.reshape(self._num_mesh_nodes_tot, -1),
       idx_sen=self.idx_grid2mesh_grid_nodes,
       idx_rec=self.idx_grid2mesh_mesh_nodes,
       node_freqs=self.node_coordinate_freqs,
+      max_edge_length=(self.overlap_factor_grid2mesh * r_min),
     )
 
     graph = TypedGraph(
@@ -372,6 +377,7 @@ class MPGNO(AbstractOperator):
       idx_sen=self.idx_multimesh_send,
       idx_rec=self.idx_multimesh_recv,
       node_freqs=self.node_coordinate_freqs,
+      max_edge_length=(np.max(self.dz_mesh) * (2 ** (self.num_multimesh_levels-1))),
     )
 
     graph = TypedGraph(
@@ -385,12 +391,14 @@ class MPGNO(AbstractOperator):
   def _init_mesh2grid_graph(self) -> TypedGraph:
     """Build Mesh2Grid graph."""
 
+    r_min = np.linalg.norm(self.dz_mesh, ord=2) / 2
     edge_set, mesh_node_set, grid_node_set = self._init_structural_features(
       zeta_sen=self.zeta_mesh.reshape(self._num_mesh_nodes_tot, -1),
       zeta_rec=self.zeta_grid.reshape(self._num_grid_nodes_tot, -1),
       idx_sen=self.idx_grid2mesh_mesh_nodes,
       idx_rec=self.idx_grid2mesh_grid_nodes,
       node_freqs=self.node_coordinate_freqs,
+      max_edge_length=(self.overlap_factor_mesh2grid * r_min),
     )
 
     graph = TypedGraph(
@@ -410,6 +418,7 @@ class MPGNO(AbstractOperator):
       idx_sen=self.idx_grid2grid_send,
       idx_rec=self.idx_grid2grid_recv,
       node_freqs=self.node_coordinate_freqs,
+      max_edge_length=np.max(self.dz_grid),
     )
 
     graph = TypedGraph(
@@ -454,6 +463,7 @@ class MPGNO(AbstractOperator):
         t_inp = jnp.tile(t_inp.reshape(1, 1), reps=(batch_size, 1))
 
     # Calculate, normalize, and concatenate derivatives
+    # TODO: Make normalization invariant to the grid resolution
     if self.deriv_degree:
       d_inp = compute_derivatives(traj=u_inp, degree=self.deriv_degree)
       d_inp = normalize(

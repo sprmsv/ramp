@@ -23,12 +23,21 @@
 
 - Remove periodic connections and try again with wave_equation datasets
 
-- Investigate performance with other resolutions (start with E250)
+- Continuous-discrete equivariance
     * Implement input-output grids with different resolutions
+    * Make derivatives invariant of the grid resolution
     * Implement edge masking in the processor
+    * Mask the nodes during training (p_max=0.5)
+        - This masking "can" be different in the encoder and the decoder
+    * Use edge length in the message-passing
+        - Weighted average of the messages with distances as weights
+    * If you're too misreable, plot the edge connections to be absolutely sure about them
+
+- Investigate performance with other resolutions
     * Train with 64x64
     * Large overlap factors (4 or 8)
     * Remove grid message-passing
+    * Remove spatial derivative concatentaion
 
 - Reproduce experiments for reporting in the thesis
     * pull the latest version
