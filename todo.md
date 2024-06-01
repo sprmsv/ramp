@@ -1,8 +1,5 @@
 # NEXT STEPS
 
-- Experiment with the baseline models
-    - GNO, brandstetter, MeshGraphNets, (FNO), (U-Net), (CNO), (GNOT), (CNN)
-
 - Evaluate time inter- and extrapolation::
     - Pick the conditional normalization mode
         * No cond_norm
@@ -10,6 +7,8 @@
         * Nonlinear + non-unique output
         * Linear + unique output
         * Linear + non-unique output
+
+    - Compare d=1 with d=4 and d=7
 
     - Prune the use of conditional normalization
         * Turn off at encoder/processor/decoder
@@ -21,21 +20,31 @@
 - Evaluate the effect of `direct_steps` on the final error
     * Compare the final performance with `direct_steps=1`
     * With or without scheduling `direct_steps`?
-    * As a data augmentation technique
+
+- Remove periodic connections and try again with wave_equation datasets
+
+- Investigate performance with other resolutions (start with E250)
+    * Implement input-output grids with different resolutions
+    * Implement edge masking in the processor
+    * Train with 64x64
+    * Large overlap factors (4 or 8)
+    * Remove grid message-passing
 
 - Reproduce experiments for reporting in the thesis
     * pull the latest version
     * 1000 epochs
 
-- Adapt for other boundary conditions (e.g., open, Robin)
+- Experiment with the baseline models
+    - GNO, brandstetter, MeshGraphNets, (FNO), (U-Net), (CNO), (GNOT), (CNN)
 
 - Get space-continuous outputs
     - Evaluate space inter- and extrapolation
 
+- Adapt for other boundary conditions (e.g., open, Robin)
+
 - adapt for unstructured grids
 
 - adapt for time-independent problems
-
 
 ## Other
 - Add uncertainty to the errors

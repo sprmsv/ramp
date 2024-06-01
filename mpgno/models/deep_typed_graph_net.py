@@ -116,7 +116,7 @@ class DeepTypedGraphNet(nn.Module):
   conditional_norm_nonlinear: bool = True
   activation: str = 'relu'
   f32_aggregation: bool = False
-  aggregate_edges_for_nodes_fn: str = 'segment_sum'
+  aggregate_edges_for_nodes_fn: str = 'segment_mean'
   aggregate_normalization: Optional[float] = None
 
   def setup(self):
