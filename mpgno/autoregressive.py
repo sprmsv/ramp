@@ -120,10 +120,21 @@ class OperatorNormalizer:
 
 class AutoregressivePredictor:
 
-  def __init__(self, normalizer: OperatorNormalizer, num_steps_direct: int = 1, tau_base: float = 1.):
+  def __init__(self, normalizer: OperatorNormalizer, tau_max: float = 1., tau_base: float = 1.):
+    """
+    Class for autoregressive inferrence of an operator.
+
+    Args:
+        normalizer: The operator.
+        tau_max: Maximum time delta of direct predictions with respect to the time resolution of the trained model. Defaults to 1.
+        tau_base: Time resolution of the output with respect to the time resolution of the trained model. Defaults to 1.
+    """
+
     # FIXME: Maybe we can benefit from checkpointing scan_fn instead
     self._apply_operator = jax.checkpoint(normalizer.apply)
-    self.num_steps_direct = num_steps_direct
+    assert tau_max >= tau_base
+    assert tau_max % tau_base == 0
+    self.num_steps_direct = int(tau_max / tau_base)
     self.tau_base = tau_base
 
   def unroll(self,
@@ -139,6 +150,7 @@ class AutoregressivePredictor:
     batch_size = u_inp.shape[0]
     num_grid_nodes = u_inp.shape[2:4]
     num_outputs = u_inp.shape[-1]
+    t_inp = t_inp.astype(float)
     random = (key is not None)
     if not random:
       key, _ = jax.random.split(jax.random.PRNGKey(0))  # NOTE: It won't be used
@@ -227,6 +239,7 @@ class AutoregressivePredictor:
   ) -> Array:
     """Takes num_jumps large steps, each of length num_steps_direct."""
 
+    t_inp = t_inp.astype(float)
     random = (key is not None)
     if not random:
       key, _ = jax.random.split(jax.random.PRNGKey(0))  # Won't be used

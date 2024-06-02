@@ -22,9 +22,9 @@
     * With or without scheduling `direct_steps`?
 
 - Remove periodic connections and try again with wave_equation datasets
+    * Concatenate a feature for the boundary nodes
 
 - Continuous-discrete equivariance
-    * Implement input-output grids with different resolutions
     * Make derivatives invariant of the grid resolution
     * Implement edge masking in the processor
     * Mask the nodes during training (p_max=0.5)
@@ -33,11 +33,16 @@
         - Weighted average of the messages with distances as weights
     * If you're too misreable, plot the edge connections to be absolutely sure about them
 
-- Investigate performance with other resolutions
+- Investigate performance with other resolutions (Check E251)
     * Train with 64x64
     * Large overlap factors (4 or 8)
     * Remove grid message-passing
     * Remove spatial derivative concatentaion
+    - Also check the effect of changing mesh resolution
+
+- Move evaluations and plots to a script
+    * Create a test set in Dataset
+    * Add downsampling in Dataset
 
 - Reproduce experiments for reporting in the thesis
     * pull the latest version

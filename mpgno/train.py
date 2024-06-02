@@ -189,8 +189,8 @@ def train(
   normalizer = OperatorNormalizer(operator=model)
   predictor = AutoregressivePredictor(
     normalizer=normalizer,
-    num_steps_direct=direct_steps,
-    tau_base=jump_steps
+    tau_max=direct_steps,
+    tau_base=1.,
   )
 
   # Set the normalization statistics
