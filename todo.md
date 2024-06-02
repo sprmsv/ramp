@@ -25,7 +25,6 @@
     * Concatenate a feature for the boundary nodes
 
 - Continuous-discrete equivariance
-    * Make derivatives invariant of the grid resolution
     * Implement edge masking in the processor
     * Mask the nodes during training (p_max=0.5)
         - This masking "can" be different in the encoder and the decoder
@@ -37,7 +36,6 @@
     * Train with 64x64
     * Large overlap factors (4 or 8)
     * Remove grid message-passing
-    * Remove spatial derivative concatentaion
     - Also check the effect of changing mesh resolution
 
 - Move evaluations and plots to a script

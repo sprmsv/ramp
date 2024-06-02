@@ -463,7 +463,9 @@ class MPGNO(AbstractOperator):
         t_inp = jnp.tile(t_inp.reshape(1, 1), reps=(batch_size, 1))
 
     # Calculate, normalize, and concatenate derivatives
+    # TODO: Remove  # NOTE: Not compatible with unstructured grids
     # TODO: Make normalization invariant to the grid resolution
+    assert self.deriv_degree == 0
     if self.deriv_degree:
       d_inp = compute_derivatives(traj=u_inp, degree=self.deriv_degree)
       d_inp = normalize(

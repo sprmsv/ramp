@@ -99,7 +99,7 @@ flags.DEFINE_integer(name='n_valid', default=(2**8), required=False,
 flags.DEFINE_integer(name='num_mesh_nodes', default=64, required=False,
   help='Number of mesh nodes in each dimension'
 )
-flags.DEFINE_integer(name='deriv_degree', default=2, required=False,
+flags.DEFINE_integer(name='deriv_degree', default=0, required=False,
   help='Maximum degree of auxiliary partial derivatives'
 )
 flags.DEFINE_float(name='overlap_factor_grid2mesh', default=2.0, required=False,
