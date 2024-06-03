@@ -99,6 +99,9 @@ flags.DEFINE_integer(name='n_valid', default=(2**8), required=False,
 )
 
 # FLAGS::model
+flags.DEFINE_string(name='stepper', default='der', required=False,
+  help='Type of the stepper'
+)
 flags.DEFINE_integer(name='num_mesh_nodes', default=64, required=False,
   help='Number of mesh nodes in each dimension'
 )
@@ -186,7 +189,14 @@ def train(
   lead_times = jnp.arange(unroll_offset, num_times - 1)
 
   # Define the autoregressive predictor
-  stepper = ResidualUpdater(operator=model)
+  if FLAGS.stepper == 'der':
+    stepper = TimeDerivativeUpdater(operator=model)
+  elif FLAGS.stepper == 'res':
+    stepper = ResidualUpdater(operator=model)
+  elif FLAGS.stepper == 'out':
+    stepper = OutputUpdater(operator=model)
+  else:
+    raise ValueError
   predictor = AutoregressiveStepper(
     stepper=stepper,
     tau_max=direct_steps,
