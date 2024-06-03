@@ -10,8 +10,7 @@ from mpgno.graph.typed_graph import (
     TypedGraph, EdgeSet, EdgeSetKey,
     EdgesIndices, NodeSet, Context)
 from mpgno.models.deep_typed_graph_net import DeepTypedGraphNet
-from mpgno.models.utils import compute_derivatives
-from mpgno.utils import Array, normalize, shuffle_arrays
+from mpgno.utils import Array, shuffle_arrays
 
 
 class AbstractOperator(nn.Module):

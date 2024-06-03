@@ -20,7 +20,10 @@ from flax.jax_utils import replicate, unreplicate
 import orbax.checkpoint
 
 from mpgno.experiments import DIR_EXPERIMENTS
-from mpgno.autoregressive import AutoregressivePredictor, OperatorNormalizer
+from mpgno.stepping import AutoregressiveStepper
+from mpgno.stepping import TimeDerivativeUpdater
+from mpgno.stepping import ResidualUpdater
+from mpgno.stepping import OutputUpdater
 from mpgno.dataset import Dataset
 from mpgno.models.mpgno import MPGNO, AbstractOperator
 from mpgno.utils import disable_logging, Array, shuffle_arrays, split_arrays, normalize
@@ -183,9 +186,9 @@ def train(
   lead_times = jnp.arange(unroll_offset, num_times - 1)
 
   # Define the autoregressive predictor
-  normalizer = OperatorNormalizer(operator=model)
-  predictor = AutoregressivePredictor(
-    normalizer=normalizer,
+  stepper = ResidualUpdater(operator=model)
+  predictor = AutoregressiveStepper(
+    stepper=stepper,
     tau_max=direct_steps,
     tau_base=1.,
   )
@@ -267,7 +270,7 @@ def train(
 
           # Get the output
           key, subkey = jax.random.split(key)
-          _loss_inputs = normalizer.get_loss_inputs(
+          _loss_inputs = stepper.get_loss_inputs(
             variables=variables,
             stats=stats,
             specs=specs,
@@ -546,7 +549,7 @@ def train(
     def get_direct_errors(lt, carry):
       carry = BatchMetrics(**carry)
       def get_direct_prediction(tau, forcing):
-        u_prd = normalizer.apply(
+        u_prd = stepper.apply(
           variables={'params': state.params},
           stats=stats,
           specs=(specs[lt] if _use_specs else None),

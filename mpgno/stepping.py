@@ -1,3 +1,5 @@
+from abc import ABC, abstractmethod
+
 import jax
 import jax.numpy as jnp
 import flax.typing
@@ -6,10 +8,49 @@ from mpgno.utils import Array, normalize, unnormalize
 from mpgno.models.mpgno import AbstractOperator
 
 
-class OperatorNormalizer:
+class Stepper(ABC):
 
   def __init__(self, operator: AbstractOperator):
     self._apply_operator = operator.apply
+
+  @abstractmethod
+  def apply(self,
+    variables,
+    stats,
+    specs: Array,
+    u_inp: Array,
+    t_inp: Array,
+    tau: Array,
+    key: flax.typing.PRNGKey = None,
+  ):
+    """
+    Normalizes raw inputs and applies the operator on it.
+
+    t_inp is the time of the input and must be a non-negative integer.
+    tau is the time difference and must be an integer greater than zero.
+    """
+    pass
+
+  @abstractmethod
+  def get_loss_inputs(self,
+    variables,
+    stats,
+    specs: Array,
+    u_inp: Array,
+    t_inp: Array,
+    u_tgt: Array,
+    tau: Array,
+    key: flax.typing.PRNGKey = None,
+  ):
+    """
+    Calculates prediction and target variables, ready to be given as input to the loss function.
+
+    t_inp is the time of the input and must be a non-negative integer.
+    tau is the time difference and must be an integer greater than zero.
+    """
+    pass
+
+class TimeDerivativeUpdater(Stepper):
 
   def apply(self,
     variables,
@@ -37,7 +78,7 @@ class OperatorNormalizer:
     tau_nrm = tau / stats['time']['max']
     t_inp_nrm = t_inp / stats['time']['max']
 
-    # Get predicted normalized derivative
+    # Get predicted normalized derivatives
     d_prd_nrm = self._apply_operator(
       variables,
       specs=specs,
@@ -47,11 +88,11 @@ class OperatorNormalizer:
       key=key,
     )
 
-    # Unnormalize predicted residuals
+    # Unnormalize predicted derivatives
     d_prd = unnormalize(
       d_prd_nrm,
-      mean=stats['res']['mean'],
-      std=stats['res']['std'],
+      mean=stats['der']['mean'],
+      std=stats['der']['std'],
     )
 
     # Get predicted output
@@ -86,7 +127,7 @@ class OperatorNormalizer:
     tau_nrm = tau / stats['time']['max']
     t_inp_nrm = t_inp / stats['time']['max']
 
-    # Get predicted normalized residuals
+    # Get predicted normalized derivatives
     d_prd_nrm = self._apply_operator(
       variables,
       specs=specs,
@@ -96,30 +137,220 @@ class OperatorNormalizer:
       key=key,
     )
 
-    # Get target normalized residuals
+    # Get target normalized derivatives
     d_tgt = (u_tgt - u_inp) / tau
     d_tgt_nrm = normalize(
       d_tgt,
-      shift=stats['res']['mean'],
-      scale=stats['res']['std'],
+      shift=stats['der']['mean'],
+      scale=stats['der']['std'],
     )
 
     return (d_prd_nrm, d_tgt_nrm)
 
-class AutoregressivePredictor:
+class ResidualUpdater(Stepper):
 
-  def __init__(self, normalizer: OperatorNormalizer, tau_max: float = 1., tau_base: float = 1.):
+  def apply(self,
+    variables,
+    stats,
+    specs: Array,
+    u_inp: Array,
+    t_inp: Array,
+    tau: Array,
+    key: flax.typing.PRNGKey = None,
+  ):
+    """
+    Normalizes raw inputs and applies the operator on it.
+
+    t_inp is the time of the input and must be a non-negative integer.
+    tau is the time difference and must be an integer greater than zero.
+    """
+
+    # Normalize inputs
+    # TODO: Normalize specs
+    u_inp_nrm = normalize(
+      u_inp,
+      shift=stats['trj']['mean'],
+      scale=stats['trj']['std'],
+    )
+    tau_nrm = tau / stats['time']['max']
+    t_inp_nrm = t_inp / stats['time']['max']
+
+    # Get predicted normalized derivative
+    r_prd_nrm = self._apply_operator(
+      variables,
+      specs=specs,
+      u_inp=u_inp_nrm,
+      t_inp=t_inp_nrm,
+      tau=tau_nrm,
+      key=key,
+    )
+
+    # Unnormalize predicted residuals
+    r_prd = unnormalize(
+      r_prd_nrm,
+      mean=stats['res']['mean'],
+      std=stats['res']['std'],
+    )
+
+    # Get predicted output
+    u_prd = u_inp + r_prd
+
+    return u_prd
+
+  def get_loss_inputs(self,
+    variables,
+    stats,
+    specs: Array,
+    u_inp: Array,
+    t_inp: Array,
+    u_tgt: Array,
+    tau: Array,
+    key: flax.typing.PRNGKey = None,
+  ):
+    """
+    Calculates prediction and target variables, ready to be given as input to the loss function.
+
+    t_inp is the time of the input and must be a non-negative integer.
+    tau is the time difference and must be an integer greater than zero.
+    """
+
+    # Normalize inputs
+    # TODO: Normalize specs
+    u_inp_nrm = normalize(
+      u_inp,
+      shift=stats['trj']['mean'],
+      scale=stats['trj']['std'],
+    )
+    tau_nrm = tau / stats['time']['max']
+    t_inp_nrm = t_inp / stats['time']['max']
+
+    # Get predicted normalized residuals
+    r_prd_nrm = self._apply_operator(
+      variables,
+      specs=specs,
+      u_inp=u_inp_nrm,
+      t_inp=t_inp_nrm,
+      tau=tau_nrm,
+      key=key,
+    )
+
+    # Get target normalized residuals
+    r_tgt = u_tgt - u_inp
+    r_tgt_nrm = normalize(
+      r_tgt,
+      shift=stats['res']['mean'],
+      scale=stats['res']['std'],
+    )
+
+    return (r_prd_nrm, r_tgt_nrm)
+
+class OutputUpdater(Stepper):
+
+  def apply(self,
+    variables,
+    stats,
+    specs: Array,
+    u_inp: Array,
+    t_inp: Array,
+    tau: Array,
+    key: flax.typing.PRNGKey = None,
+  ):
+    """
+    Normalizes raw inputs and applies the operator on it.
+
+    t_inp is the time of the input and must be a non-negative integer.
+    tau is the time difference and must be an integer greater than zero.
+    """
+
+    # Normalize inputs
+    # TODO: Normalize specs
+    u_inp_nrm = normalize(
+      u_inp,
+      shift=stats['trj']['mean'],
+      scale=stats['trj']['std'],
+    )
+    tau_nrm = tau / stats['time']['max']
+    t_inp_nrm = t_inp / stats['time']['max']
+
+    # Get predicted normalized output
+    u_prd_nrm = self._apply_operator(
+      variables,
+      specs=specs,
+      u_inp=u_inp_nrm,
+      t_inp=t_inp_nrm,
+      tau=tau_nrm,
+      key=key,
+    )
+
+    # Unnormalize predicted output
+    u_prd = unnormalize(
+      u_prd_nrm,
+      mean=stats['trj']['mean'],
+      std=stats['trj']['std'],
+    )
+
+    return u_prd
+
+  def get_loss_inputs(self,
+    variables,
+    stats,
+    specs: Array,
+    u_inp: Array,
+    t_inp: Array,
+    u_tgt: Array,
+    tau: Array,
+    key: flax.typing.PRNGKey = None,
+  ):
+    """
+    Calculates prediction and target variables, ready to be given as input to the loss function.
+
+    t_inp is the time of the input and must be a non-negative integer.
+    tau is the time difference and must be an integer greater than zero.
+    """
+
+    # Normalize inputs
+    # TODO: Normalize specs
+    u_inp_nrm = normalize(
+      u_inp,
+      shift=stats['trj']['mean'],
+      scale=stats['trj']['std'],
+    )
+    tau_nrm = tau / stats['time']['max']
+    t_inp_nrm = t_inp / stats['time']['max']
+
+    # Get predicted normalized output
+    u_prd_nrm = self._apply_operator(
+      variables,
+      specs=specs,
+      u_inp=u_inp_nrm,
+      t_inp=t_inp_nrm,
+      tau=tau_nrm,
+      key=key,
+    )
+
+    # Get target normalized output
+    u_tgt_nrm = normalize(
+      u_tgt,
+      shift=stats['trj']['mean'],
+      scale=stats['trj']['std'],
+    )
+
+    return (u_prd_nrm, u_tgt_nrm)
+
+class AutoregressiveStepper:
+
+  def __init__(self, stepper: Stepper, tau_max: float = 1., tau_base: float = 1.):
     """
     Class for autoregressive inferrence of an operator.
 
     Args:
-        normalizer: The operator.
+        stepper: Uses an operator with proper stepping method.
         tau_max: Maximum time delta of direct predictions with respect to the time resolution of the trained model. Defaults to 1.
         tau_base: Time resolution of the output with respect to the time resolution of the trained model. Defaults to 1.
     """
 
     # FIXME: Maybe we can benefit from checkpointing scan_fn instead
-    self._apply_operator = jax.checkpoint(normalizer.apply)
+    self._apply_operator = jax.checkpoint(stepper.apply)
     assert tau_max >= tau_base
     assert tau_max % tau_base == 0
     self.num_steps_direct = int(tau_max / tau_base)

@@ -261,26 +261,24 @@ class Dataset:
     self.stats['trj']['mean'] = np.mean(trj, axis=axes, keepdims=True)
     self.stats['trj']['std'] = np.std(trj, axis=axes, keepdims=True)
 
-    # Compute statistics of the derivatives
-    if derivs_degree > 0:
-      trj_nrm = normalize(trj, shift=self.stats['trj']['mean'], scale=self.stats['trj']['std'])
-      trj_nrm_der = compute_derivatives(trj_nrm, degree=derivs_degree)
-      self.stats['der']['mean'] = np.mean(trj_nrm_der, axis=axes, keepdims=True)
-      self.stats['der']['std'] = np.std(trj_nrm_der, axis=axes, keepdims=True)
-
-    # Compute statistics of the residuals
+    # Compute statistics of the residuals and time derivatives
     # TRY: Compute statistics of residuals of normalized trajectories
-    _get_res = lambda s, trj: (trj[:, (s):] - trj[:, :-(s)]) / s
+    _get_res = lambda s, trj: (trj[:, (s):] - trj[:, :-(s)])
     residuals = []
+    derivatives = []
     for s in range(1, residual_steps+1):
       if (s % skip_residual_steps):
         continue
       res = _get_res(s, trj)
       residuals.append(res)
+      derivatives.append(res / s)
     residuals = np.concatenate(residuals, axis=1)
+    derivatives = np.concatenate(derivatives, axis=1)
 
     self.stats['res']['mean'] = np.mean(residuals, axis=axes, keepdims=True)
     self.stats['res']['std'] = np.std(residuals, axis=axes, keepdims=True)
+    self.stats['der']['mean'] = np.mean(derivatives, axis=axes, keepdims=True)
+    self.stats['der']['std'] = np.std(derivatives, axis=axes, keepdims=True)
 
   def _fetch(self, idx: Union[int, Sequence], raw: bool = False):
     """Fetches a sample from the dataset, given its global index."""
