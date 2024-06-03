@@ -99,9 +99,6 @@ flags.DEFINE_integer(name='n_valid', default=(2**8), required=False,
 flags.DEFINE_integer(name='num_mesh_nodes', default=64, required=False,
   help='Number of mesh nodes in each dimension'
 )
-flags.DEFINE_integer(name='deriv_degree', default=0, required=False,
-  help='Maximum degree of auxiliary partial derivatives'
-)
 flags.DEFINE_float(name='overlap_factor_grid2mesh', default=2.0, required=False,
   help='Overlap factor for grid2mesh edges (encoder)'
 )
@@ -1033,7 +1030,6 @@ def main(argv):
       concatenate_t=True,
       conditional_normalization=False,
       conditional_norm_latent_size=16,
-      deriv_degree=FLAGS.deriv_degree,
       latent_size=FLAGS.latent_size,
       num_mlp_hidden_layers=FLAGS.num_mlp_hidden_layers,
       num_message_passing_steps=FLAGS.num_message_passing_steps,

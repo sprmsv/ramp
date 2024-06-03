@@ -40,7 +40,6 @@ class MPGNO(AbstractOperator):
   concatenate_tau: bool = True
   conditional_normalization: bool = False
   conditional_norm_latent_size: int = 16
-  deriv_degree: int = 0
   latent_size: int = 128
   num_mlp_hidden_layers: int = 2
   num_message_passing_steps: int = 18
@@ -451,19 +450,6 @@ class MPGNO(AbstractOperator):
       t_inp = jnp.array(t_inp, dtype=jnp.float32)
       if t_inp.size == 1:
         t_inp = jnp.tile(t_inp.reshape(1, 1), reps=(batch_size, 1))
-
-    # Calculate, normalize, and concatenate derivatives
-    # TODO: Remove  # NOTE: Not compatible with unstructured grids
-    # TODO: Make normalization invariant to the grid resolution
-    assert self.deriv_degree == 0
-    if self.deriv_degree:
-      d_inp = compute_derivatives(traj=u_inp, degree=self.deriv_degree)
-      d_inp = normalize(
-        arr=d_inp,
-        shift=0.,
-        scale=jnp.max(jnp.abs(d_inp), axis=(2, 3), keepdims=True),
-      )
-      u_inp = jnp.concatenate([u_inp, d_inp], axis=-1)
 
     # Prepare the grid node features
     # u -> [num_grid_nodes, batch_size, num_inputs]
