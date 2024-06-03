@@ -111,9 +111,7 @@ class DeepTypedGraphNet(nn.Module):
   include_sent_messages_in_node_update: bool = False
   use_layer_norm: bool = True
   conditional_normalization: bool = False
-  conditional_norm_latent_size: int = 4
-  conditional_norm_unique: bool = True
-  conditional_norm_nonlinear: bool = True
+  conditional_norm_latent_size: int = 16
   activation: str = 'relu'
   f32_aggregation: bool = False
   aggregate_edges_for_nodes_fn: str = 'segment_mean'
@@ -198,8 +196,6 @@ class DeepTypedGraphNet(nn.Module):
             use_layer_norm=self.use_layer_norm,
             use_conditional_norm=self.conditional_normalization,
             conditional_norm_latent_size=self.conditional_norm_latent_size,
-            conditional_norm_unique=self.conditional_norm_unique,
-            conditional_norm_nonlinear=self.conditional_norm_nonlinear,
             name=f'processor_{step_i}_edges_{edge_set_name}',
           )
           for edge_set_name in self.edge_latent_size.keys()
@@ -214,8 +210,6 @@ class DeepTypedGraphNet(nn.Module):
             use_layer_norm=self.use_layer_norm,
             use_conditional_norm=self.conditional_normalization,
             conditional_norm_latent_size=self.conditional_norm_latent_size,
-            conditional_norm_unique=self.conditional_norm_unique,
-            conditional_norm_nonlinear=self.conditional_norm_nonlinear,
             name=f'processor_{step_i}_nodes_{node_set_name}',
           )
           for node_set_name in self.node_latent_size.keys()

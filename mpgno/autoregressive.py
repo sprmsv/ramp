@@ -27,18 +27,12 @@ class OperatorNormalizer:
     tau is the time difference and must be an integer greater than zero.
     """
 
-    # Get the corresponding the global statistics
-    stats_trj_mean = stats['trj']['mean']
-    stats_trj_std = stats['trj']['std']
-    stats_res_mean = stats['res']['mean']
-    stats_res_std = stats['res']['std']
-
     # Normalize inputs
     # TODO: Normalize specs
     u_inp_nrm = normalize(
       u_inp,
-      shift=stats_trj_mean,
-      scale=stats_trj_std,
+      shift=stats['trj']['mean'],
+      scale=stats['trj']['std'],
     )
     tau_nrm = tau / stats['time']['max']
     t_inp_nrm = t_inp / stats['time']['max']
@@ -56,8 +50,8 @@ class OperatorNormalizer:
     # Unnormalize predicted residuals
     d_prd = unnormalize(
       d_prd_nrm,
-      mean=stats_res_mean,
-      std=stats_res_std,
+      mean=stats['res']['mean'],
+      std=stats['res']['std'],
     )
 
     # Get predicted output
@@ -82,18 +76,12 @@ class OperatorNormalizer:
     tau is the time difference and must be an integer greater than zero.
     """
 
-    # Get the corresponding the global statistics
-    stats_trj_mean = stats['trj']['mean']
-    stats_trj_std = stats['trj']['std']
-    stats_res_mean = stats['res']['mean']
-    stats_res_std = stats['res']['std']
-
     # Normalize inputs
     # TODO: Normalize specs
     u_inp_nrm = normalize(
       u_inp,
-      shift=stats_trj_mean,
-      scale=stats_trj_std,
+      shift=stats['trj']['mean'],
+      scale=stats['trj']['std'],
     )
     tau_nrm = tau / stats['time']['max']
     t_inp_nrm = t_inp / stats['time']['max']
@@ -112,8 +100,8 @@ class OperatorNormalizer:
     d_tgt = (u_tgt - u_inp) / tau
     d_tgt_nrm = normalize(
       d_tgt,
-      shift=stats_res_mean,
-      scale=stats_res_std,
+      shift=stats['res']['mean'],
+      scale=stats['res']['std'],
     )
 
     return (d_prd_nrm, d_tgt_nrm)

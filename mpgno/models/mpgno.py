@@ -39,9 +39,7 @@ class MPGNO(AbstractOperator):
   use_t: bool = True
   use_tau: bool = True
   conditional_normalization: bool = False
-  conditional_norm_latent_size: int = 4,
-  conditional_norm_unique: bool = True,
-  conditional_norm_nonlinear: bool = True,
+  conditional_norm_latent_size: int = 16
   deriv_degree: int = 0
   latent_size: int = 128
   num_mlp_hidden_layers: int = 2
@@ -173,8 +171,6 @@ class MPGNO(AbstractOperator):
       use_layer_norm=True,
       conditional_normalization=self.conditional_normalization,
       conditional_norm_latent_size=self.conditional_norm_latent_size,
-      conditional_norm_unique=self.conditional_norm_unique,
-      conditional_norm_nonlinear=self.conditional_norm_nonlinear,
       include_sent_messages_in_node_update=False,
       activation='swish',
       f32_aggregation=True,
@@ -195,8 +191,6 @@ class MPGNO(AbstractOperator):
       use_layer_norm=True,
       conditional_normalization=self.conditional_normalization,
       conditional_norm_latent_size=self.conditional_norm_latent_size,
-      conditional_norm_unique=self.conditional_norm_unique,
-      conditional_norm_nonlinear=self.conditional_norm_nonlinear,
       include_sent_messages_in_node_update=False,
       activation='swish',
       f32_aggregation=False,
@@ -217,8 +211,6 @@ class MPGNO(AbstractOperator):
       use_layer_norm=True,
       conditional_normalization=self.conditional_normalization,
       conditional_norm_latent_size=self.conditional_norm_latent_size,
-      conditional_norm_unique=self.conditional_norm_unique,
-      conditional_norm_nonlinear=self.conditional_norm_nonlinear,
       include_sent_messages_in_node_update=False,
       activation='swish',
       f32_aggregation=False,
@@ -241,8 +233,6 @@ class MPGNO(AbstractOperator):
       use_layer_norm=True,
       conditional_normalization=self.conditional_normalization,
       conditional_norm_latent_size=self.conditional_norm_latent_size,
-      conditional_norm_unique=self.conditional_norm_unique,
-      conditional_norm_nonlinear=self.conditional_norm_nonlinear,
       include_sent_messages_in_node_update=False,
       activation='swish',
       f32_aggregation=False,

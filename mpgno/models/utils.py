@@ -45,8 +45,6 @@ class AugmentedMLP(nn.Module):
   use_layer_norm: bool = False
   use_conditional_norm: bool = False
   conditional_norm_latent_size: int = 4
-  conditional_norm_unique: bool = True
-  conditional_norm_nonlinear: bool = True
   concatenate_axis: int = -1
 
   def setup(self):
@@ -64,15 +62,10 @@ class AugmentedMLP(nn.Module):
     # Set conditional normalization layer
     self.correction = None
     if self.use_conditional_norm:
-      if self.conditional_norm_nonlinear:
-        self.correction = LearnedCorrection(
-          latent_size=self.conditional_norm_latent_size,
-          correction_size=(1 if self.conditional_norm_unique else self.layer_sizes[-1]),
-        )
-      else:
-        self.correction = LinearLearnedCorrection(
-          correction_size=(1 if self.conditional_norm_unique else self.layer_sizes[-1]),
-        )
+      self.correction = ConditionedNorm(
+        latent_size=self.conditional_norm_latent_size,
+        correction_size=self.layer_sizes[-1],
+      )
 
   def __call__(self, *args, c = None, **kwargs):
     x = concatenate_args(args=args, kwargs=kwargs, axis=self.concatenate_axis)
@@ -87,7 +80,7 @@ class AugmentedMLP(nn.Module):
       x = self.correction(c=c, x=x)
     return x
 
-class LearnedCorrection(nn.Module):
+class ConditionedNorm(nn.Module):
   """
   Learned correction layer is designed to be applied after a normalization layer.
   Based on an input (e.g., time delta), it shifts and scales the distribution of its input.
@@ -120,7 +113,7 @@ class LearnedCorrection(nn.Module):
     bias = c * self.mlp_bias(c)
     return x * scale + bias
 
-class LinearLearnedCorrection(nn.Module):
+class LinearConditionedNorm(nn.Module):
   """
   Learned correction layer is designed to be applied after a normalization layer.
   Based on an input (e.g., time delta), it shifts and scales the distribution of its input.
