@@ -1,21 +1,8 @@
 # NEXT STEPS
 
 - Evaluate time inter- and extrapolation::
-    - Pick the conditional normalization mode
-        * No cond_norm
-        * Nonlinear + unique output
-        * Nonlinear + non-unique output
-        * Linear + unique output
-        * Linear + non-unique output
-
-    - Compare d=1 with d=4 and d=7
-
-    - Prune the use of conditional normalization
-        * Turn off at encoder/processor/decoder
-        * Switch off at message/aggregation MLPs
-        * Tune latent_size
-        * Try use_t=off and/or use_tau=off
-        * Try concatenating tau to the edges
+    - Compare D=1 with D=4 and D=7
+    * Try concatenate_t=off and/or concatenate_tau=off
 
 - Evaluate the effect of `direct_steps` on the final error
     * Compare the final performance with `direct_steps=1`

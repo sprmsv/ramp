@@ -36,8 +36,8 @@ class MPGNO(AbstractOperator):
   num_outputs: int
   num_grid_nodes: Sequence[int]
   num_mesh_nodes: Sequence[int]
-  use_t: bool = True
-  use_tau: bool = True
+  concatenate_t: bool = True
+  concatenate_tau: bool = True
   conditional_normalization: bool = False
   conditional_norm_latent_size: int = 16
   deriv_degree: int = 0
@@ -441,12 +441,12 @@ class MPGNO(AbstractOperator):
       assert specs.ndim == 2  # [batch_size, num_params]
       assert specs.shape[0] == batch_size
 
-    if self.use_tau:
+    if self.concatenate_tau:
       assert tau is not None
       tau = jnp.array(tau, dtype=jnp.float32)
       if tau.size == 1:
         tau = jnp.tile(tau.reshape(1, 1), reps=(batch_size, 1))
-    if self.use_t:
+    if self.concatenate_t:
       assert t_inp is not None
       t_inp = jnp.array(t_inp, dtype=jnp.float32)
       if t_inp.size == 1:
@@ -473,10 +473,10 @@ class MPGNO(AbstractOperator):
     ).reshape(self._num_grid_nodes_tot, batch_size, -1)
     # Concatente with forced features
     grid_node_features_forced = []
-    if self.use_tau:
+    if self.concatenate_tau:
       grid_node_features_forced.append(
         jnp.tile(tau, reps=(self._num_grid_nodes_tot, 1, 1)))
-    if self.use_t:
+    if self.concatenate_t:
       grid_node_features_forced.append(
         jnp.tile(t_inp, reps=(self._num_grid_nodes_tot, 1, 1)))
     if specs is not None:
