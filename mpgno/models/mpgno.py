@@ -48,6 +48,7 @@ class MPGNO(AbstractOperator):
   num_multimesh_levels: int = 1
   node_coordinate_freqs: int = 1
   p_dropout_edges_grid2mesh: int = 0.
+  p_dropout_edges_multimesh: int = 0.
   p_dropout_edges_mesh2grid: int = 0.
 
   def setup(self):
@@ -469,8 +470,8 @@ class MPGNO(AbstractOperator):
 
     # Run message-passing in the multimesh.
     # -> [num_mesh_nodes, batch_size, latent_size]
-    # TRY: Add edge dropout
-    updated_latent_mesh_nodes = self._run_mesh_gnn(latent_mesh_nodes, tau)
+    subkey, key = jax.random.split(key) if (key is not None) else (None, None)
+    updated_latent_mesh_nodes = self._run_mesh_gnn(latent_mesh_nodes, tau, key=subkey)
 
     # Transfer data from the mesh to the grid.
     # -> [num_grid_nodes, batch_size, latent_size]
@@ -572,7 +573,8 @@ class MPGNO(AbstractOperator):
 
   def _run_mesh_gnn(self,
     latent_mesh_nodes: Array,
-    tau: float
+    tau: float,
+    key: flax.typing.PRNGKey = None,
   ) -> Array:
     """Runs the mesh_gnn, extracting updated latent mesh nodes."""
 
@@ -582,27 +584,49 @@ class MPGNO(AbstractOperator):
     # Replace the node features
     # NOTE: We don't need to add the structural node features, because these are
     # already part of  the latent state, via the original Grid2Mesh gnn.
-    nodes = mesh_graph.nodes['mesh_nodes']
-    nodes = nodes._replace(features=latent_mesh_nodes)
+    mesh_nodes = mesh_graph.nodes['mesh_nodes']
+    new_mesh_nodes = mesh_nodes._replace(features=latent_mesh_nodes)
 
-    # Add the structural edge features of this graph.
-    # NOTE: We need the structural edge features, because it is the first
-    # time we are seeing this particular set of edges.
+    # Get edges
     mesh_edges_key = mesh_graph.edge_key_by_name('mesh')
-    # We are assuming here that the mesh gnn uses a single set of edge keys
-    # named 'mesh' for the edges and that it uses a single set of nodes named
-    # 'mesh_nodes'
+    # NOTE: We are assuming here that the mesh gnn uses a single set of edge keys
+    # named 'mesh' for the edges and that it uses a single set of nodes named 'mesh_nodes'
     msg = ('The setup currently requires to only have one kind of edge in the mesh GNN.')
     assert len(mesh_graph.edges) == 1, msg
     edges = mesh_graph.edges[mesh_edges_key]
-    new_edges = edges._replace(
-      features=_add_batch_second_axis(
-        edges.features.astype(latent_mesh_nodes.dtype), bsz)
+    # Drop out edges randomly with the given probability
+    # NOTE: We need the structural edge features, because it is the first
+    # time we are seeing this particular set of edges.
+    if key is not None:
+      n_edges_after = int((1 - self.p_dropout_edges_multimesh) * edges.features.shape[0])
+      [new_edge_features, new_edge_senders, new_edge_receivers] = shuffle_arrays(
+        key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers])
+      new_edge_features = new_edge_features[:n_edges_after]
+      new_edge_senders = new_edge_senders[:n_edges_after]
+      new_edge_receivers = new_edge_receivers[:n_edges_after]
+    else:
+      n_edges_after = edges.features.shape[0]
+      new_edge_features = edges.features
+      new_edge_senders = edges.indices.senders
+      new_edge_receivers = edges.indices.receivers
+    # Change edge feature dtype
+    new_edge_features = new_edge_features.astype(latent_mesh_nodes.dtype)
+    # Broadcast edge structural features to the required batch size
+    new_edge_features = _add_batch_second_axis(new_edge_features, bsz)
+    # Build new edge set
+    new_edges = EdgeSet(
+      n_edge=jnp.array([n_edges_after]),
+      indices=EdgesIndices(
+        senders=new_edge_senders,
+        receivers=new_edge_receivers,
+      ),
+      features=new_edge_features,
     )
 
     # Build the graph
     input_graph = mesh_graph._replace(
-      edges={mesh_edges_key: new_edges}, nodes={'mesh_nodes': nodes}
+      edges={mesh_edges_key: new_edges},
+      nodes={'mesh_nodes': new_mesh_nodes},
     )
 
     # Run the GNN

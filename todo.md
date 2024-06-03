@@ -11,8 +11,10 @@
 - Remove periodic connections and try again with wave_equation datasets
     * Concatenate a feature for the boundary nodes
 
+- Investigate the effect of edge masking with OF=4 on the final error
+    * grid2mesh, multimesh, mesh2grid
+
 - Continuous-discrete equivariance
-    * Implement edge masking in the processor
     * Mask the nodes during training (p_max=0.5)
         - This masking "can" be different in the encoder and the decoder
     * Use edge length in the message-passing

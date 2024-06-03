@@ -121,11 +121,14 @@ flags.DEFINE_integer(name='num_mlp_hidden_layers', default=1, required=False,
 flags.DEFINE_integer(name='num_message_passing_steps', default=18, required=False,
   help='Number of message-passing steps in the processor'
 )
-flags.DEFINE_integer(name='num_message_passing_steps_grid', default=2, required=False,
+flags.DEFINE_integer(name='num_message_passing_steps_grid', default=0, required=False,
   help='Number of message-passing steps in the decoder'
 )
 flags.DEFINE_float(name='p_dropout_edges_grid2mesh', default=0.5, required=False,
   help='Probability of dropping out edges of grid2mesh'
+)
+flags.DEFINE_float(name='p_dropout_edges_multimesh', default=0, required=False,
+  help='Probability of dropping out edges of the multi-mesh'
 )
 flags.DEFINE_float(name='p_dropout_edges_mesh2grid', default=0., required=False,
   help='Probability of dropping out edges of mesh2grid'
@@ -980,6 +983,7 @@ def main(argv):
       num_multimesh_levels=FLAGS.num_multimesh_levels,
       node_coordinate_freqs=FLAGS.node_coordinate_freqs,
       p_dropout_edges_grid2mesh=FLAGS.p_dropout_edges_grid2mesh,
+      p_dropout_edges_multimesh=FLAGS.p_dropout_edges_multimesh,
       p_dropout_edges_mesh2grid=FLAGS.p_dropout_edges_mesh2grid,
     )
   model = get_model(model_kwargs)
