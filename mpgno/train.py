@@ -34,11 +34,11 @@ from mpgno.metrics import rel_l1_error_sum_vars, rel_l2_error_sum_vars
 
 
 NUM_DEVICES = jax.local_device_count()
-
-TIME_DOWNSAMPLE_FACTOR = 2
-IDX_FN = 7
-
 EVAL_FREQ = 50
+
+IDX_FN = 7
+TIME_DOWNSAMPLE_FACTOR = 2
+SPACE_DOWNSAMPLE_FACTOR = 1
 
 # FLAGS::general
 FLAGS = flags.FLAGS
@@ -947,6 +947,7 @@ def main(argv):
     n_train=FLAGS.n_train,
     n_valid=FLAGS.n_valid,
     time_downsample_factor=TIME_DOWNSAMPLE_FACTOR,
+    space_downsample_factor=SPACE_DOWNSAMPLE_FACTOR,
     cutoff=(IDX_FN + 1),
     preload=True,
     include_passive_variables=False,
