@@ -1,12 +1,12 @@
 # NEXT STEPS
 
-- Evaluate time inter- and extrapolation::
-    - Compare D=1 with D=4 and D=7
-    * Try concatenate_t=off and/or concatenate_tau=off
+- (Repeat and) check E260
+    - Evaluate time inter- and extrapolation::
+        - Compare D=1 with D=4 and D=7
+        * Try concatenate_t=off and/or concatenate_tau=off
 
-- Evaluate the effect of `direct_steps` on the final error
-    * Compare the final performance with `direct_steps=1`
-    * With or without scheduling `direct_steps`?
+    - Evaluate the effect of `direct_steps` on the final error
+        * Compare the final performance with `direct_steps=1`
 
 - Remove periodic connections and try again with wave_equation datasets
     * Concatenate a feature for the boundary nodes
@@ -21,7 +21,7 @@
         - Weighted average of the messages with distances as weights
     * If you're too misreable, plot the edge connections to be absolutely sure about them
 
-- Investigate performance with other resolutions (Check E251)
+- Investigate performance with other resolutions
     * Train with 64x64
     * Large overlap factors (4 or 8)
     * Remove grid message-passing

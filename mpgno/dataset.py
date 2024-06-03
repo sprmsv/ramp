@@ -206,8 +206,6 @@ class Dataset:
 
     # Set attributes
     self.metadata = DATASET_METADATA[datapath]
-    if isinstance(self.metadata.signed, bool):
-      self.metadata.signed = [self.metadata.signed]
     self.data_group = self.metadata.data_group
     self.reader = h5py.File(Path(datadir) / f'{datapath}.nc', 'r')
     self.idx_vars = (None if include_passive_variables
@@ -221,6 +219,8 @@ class Dataset:
     self.space_downsample_factor = space_downsample_factor
     self.sample = self._fetch(0)
     self.shape = self.sample.shape
+    if isinstance(self.metadata.signed, bool):
+      self.metadata.signed = [self.metadata.signed] * self.shape[-1]
 
     # Split the dataset
     assert (n_train + n_valid) <= self.length

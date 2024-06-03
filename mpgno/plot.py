@@ -94,7 +94,7 @@ def plot_trajectory(traj, idx_time, idx_traj=0, symmetric=True, ylabels=None):
   _WIDTH_PER_COL = 1.5
   _WIDTH_MARGIN = .2
 
-  n_vars = traj[0].shape[-1]
+  n_vars = traj.shape[-1]
   if isinstance(symmetric, bool):
     symmetric = [symmetric] * n_vars
 
