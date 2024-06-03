@@ -37,8 +37,6 @@ NUM_DEVICES = jax.local_device_count()
 
 TIME_DOWNSAMPLE_FACTOR = 2
 IDX_FN = 7
-# NOTE: With JUMP_STEPS=4, we need trajectories of length 12 after downsampling
-MAX_JUMP_STEPS = 1
 
 EVAL_FREQ = 50
 
@@ -82,8 +80,8 @@ flags.DEFINE_float(name='lr_base', default=1e-05, required=False,
 flags.DEFINE_float(name='lr_lowr', default=1e-06, required=False,
   help='Final learning rate in the exponential decay'
 )
-flags.DEFINE_integer(name='jump_steps', default=1, required=False,
-  help='Factor by which the dataset time delta is multiplied in prediction'
+flags.DEFINE_string(name='stepper', default='der', required=False,
+  help='Type of the stepper'
 )
 flags.DEFINE_integer(name='direct_steps', default=1, required=False,
   help='Maximum number of time steps between input/output pairs during training'
@@ -99,9 +97,6 @@ flags.DEFINE_integer(name='n_valid', default=(2**8), required=False,
 )
 
 # FLAGS::model
-flags.DEFINE_string(name='stepper', default='der', required=False,
-  help='Type of the stepper'
-)
 flags.DEFINE_integer(name='num_mesh_nodes', default=64, required=False,
   help='Number of mesh nodes in each dimension'
 )
@@ -141,7 +136,6 @@ def train(
   model: nn.Module,
   state: TrainState,
   dataset: Dataset,
-  jump_steps: int,
   direct_steps: int,
   unroll_steps: int,
   epochs: int,
@@ -164,10 +158,9 @@ def train(
   unroll_offset = unroll_steps * direct_steps
   assert num_samples_trn % FLAGS.batch_size == 0
   num_batches = num_samples_trn // FLAGS.batch_size
-  assert (jump_steps * FLAGS.batch_size) % NUM_DEVICES == 0
-  batch_size_per_device = (jump_steps * FLAGS.batch_size) // NUM_DEVICES
-  assert len_traj % jump_steps == 0
-  num_times = len_traj // jump_steps
+  assert FLAGS.batch_size % NUM_DEVICES == 0
+  batch_size_per_device = FLAGS.batch_size // NUM_DEVICES
+  num_times = len_traj
   evaluation_frequency = (
     (FLAGS.epochs // EVAL_FREQ) if (FLAGS.epochs >= EVAL_FREQ)
     else 1
@@ -276,7 +269,7 @@ def train(
             num_jumps=num_steps_autoreg,
             key=subkey,
           )
-          t_inp = t_lag + num_steps_autoreg * jump_steps * direct_steps
+          t_inp = t_lag + num_steps_autoreg * direct_steps
 
           # Get the output
           key, subkey = jax.random.split(key)
@@ -323,7 +316,7 @@ def train(
         key, subkey = jax.random.split(key)
         u_inp = _get_noisy_input(
           specs, u_lag, t_lag, num_steps_autoreg=noise_steps, key=subkey)
-        t_inp = t_lag + noise_steps * jump_steps * direct_steps
+        t_inp = t_lag + noise_steps * direct_steps
         # Use noisy input and compute gradients
         key, subkey = jax.random.split(key)
         loss, grads = jax.value_and_grad(_compute_loss)(
@@ -375,7 +368,7 @@ def train(
     u_lag_batch = jnp.tile(u_lag_batch, reps=(1, 1, direct_steps, 1, 1, 1))
     t_lag_batch = jnp.tile(t_lag_batch, reps=(1, 1, direct_steps, 1, 1, 1))
     tau_batch = jnp.tile(
-      (jump_steps * jnp.arange(1, direct_steps+1)).reshape(1, 1, direct_steps, 1),
+      (jnp.arange(1, direct_steps+1)).reshape(1, 1, direct_steps, 1),
       reps=(num_lead_times, batch_size_per_device, 1, 1)
     )
     specs_batch = jnp.tile(specs_batch, reps=(1, 1, direct_steps, 1)) if _use_specs else None
@@ -476,31 +469,8 @@ def train(
       # -> [batch_size, len_traj, ...]
       trajs, specs = batch
       times = jnp.tile(jnp.arange(trajs.shape[1]), reps=(trajs.shape[0], 1))
-
-      # Downsample the trajectories
-      # -> [batch_size * jump_steps, num_times, ...]
-      trajs = jnp.concatenate(jnp.split(
-          (trajs
-          .reshape(FLAGS.batch_size, num_times, jump_steps, *num_grid_points, num_vars)
-          .swapaxes(1, 2)
-          .reshape(FLAGS.batch_size, len_traj, *num_grid_points, num_vars)),
-          jump_steps,
-          axis=1),
-        axis=0,
-      )
-      times = jnp.concatenate(jnp.split(
-          (times
-          .reshape(FLAGS.batch_size, num_times, jump_steps)
-          .swapaxes(1, 2)
-          .reshape(FLAGS.batch_size, len_traj)),
-          jump_steps,
-          axis=1),
-        axis=0,
-      )
-      specs = (jnp.tile(specs, jump_steps)
-        .reshape(FLAGS.batch_size, jump_steps, -1)
-        .swapaxes(0, 1)
-        .reshape(FLAGS.batch_size * jump_steps, -1)
+      specs = (jnp.tile(specs, 1)
+        .reshape(FLAGS.batch_size, -1)
       ) if _use_specs else None
 
       # Split the batch between devices
@@ -567,10 +537,10 @@ def train(
           t_inp=t_inp[lt],
           tau=tau,
         )
-        return (tau+jump_steps), u_prd
+        return (tau+1), u_prd
       _, u_prd = jax.lax.scan(
         f=get_direct_prediction,
-        init=jump_steps,
+        init=1,
         xs=None,
         length=direct_steps,
       )
@@ -686,8 +656,8 @@ def train(
     u_tgt = trajs[:, (IDX_FN):(IDX_FN+1)]
 
     # Get prediction at the final step
-    _num_jumps = IDX_FN // (direct_steps * jump_steps)
-    _num_direct_steps = IDX_FN % (direct_steps * jump_steps)
+    _num_jumps = IDX_FN // (direct_steps)
+    _num_direct_steps = IDX_FN % (direct_steps)
     variables = {'params': state.params}
     u_prd = predictor.jump(
       variables=variables,
@@ -745,34 +715,11 @@ def train(
 
     for batch in batches:
       # Unwrap the batch
-      trajs_raw, specs_raw = batch
-      times_raw = jnp.tile(jnp.arange(trajs_raw.shape[1]), reps=(trajs_raw.shape[0], 1))
-
-      # Downsample the trajectories
-      # -> [batch_size * jump_steps, num_times, ...]
-      # NOTE: The last timestep is excluded to make the length of all the trajectories even
-      trajs = jnp.concatenate(jnp.split(
-          (trajs_raw
-          .reshape(FLAGS.batch_size, num_times, jump_steps, *num_grid_points, num_vars)
-          .swapaxes(1, 2)
-          .reshape(FLAGS.batch_size, len_traj, *num_grid_points, num_vars)),
-          jump_steps,
-          axis=1),
-        axis=0,
-      )
-      times = jnp.concatenate(jnp.split(
-          (times_raw
-          .reshape(FLAGS.batch_size, num_times, jump_steps)
-          .swapaxes(1, 2)
-          .reshape(FLAGS.batch_size, len_traj)),
-          jump_steps,
-          axis=1),
-        axis=0,
-      )
-      specs = (jnp.tile(specs_raw, jump_steps)
-        .reshape(FLAGS.batch_size, jump_steps, -1)
-        .swapaxes(0, 1)
-        .reshape(FLAGS.batch_size * jump_steps, -1)
+      trajs, specs = batch
+      times = jnp.tile(jnp.arange(trajs.shape[1]), reps=(trajs.shape[0], 1))
+      assert times.shape == (FLAGS.batch_size, len_traj)  # TMP
+      specs = (jnp.tile(specs, 1)
+        .reshape(FLAGS.batch_size, -1)
       ) if _use_specs else None
 
       # Split the batch between devices
@@ -803,12 +750,6 @@ def train(
         # Compute and store metrics
         metrics_rollout.append(batch_metrics_rollout)
 
-      # Split the batch between devices
-      # -> [NUM_DEVICES, batch_size/NUM_DEVICES, ...]
-      trajs = shard(trajs_raw)
-      times = shard(times_raw)
-      specs = shard(specs_raw) if _use_specs else None
-
       # Evaluate final prediction
       if final:
         assert IDX_FN < trajs.shape[2]
@@ -817,7 +758,7 @@ def train(
         )
         batch_metrics_final = BatchMetrics(**batch_metrics_final)
         # Re-arrange the sub-batches gotten from each device
-        batch_metrics_final.reshape(shape=(batch_size_per_device * (NUM_DEVICES // jump_steps), 1))
+        batch_metrics_final.reshape(shape=(batch_size_per_device * NUM_DEVICES, 1))
         # Append the errors to the list
         metrics_final.append(batch_metrics_final)
 
@@ -993,8 +934,6 @@ def main(argv):
   # Check the inputs
   if not FLAGS.datetime:
     FLAGS.datetime = datetime.now().strftime('%Y%m%d-%H%M%S')
-  assert FLAGS.jump_steps <= MAX_JUMP_STEPS
-  assert (IDX_FN % FLAGS.jump_steps) == 0
 
   # Initialize the random key
   key = jax.random.PRNGKey(FLAGS.seed)
@@ -1008,15 +947,13 @@ def main(argv):
     n_train=FLAGS.n_train,
     n_valid=FLAGS.n_valid,
     downsample_factor=TIME_DOWNSAMPLE_FACTOR,
-    cutoff=(IDX_FN + MAX_JUMP_STEPS),
+    cutoff=(IDX_FN + 1),
     preload=True,
     include_passive_variables=False,
   )
   dataset.compute_stats(
     axes=(0, 1, 2, 3),
-    derivs_degree=0,
-    residual_steps=(FLAGS.direct_steps * FLAGS.jump_steps),
-    skip_residual_steps=FLAGS.jump_steps,
+    residual_steps=FLAGS.direct_steps,
   )
 
   # Read the checkpoint
@@ -1104,7 +1041,7 @@ def main(argv):
   schedule_direct_steps = False
   epochs_trained = 0
   num_batches = dataset.nums['train'] // FLAGS.batch_size
-  num_times = dataset.shape[1] // FLAGS.jump_steps
+  num_times = dataset.shape[1]
   unroll_offset = FLAGS.unroll_steps * FLAGS.direct_steps
   num_lead_times = num_times - 1 - unroll_offset
   assert num_lead_times > 0
@@ -1120,7 +1057,7 @@ def main(argv):
       epochs_d = (epochs_u00_dff if (_d == FLAGS.direct_steps) else epochs_u00_dxx)
     else:
       epochs_d = epochs_u00
-    transition_steps +=  epochs_d * num_batches * FLAGS.jump_steps * num_valid_pairs_d
+    transition_steps +=  epochs_d * num_batches * num_valid_pairs_d
 
   pct_start = .02  # Warmup cosine onecycle
   pct_final = .1   # Final exponential decay
@@ -1156,7 +1093,6 @@ def main(argv):
       model=model,
       state=state,
       dataset=dataset,
-      jump_steps=FLAGS.jump_steps,
       direct_steps=_d,
       unroll_steps=0,
       epochs=epochs,
@@ -1178,7 +1114,6 @@ def main(argv):
       model=model,
       state=state,
       dataset=dataset,
-      jump_steps=FLAGS.jump_steps,
       direct_steps=FLAGS.direct_steps,
       unroll_steps=_u,
       epochs=epochs,

@@ -244,9 +244,7 @@ class Dataset:
 
   def compute_stats(self,
       axes: Sequence[int] = (0,),
-      derivs_degree: int = 0,
       residual_steps: int = 0,
-      skip_residual_steps: int = 1,
     ) -> None:
 
     # Check inputs
@@ -267,8 +265,6 @@ class Dataset:
     residuals = []
     derivatives = []
     for s in range(1, residual_steps+1):
-      if (s % skip_residual_steps):
-        continue
       res = _get_res(s, trj)
       residuals.append(res)
       derivatives.append(res / s)
