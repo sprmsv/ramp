@@ -199,7 +199,8 @@ class Dataset:
     n_valid: int = 0,
     preload: bool = False,
     include_passive_variables: bool = False,
-    downsample_factor: int = 1,
+    time_downsample_factor: int = 1,
+    space_downsample_factor: int = 1,
     cutoff: int = None,
   ):
 
@@ -216,7 +217,8 @@ class Dataset:
     self.length = ((n_train + n_valid) if self.preload
       else self.reader[self.data_group].shape[0])
     self.cutoff = cutoff if (cutoff is not None) else (self._fetch(0, raw=True)[0].shape[1])
-    self.downsample_factor = downsample_factor
+    self.time_downsample_factor = time_downsample_factor
+    self.space_downsample_factor = space_downsample_factor
     self.sample = self._fetch(0)
     self.shape = self.sample[0].shape
 
@@ -302,8 +304,9 @@ class Dataset:
 
     # Downsample and cut the trajectories
     if not raw:
-      traj = traj[:, ::self.downsample_factor]
+      traj = traj[:, ::self.time_downsample_factor]
       traj = traj[:, :self.cutoff]
+      traj = traj[:, :, ::self.space_downsample_factor, ::self.space_downsample_factor]
 
     return traj, spec
 

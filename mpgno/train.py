@@ -946,7 +946,7 @@ def main(argv):
     datapath=FLAGS.datapath,
     n_train=FLAGS.n_train,
     n_valid=FLAGS.n_valid,
-    downsample_factor=TIME_DOWNSAMPLE_FACTOR,
+    time_downsample_factor=TIME_DOWNSAMPLE_FACTOR,
     cutoff=(IDX_FN + 1),
     preload=True,
     include_passive_variables=False,
