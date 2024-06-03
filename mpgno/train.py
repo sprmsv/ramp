@@ -145,10 +145,8 @@ def train(
   """Trains a model and returns the state."""
 
   # Samples
-  sample_traj, sample_spec = dataset.sample
-  _use_specs = (sample_spec is not None)
+  sample_traj = dataset.sample
   sample_traj = jnp.array(sample_traj)
-  sample_spec = jnp.array(sample_spec) if _use_specs else None
 
   # Set constants
   num_samples_trn = dataset.nums['train']
@@ -217,14 +215,12 @@ def train(
     stats: dict,
     trajs: Array,
     times: Array,
-    specs: Array,
   ) -> Tuple[TrainState, Array, Array]:
     """Loads a batch, normalizes it, updates the state based on it, and returns it."""
 
     def _update_state_per_subbatch(
       key: flax.typing.PRNGKey,
       state: TrainState,
-      specs: Array,
       u_lag: Array,
       t_lag: Array,
       u_tgt: Array,
@@ -235,7 +231,6 @@ def train(
       def _get_loss_and_grads(
         key: flax.typing.PRNGKey,
         params: flax.typing.Collection,
-        specs: Array,
         u_lag: Array,
         t_lag: Array,
         u_tgt: Array,
@@ -247,7 +242,6 @@ def train(
 
         def _compute_loss(
           params: flax.typing.Collection,
-          specs: Array,
           u_lag: Array,
           t_lag: Array,
           tau: int,
@@ -263,7 +257,6 @@ def train(
           u_inp = predictor.jump(
             variables=variables,
             stats=stats,
-            specs=specs,
             u_inp=u_lag,
             t_inp=t_lag,
             num_jumps=num_steps_autoreg,
@@ -276,7 +269,6 @@ def train(
           _loss_inputs = stepper.get_loss_inputs(
             variables=variables,
             stats=stats,
-            specs=specs,
             u_inp=u_inp,
             t_inp=t_inp,
             u_tgt=u_tgt,
@@ -287,7 +279,6 @@ def train(
           return loss_fn(*_loss_inputs)
 
         def _get_noisy_input(
-          specs: Array,
           u_lag: Array,
           t_lag: Array,
           num_steps_autoreg: int,
@@ -299,7 +290,6 @@ def train(
           u_inp_noisy = predictor.jump(
             variables=variables,
             stats=stats,
-            specs=specs,
             u_inp=u_lag,
             t_inp=t_lag,
             num_jumps=num_steps_autoreg,
@@ -315,12 +305,12 @@ def train(
         # Get noisy input
         key, subkey = jax.random.split(key)
         u_inp = _get_noisy_input(
-          specs, u_lag, t_lag, num_steps_autoreg=noise_steps, key=subkey)
+          u_lag, t_lag, num_steps_autoreg=noise_steps, key=subkey)
         t_inp = t_lag + noise_steps * direct_steps
         # Use noisy input and compute gradients
         key, subkey = jax.random.split(key)
         loss, grads = jax.value_and_grad(_compute_loss)(
-          params, specs, u_inp, t_inp, tau, u_tgt, num_steps_autoreg=grads_steps, key=subkey)
+          params, u_inp, t_inp, tau, u_tgt, num_steps_autoreg=grads_steps, key=subkey)
 
         return loss, grads
 
@@ -328,7 +318,6 @@ def train(
       _loss, _grads = _get_loss_and_grads(
         key=key,
         params=state.params,
-        specs=(specs if _use_specs else None),
         u_lag=u_lag,
         t_lag=t_lag,
         u_tgt=u_tgt,
@@ -354,9 +343,6 @@ def train(
           operand=times,
           start_index=(lt-unroll_offset), slice_size=1, axis=1)
     )(lead_times)
-    specs_batch = (specs[None, :, None, :]
-      .repeat(repeats=num_lead_times, axis=0)
-    ) if _use_specs else None
     u_tgt_batch = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
           operand=jnp.concatenate([trajs, jnp.zeros_like(trajs)], axis=1),
@@ -371,14 +357,12 @@ def train(
       (jnp.arange(1, direct_steps+1)).reshape(1, 1, direct_steps, 1),
       reps=(num_lead_times, batch_size_per_device, 1, 1)
     )
-    specs_batch = jnp.tile(specs_batch, reps=(1, 1, direct_steps, 1)) if _use_specs else None
 
     # Put all pairs along the batch axis
     # -> [batch_size_per_device * num_lead_times * direct_steps, ...]
     u_lag_batch = u_lag_batch.reshape((num_lead_times*batch_size_per_device*direct_steps), 1, *num_grid_points, num_vars)
     t_lag_batch = t_lag_batch.reshape((num_lead_times*batch_size_per_device*direct_steps), 1)
     tau_batch = tau_batch.reshape((num_lead_times*batch_size_per_device*direct_steps), 1)
-    specs_batch = specs_batch.reshape((num_lead_times*batch_size_per_device*direct_steps), -1) if _use_specs else None
     u_tgt_batch = u_tgt_batch.reshape((num_lead_times*batch_size_per_device*direct_steps), 1, *num_grid_points, num_vars)
 
     # Remove the invalid pairs
@@ -393,23 +377,16 @@ def train(
     u_lag_batch = jnp.delete(u_lag_batch, idx_invalid_pairs, axis=0)
     t_lag_batch = jnp.delete(t_lag_batch, idx_invalid_pairs, axis=0)
     tau_batch = jnp.delete(tau_batch, idx_invalid_pairs, axis=0)
-    specs_batch = jnp.delete(specs_batch, idx_invalid_pairs, axis=0) if _use_specs else None
     u_tgt_batch = jnp.delete(u_tgt_batch, idx_invalid_pairs, axis=0)
 
     # Shuffle and split the pairs
     # -> [num_valid_pairs, batch_size_per_device, ...]
     num_valid_pairs = u_tgt_batch.shape[0] // batch_size_per_device
     key, subkey = jax.random.split(key)
-    if _use_specs:
-      u_lag_batch, t_lag_batch, tau_batch, specs_batch, u_tgt_batch = shuffle_arrays(
-        subkey, [u_lag_batch, t_lag_batch, tau_batch, specs_batch, u_tgt_batch])
-      u_lag_batch, t_lag_batch, tau_batch, specs_batch, u_tgt_batch = split_arrays(
-        [u_lag_batch, t_lag_batch, tau_batch, specs_batch, u_tgt_batch], size=batch_size_per_device)
-    else:
-      u_lag_batch, t_lag_batch, tau_batch, u_tgt_batch = shuffle_arrays(
-        subkey, [u_lag_batch, t_lag_batch, tau_batch, u_tgt_batch])
-      u_lag_batch, t_lag_batch, tau_batch, u_tgt_batch = split_arrays(
-        [u_lag_batch, t_lag_batch, tau_batch, u_tgt_batch], size=batch_size_per_device)
+    u_lag_batch, t_lag_batch, tau_batch, u_tgt_batch = shuffle_arrays(
+      subkey, [u_lag_batch, t_lag_batch, tau_batch, u_tgt_batch])
+    u_lag_batch, t_lag_batch, tau_batch, u_tgt_batch = split_arrays(
+      [u_lag_batch, t_lag_batch, tau_batch, u_tgt_batch], size=batch_size_per_device)
 
     # Add loss and gradients for each subbatch
     def _update_state(i, carry):
@@ -419,7 +396,6 @@ def train(
       _state, _loss_subbatch, _grads_subbatch = _update_state_per_subbatch(
         key=_subkey,
         state=_state,
-        specs=(specs_batch if _use_specs else None),
         u_lag=u_lag_batch[i],
         t_lag=t_lag_batch[i],
         u_tgt=u_tgt_batch[i],
@@ -467,22 +443,18 @@ def train(
     for batch in batches:
       # Unwrap the batch
       # -> [batch_size, len_traj, ...]
-      trajs, specs = batch
+      trajs = batch
       times = jnp.tile(jnp.arange(trajs.shape[1]), reps=(trajs.shape[0], 1))
-      specs = (jnp.tile(specs, 1)
-        .reshape(FLAGS.batch_size, -1)
-      ) if _use_specs else None
 
       # Split the batch between devices
       # -> [NUM_DEVICES, batch_size_per_device, ...]
       trajs = shard(trajs)
       times = shard(times)
-      specs = shard(specs) if _use_specs else None
 
       # Get loss and updated state
       subkey, key = jax.random.split(key)
       subkey = shard_prng_key(subkey)
-      state, loss, grads = _train_one_batch(subkey, state, stats, trajs, times, specs)
+      state, loss, grads = _train_one_batch(subkey, state, stats, trajs, times)
       # NOTE: Using the first element of replicated loss and grads
       loss_epoch += loss[0] * FLAGS.batch_size / num_samples_trn
       grad_epoch += np.mean(jax.tree_util.tree_flatten(
@@ -496,7 +468,6 @@ def train(
     stats,
     trajs: Array,
     times: Array,
-    specs: Array,
   ) -> Mapping:
 
     # Inputs are of shape [batch_size_per_device, ...]
@@ -522,9 +493,6 @@ def train(
           operand=trajs,
           start_index=(lt+1), slice_size=direct_steps, axis=1)
     )(lead_times)
-    specs = (jnp.array(specs[None, :, :])
-      .repeat(repeats=num_lead_times, axis=0)
-    ) if _use_specs else None
 
     def get_direct_errors(lt, carry):
       carry = BatchMetrics(**carry)
@@ -532,7 +500,6 @@ def train(
         u_prd = stepper.apply(
           variables={'params': state.params},
           stats=stats,
-          specs=(specs[lt] if _use_specs else None),
           u_inp=u_inp[lt],
           t_inp=t_inp[lt],
           tau=tau,
@@ -594,7 +561,6 @@ def train(
     stats,
     trajs: Array,
     times: Array,
-    specs: Array,
   ) -> Mapping:
     """
     Predicts the trajectories autoregressively.
@@ -612,7 +578,6 @@ def train(
     u_prd, _ = predictor.unroll(
       variables=variables,
       stats=stats,
-      specs=specs,
       u_inp=u_inp,
       t_inp=t_inp,
       num_steps=num_times,
@@ -647,7 +612,6 @@ def train(
     stats,
     trajs: Array,
     times: Array,
-    specs: Array,
   ) -> Mapping:
 
     # Set input and target
@@ -662,7 +626,6 @@ def train(
     u_prd = predictor.jump(
       variables=variables,
       stats=stats,
-      specs=specs,
       u_inp=u_inp,
       t_inp=t_inp,
       num_jumps=_num_jumps,
@@ -671,7 +634,6 @@ def train(
       _, u_prd = predictor.unroll(
         variables=variables,
         stats=stats,
-        specs=specs,
         u_inp=u_prd,
         t_inp=t_inp,
         num_steps=_num_direct_steps,
@@ -715,23 +677,19 @@ def train(
 
     for batch in batches:
       # Unwrap the batch
-      trajs, specs = batch
+      trajs = batch
       times = jnp.tile(jnp.arange(trajs.shape[1]), reps=(trajs.shape[0], 1))
       assert times.shape == (FLAGS.batch_size, len_traj)  # TMP
-      specs = (jnp.tile(specs, 1)
-        .reshape(FLAGS.batch_size, -1)
-      ) if _use_specs else None
 
       # Split the batch between devices
       # -> [NUM_DEVICES, batch_size_per_device, ...]
       trajs = shard(trajs)
       times = shard(times)
-      specs = shard(specs) if _use_specs else None
 
       # Evaluate direct prediction
       if direct:
         batch_metrics_direct = _evaluate_direct_prediction(
-          state, stats, trajs, times, specs,
+          state, stats, trajs, times,
         )
         batch_metrics_direct = BatchMetrics(**batch_metrics_direct)
         # Re-arrange the sub-batches gotten from each device
@@ -742,7 +700,7 @@ def train(
       # Evaluate rollout prediction
       if rollout:
         batch_metrics_rollout = _evaluate_rollout_prediction(
-          state, stats, trajs, times, specs
+          state, stats, trajs, times,
         )
         batch_metrics_rollout = BatchMetrics(**batch_metrics_rollout)
         # Re-arrange the sub-batches gotten from each device
@@ -754,7 +712,7 @@ def train(
       if final:
         assert IDX_FN < trajs.shape[2]
         batch_metrics_final = _evaluate_final_prediction(
-          state, stats, trajs, times, specs,
+          state, stats, trajs, times,
         )
         batch_metrics_final = BatchMetrics(**batch_metrics_final)
         # Re-arrange the sub-batches gotten from each device
@@ -1019,15 +977,12 @@ def main(argv):
 
   # Initialzize the model or use the loaded parameters
   if not params:
-    _, sample_spec = dataset.sample
     num_grid_points = dataset.shape[2:4]
     num_vars = dataset.shape[-1]
     model_init_kwargs = dict(
       u_inp=jnp.ones(shape=(FLAGS.batch_size, 1, *num_grid_points, num_vars)),
       t_inp=jnp.zeros(shape=(FLAGS.batch_size, 1)),
       tau=jnp.ones(shape=(FLAGS.batch_size, 1)),
-      specs=(jnp.ones_like(sample_spec).repeat(FLAGS.batch_size, axis=0)
-        if (sample_spec is not None) else None),
     )
     subkey, key = jax.random.split(key)
     variables = jax.jit(model.init)(subkey, **model_init_kwargs)

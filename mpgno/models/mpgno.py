@@ -421,7 +421,6 @@ class MPGNO(AbstractOperator):
     u_inp: Array,
     t_inp: Array = None,
     tau: Union[float, int] = None,
-    specs: Array = None,
     key: flax.typing.PRNGKey = None,
   ) -> Array:
     """
@@ -434,10 +433,6 @@ class MPGNO(AbstractOperator):
     assert u_inp.shape[2] == self.num_grid_nodes[0]
     assert u_inp.shape[3] == self.num_grid_nodes[1]
     assert u_inp.shape[-1] == self.num_outputs
-
-    if specs is not None:
-      assert specs.ndim == 2  # [batch_size, num_params]
-      assert specs.shape[0] == batch_size
 
     if self.concatenate_tau:
       assert tau is not None
@@ -464,9 +459,6 @@ class MPGNO(AbstractOperator):
     if self.concatenate_t:
       grid_node_features_forced.append(
         jnp.tile(t_inp, reps=(self._num_grid_nodes_tot, 1, 1)))
-    if specs is not None:
-      grid_node_features_forced.append(
-        jnp.repeat(specs[None, :, :], repeats=self._num_grid_nodes_tot, axis=0),)
     grid_node_features = jnp.concatenate(
       [grid_node_features, *grid_node_features_forced], axis=-1)
 

@@ -220,7 +220,7 @@ class Dataset:
     self.time_downsample_factor = time_downsample_factor
     self.space_downsample_factor = space_downsample_factor
     self.sample = self._fetch(0)
-    self.shape = self.sample[0].shape
+    self.shape = self.sample.shape
 
     # Split the dataset
     assert (n_train + n_valid) <= self.length
@@ -255,7 +255,7 @@ class Dataset:
     assert 1 in axes  # NOTE: Otherwise we cannot extrapolate in time
 
     # Get all trajectories
-    trj, _ = self.train(np.arange(self.nums['train']))
+    trj = self.train(np.arange(self.nums['train']))
 
     # Compute statistics of the solutions
     self.stats['trj']['mean'] = np.mean(trj, axis=axes, keepdims=True)
@@ -295,8 +295,6 @@ class Dataset:
       traj = np.moveaxis(traj, source=(2, 3, 4), destination=(4, 2, 3))
     elif len(traj.shape) == 4:
       traj = np.expand_dims(traj, axis=-1)
-    # Set equation parameters
-    spec = None
 
     # Select variables
     if self.idx_vars is not None:
@@ -308,7 +306,7 @@ class Dataset:
       traj = traj[:, :self.cutoff]
       traj = traj[:, :, ::self.space_downsample_factor, ::self.space_downsample_factor]
 
-    return traj, spec
+    return traj
 
   def _fetch_mode(self, idx: Union[int, Sequence], mode: str):
     # Check inputs

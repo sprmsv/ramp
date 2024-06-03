@@ -17,7 +17,6 @@ class Stepper(ABC):
   def apply(self,
     variables,
     stats,
-    specs: Array,
     u_inp: Array,
     t_inp: Array,
     tau: Array,
@@ -35,7 +34,6 @@ class Stepper(ABC):
   def get_loss_inputs(self,
     variables,
     stats,
-    specs: Array,
     u_inp: Array,
     t_inp: Array,
     u_tgt: Array,
@@ -55,7 +53,6 @@ class TimeDerivativeUpdater(Stepper):
   def apply(self,
     variables,
     stats,
-    specs: Array,
     u_inp: Array,
     t_inp: Array,
     tau: Array,
@@ -69,7 +66,6 @@ class TimeDerivativeUpdater(Stepper):
     """
 
     # Normalize inputs
-    # TODO: Normalize specs
     u_inp_nrm = normalize(
       u_inp,
       shift=stats['trj']['mean'],
@@ -81,7 +77,6 @@ class TimeDerivativeUpdater(Stepper):
     # Get predicted normalized derivatives
     d_prd_nrm = self._apply_operator(
       variables,
-      specs=specs,
       u_inp=u_inp_nrm,
       t_inp=t_inp_nrm,
       tau=tau_nrm,
@@ -103,7 +98,6 @@ class TimeDerivativeUpdater(Stepper):
   def get_loss_inputs(self,
     variables,
     stats,
-    specs: Array,
     u_inp: Array,
     t_inp: Array,
     u_tgt: Array,
@@ -118,7 +112,6 @@ class TimeDerivativeUpdater(Stepper):
     """
 
     # Normalize inputs
-    # TODO: Normalize specs
     u_inp_nrm = normalize(
       u_inp,
       shift=stats['trj']['mean'],
@@ -130,7 +123,6 @@ class TimeDerivativeUpdater(Stepper):
     # Get predicted normalized derivatives
     d_prd_nrm = self._apply_operator(
       variables,
-      specs=specs,
       u_inp=u_inp_nrm,
       t_inp=t_inp_nrm,
       tau=tau_nrm,
@@ -152,7 +144,6 @@ class ResidualUpdater(Stepper):
   def apply(self,
     variables,
     stats,
-    specs: Array,
     u_inp: Array,
     t_inp: Array,
     tau: Array,
@@ -166,7 +157,6 @@ class ResidualUpdater(Stepper):
     """
 
     # Normalize inputs
-    # TODO: Normalize specs
     u_inp_nrm = normalize(
       u_inp,
       shift=stats['trj']['mean'],
@@ -178,7 +168,6 @@ class ResidualUpdater(Stepper):
     # Get predicted normalized derivative
     r_prd_nrm = self._apply_operator(
       variables,
-      specs=specs,
       u_inp=u_inp_nrm,
       t_inp=t_inp_nrm,
       tau=tau_nrm,
@@ -200,7 +189,6 @@ class ResidualUpdater(Stepper):
   def get_loss_inputs(self,
     variables,
     stats,
-    specs: Array,
     u_inp: Array,
     t_inp: Array,
     u_tgt: Array,
@@ -215,7 +203,6 @@ class ResidualUpdater(Stepper):
     """
 
     # Normalize inputs
-    # TODO: Normalize specs
     u_inp_nrm = normalize(
       u_inp,
       shift=stats['trj']['mean'],
@@ -227,7 +214,6 @@ class ResidualUpdater(Stepper):
     # Get predicted normalized residuals
     r_prd_nrm = self._apply_operator(
       variables,
-      specs=specs,
       u_inp=u_inp_nrm,
       t_inp=t_inp_nrm,
       tau=tau_nrm,
@@ -249,7 +235,6 @@ class OutputUpdater(Stepper):
   def apply(self,
     variables,
     stats,
-    specs: Array,
     u_inp: Array,
     t_inp: Array,
     tau: Array,
@@ -263,7 +248,6 @@ class OutputUpdater(Stepper):
     """
 
     # Normalize inputs
-    # TODO: Normalize specs
     u_inp_nrm = normalize(
       u_inp,
       shift=stats['trj']['mean'],
@@ -275,7 +259,6 @@ class OutputUpdater(Stepper):
     # Get predicted normalized output
     u_prd_nrm = self._apply_operator(
       variables,
-      specs=specs,
       u_inp=u_inp_nrm,
       t_inp=t_inp_nrm,
       tau=tau_nrm,
@@ -294,7 +277,6 @@ class OutputUpdater(Stepper):
   def get_loss_inputs(self,
     variables,
     stats,
-    specs: Array,
     u_inp: Array,
     t_inp: Array,
     u_tgt: Array,
@@ -309,7 +291,6 @@ class OutputUpdater(Stepper):
     """
 
     # Normalize inputs
-    # TODO: Normalize specs
     u_inp_nrm = normalize(
       u_inp,
       shift=stats['trj']['mean'],
@@ -321,7 +302,6 @@ class OutputUpdater(Stepper):
     # Get predicted normalized output
     u_prd_nrm = self._apply_operator(
       variables,
-      specs=specs,
       u_inp=u_inp_nrm,
       t_inp=t_inp_nrm,
       tau=tau_nrm,
@@ -359,7 +339,6 @@ class AutoregressiveStepper:
   def unroll(self,
     variables: flax.typing.VariableDict,
     stats: flax.typing.VariableDict,
-    specs: Array,
     u_inp: Array,
     t_inp: Array,
     num_steps: int,
@@ -381,7 +360,6 @@ class AutoregressiveStepper:
       u_out = self._apply_operator(
         variables,
         stats,
-        specs=specs,
         u_inp=u_inp,
         t_inp=t_inp,
         tau=tau,
@@ -450,7 +428,6 @@ class AutoregressiveStepper:
   def jump(self,
     variables: flax.typing.VariableDict,
     stats: flax.typing.VariableDict,
-    specs: Array,
     u_inp: Array,
     t_inp: Array,
     num_jumps: int,
@@ -470,7 +447,6 @@ class AutoregressiveStepper:
       u_out = self._apply_operator(
         variables,
         stats,
-        specs=specs,
         u_inp=u_inp,
         t_inp=t_inp,
         tau=tau,
