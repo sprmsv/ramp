@@ -150,7 +150,7 @@ def train(
 
   # Set constants
   num_samples_trn = dataset.nums['train']
-  len_traj = dataset.shape[1]
+  num_times = dataset.shape[1]
   num_grid_points = dataset.shape[2:4]
   num_vars = dataset.shape[-1]
   unroll_offset = unroll_steps * direct_steps
@@ -158,7 +158,6 @@ def train(
   num_batches = num_samples_trn // FLAGS.batch_size
   assert FLAGS.batch_size % NUM_DEVICES == 0
   batch_size_per_device = FLAGS.batch_size // NUM_DEVICES
-  num_times = len_traj
   evaluation_frequency = (
     (FLAGS.epochs // EVAL_FREQ) if (FLAGS.epochs >= EVAL_FREQ)
     else 1
@@ -442,7 +441,7 @@ def train(
     grad_epoch = 0.
     for batch in batches:
       # Unwrap the batch
-      # -> [batch_size, len_traj, ...]
+      # -> [batch_size, num_times, ...]
       trajs = batch
       times = jnp.tile(jnp.arange(trajs.shape[1]), reps=(trajs.shape[0], 1))
 
@@ -679,7 +678,6 @@ def train(
       # Unwrap the batch
       trajs = batch
       times = jnp.tile(jnp.arange(trajs.shape[1]), reps=(trajs.shape[0], 1))
-      assert times.shape == (FLAGS.batch_size, len_traj)  # TMP
 
       # Split the batch between devices
       # -> [NUM_DEVICES, batch_size_per_device, ...]
