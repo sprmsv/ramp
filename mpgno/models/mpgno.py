@@ -35,6 +35,7 @@ class MPGNO(AbstractOperator):
   num_outputs: int
   num_grid_nodes: Sequence[int]
   num_mesh_nodes: Sequence[int]
+  periodic: bool = True,
   concatenate_t: bool = True
   concatenate_tau: bool = True
   conditional_normalization: bool = False
@@ -91,7 +92,6 @@ class MPGNO(AbstractOperator):
     self.idx_grid2mesh_mesh_nodes = np.concatenate(_idx_grid2mesh_mesh_nodes).tolist()
 
     # Get multimesh edge connections
-    # TODO: Optimize the procedure (avoid for loops)
     assert (2 ** self.num_multimesh_levels) < max(self.num_mesh_nodes)
     idx_senders = []
     idx_receivers = []
@@ -102,19 +102,28 @@ class MPGNO(AbstractOperator):
       )
       for i in np.arange(self.num_mesh_nodes[0], step=dist[0]):
         for j in np.arange(self.num_mesh_nodes[1], step=dist[1]):
-          idx_senders.append((i, j))  # LEFT
-          idx_receivers.append(((i-dist[0]) % self.num_mesh_nodes[0], j))
-          idx_senders.append((i, j))  # RIGHT
-          idx_receivers.append(((i+dist[0]) % self.num_mesh_nodes[0], j))
-          idx_senders.append((i, j))  # DOWN
-          idx_receivers.append((i, (j-dist[1]) % self.num_mesh_nodes[0]))
-          idx_senders.append((i, j))  # UP
-          idx_receivers.append((i, (j+dist[1]) % self.num_mesh_nodes[0]))
+          for _i, _j in [
+            ((i-dist[0]), j),  # LEFT
+            ((i+dist[0]), j),  # RIGHT
+            (i, (j-dist[1])),  # DOWN
+            (i, (j+dist[1])),  # UP
+          ]:
+            if self.periodic:
+              _i = _i % self.num_mesh_nodes[0]
+              _j = _j % self.num_mesh_nodes[1]
+            if all([
+              (_i >= 0),
+              (_i < self.num_mesh_nodes[0]),
+              (_j >= 0),
+              (_j < self.num_mesh_nodes[1]),
+            ]):
+              idx_senders.append((i, j))
+              idx_receivers.append((_i, _j))
     # Get flat indexes
     self.idx_multimesh_send = list(
-      map(lambda s: s[0] * self.num_mesh_nodes[0] + s[1], idx_senders))
+      map(lambda s: s[0] * self.num_mesh_nodes[1] + s[1], idx_senders))
     self.idx_multimesh_recv = list(
-      map(lambda r: r[0] * self.num_mesh_nodes[0] + r[1], idx_receivers))
+      map(lambda r: r[0] * self.num_mesh_nodes[1] + r[1], idx_receivers))
 
     # Get mesh2grid edge connections
     _idx_mesh2grid_grid_nodes: list[int] = []
@@ -128,7 +137,6 @@ class MPGNO(AbstractOperator):
     self.idx_mesh2grid_mesh_nodes = np.concatenate(_idx_mesh2grid_mesh_nodes).tolist()
 
     # Get grid2grid edge connections
-    # TODO: Optimize the procedure (avoid for loops)
     idx_senders = []
     idx_receivers = []
     for p in range(1):
@@ -138,19 +146,28 @@ class MPGNO(AbstractOperator):
       )
       for i in np.arange(self.num_grid_nodes[0], step=dist[0]):
         for j in np.arange(self.num_grid_nodes[1], step=dist[1]):
-          idx_senders.append((i, j))  # LEFT
-          idx_receivers.append(((i-dist[0]) % self.num_grid_nodes[0], j))
-          idx_senders.append((i, j))  # RIGHT
-          idx_receivers.append(((i+dist[0]) % self.num_grid_nodes[0], j))
-          idx_senders.append((i, j))  # DOWN
-          idx_receivers.append((i, (j-dist[1]) % self.num_grid_nodes[0]))
-          idx_senders.append((i, j))  # UP
-          idx_receivers.append((i, (j+dist[1]) % self.num_grid_nodes[0]))
+          for _i, _j in [
+            ((i-dist[0]), j),  # LEFT
+            ((i+dist[0]), j),  # RIGHT
+            (i, (j-dist[1])),  # DOWN
+            (i, (j+dist[1])),  # UP
+          ]:
+            if self.periodic:
+              _i = _i % self.num_grid_nodes[0]
+              _j = _j % self.num_grid_nodes[1]
+            if all([
+              (_i >= 0),
+              (_i < self.num_grid_nodes[0]),
+              (_j >= 0),
+              (_j < self.num_grid_nodes[1]),
+            ]):
+              idx_senders.append((i, j))
+              idx_receivers.append((_i, _j))
     # Get flat indexes
     self.idx_grid2grid_send = list(
-      map(lambda s: s[0] * self.num_grid_nodes[0] + s[1], idx_senders))
+      map(lambda s: s[0] * self.num_grid_nodes[1] + s[1], idx_senders))
     self.idx_grid2grid_recv = list(
-      map(lambda r: r[0] * self.num_grid_nodes[0] + r[1], idx_receivers))
+      map(lambda r: r[0] * self.num_grid_nodes[1] + r[1], idx_receivers))
 
     # Initialize the graphs
     self._grid2mesh_graph = self._init_grid2mesh_graph()
@@ -257,7 +274,9 @@ class MPGNO(AbstractOperator):
     # Get relative positions
     zeta_grid_rel = self.zeta_grid - self.zeta_mesh[idx_mesh_node[0], idx_mesh_node[1]]
     # Mirror relative positions because of periodic boudnary conditions
-    zeta_grid_rel = np.where(zeta_grid_rel > 1., (zeta_grid_rel - 2.), zeta_grid_rel)
+    if self.periodic:
+      zeta_grid_rel = np.where(zeta_grid_rel >= 1., (zeta_grid_rel - 2.), zeta_grid_rel)
+      zeta_grid_rel = np.where(zeta_grid_rel < -1., (zeta_grid_rel + 2.), zeta_grid_rel)
 
     # Compute distance
     # NOTE: Order of the norm determines
@@ -276,7 +295,7 @@ class MPGNO(AbstractOperator):
   @staticmethod
   def _init_structural_features(
     zeta_sen: np.ndarray, zeta_rec: np.ndarray, idx_sen: list[int], idx_rec: list[int],
-    node_freqs: int, max_edge_length: float,
+    node_freqs: int, max_edge_length: float, periodic: bool,
   ) -> Tuple[EdgeSet, NodeSet, NodeSet]:
     # NOTE: All inputs must be flattened: [num_nodes, num_dims]
 
@@ -292,14 +311,18 @@ class MPGNO(AbstractOperator):
 
     # Define node features
     # NOTE: Sinusoidal features don't need normalization
-    sender_node_feats = np.concatenate([
-        np.concatenate([np.sin((k+1) * phi_sen), np.cos((k+1) * phi_sen)], axis=-1)
-        for k in range(node_freqs)
-      ], axis=-1)
-    receiver_node_feats = np.concatenate([
-        np.concatenate([np.sin((k+1) * phi_rec), np.cos((k+1) * phi_rec)], axis=-1)
-        for k in range(node_freqs)
-      ], axis=-1)
+    if periodic:
+      sender_node_feats = np.concatenate([
+          np.concatenate([np.sin((k+1) * phi_sen), np.cos((k+1) * phi_sen)], axis=-1)
+          for k in range(node_freqs)
+        ], axis=-1)
+      receiver_node_feats = np.concatenate([
+          np.concatenate([np.sin((k+1) * phi_rec), np.cos((k+1) * phi_rec)], axis=-1)
+          for k in range(node_freqs)
+        ], axis=-1)
+    else:
+      sender_node_feats = np.concatenate([zeta_sen], axis=-1)
+      receiver_node_feats = np.concatenate([zeta_rec], axis=-1)
 
     # Build node sets
     sender_node_set = NodeSet(
@@ -316,8 +339,9 @@ class MPGNO(AbstractOperator):
       (zeta_sen[s] - zeta_rec[r])
       for s, r in zip(idx_sen, idx_rec)
     ], axis=0)
-    z_ij = np.where(z_ij < -1, z_ij + 2, z_ij)
-    z_ij = np.where(z_ij >= 1, z_ij - 2, z_ij)
+    if periodic:
+      z_ij = np.where(z_ij < -1, z_ij + 2, z_ij)
+      z_ij = np.where(z_ij >= 1, z_ij - 2, z_ij)
     d_ij = np.linalg.norm(z_ij, axis=-1, keepdims=True)
     # Normalize and concatenate edge features
     z_ij = z_ij / max_edge_length
@@ -347,6 +371,7 @@ class MPGNO(AbstractOperator):
       idx_rec=self.idx_grid2mesh_mesh_nodes,
       node_freqs=self.node_coordinate_freqs,
       max_edge_length=(self.overlap_factor_grid2mesh * r_min),
+      periodic=self.periodic,
     )
 
     graph = TypedGraph(
@@ -367,6 +392,7 @@ class MPGNO(AbstractOperator):
       idx_rec=self.idx_multimesh_recv,
       node_freqs=self.node_coordinate_freqs,
       max_edge_length=(np.max(self.dz_mesh) * (2 ** (self.num_multimesh_levels-1))),
+      periodic=self.periodic,
     )
 
     graph = TypedGraph(
@@ -388,6 +414,7 @@ class MPGNO(AbstractOperator):
       idx_rec=self.idx_grid2mesh_grid_nodes,
       node_freqs=self.node_coordinate_freqs,
       max_edge_length=(self.overlap_factor_mesh2grid * r_min),
+      periodic=self.periodic,
     )
 
     graph = TypedGraph(
@@ -408,6 +435,7 @@ class MPGNO(AbstractOperator):
       idx_rec=self.idx_grid2grid_recv,
       node_freqs=self.node_coordinate_freqs,
       max_edge_length=np.max(self.dz_grid),
+      periodic=self.periodic,
     )
 
     graph = TypedGraph(

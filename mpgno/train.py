@@ -970,6 +970,7 @@ def main(argv):
       num_outputs=dataset.shape[-1],
       num_grid_nodes=dataset.shape[2:4],
       num_mesh_nodes=(FLAGS.num_mesh_nodes, FLAGS.num_mesh_nodes),
+      periodic=dataset.metadata.periodic,
       concatenate_tau=True,
       concatenate_t=True,
       conditional_normalization=False,

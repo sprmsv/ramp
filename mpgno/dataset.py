@@ -19,6 +19,7 @@ from mpgno.models.utils import compute_derivatives
 
 @dataclass
 class Metadata:
+  periodic: bool
   data_group: str
   active_variables: Sequence[int]
   target_variables: Sequence[int]
@@ -59,6 +60,7 @@ STATS_WAVE_EQUATION = {
 DATASET_METADATA = {
   # incompressible_fluids: [velocity, velocity]
   'incompressible_fluids/brownian_bridge': Metadata(
+    periodic=True,
     data_group='velocity',
     active_variables=ACTIVE_VARS_INCOMPRESSIBLE_FLUIDS,
     target_variables=TARGET_VARS_INCOMPRESSIBLE_FLUIDS,
@@ -66,6 +68,7 @@ DATASET_METADATA = {
     signed=True,
   ),
   'incompressible_fluids/gaussians': Metadata(
+    periodic=True,
     data_group='velocity',
     active_variables=ACTIVE_VARS_INCOMPRESSIBLE_FLUIDS,
     target_variables=TARGET_VARS_INCOMPRESSIBLE_FLUIDS,
@@ -73,6 +76,7 @@ DATASET_METADATA = {
     signed=True,
   ),
   'incompressible_fluids/pwc': Metadata(
+    periodic=True,
     data_group='velocity',
     active_variables=ACTIVE_VARS_INCOMPRESSIBLE_FLUIDS,
     target_variables=TARGET_VARS_INCOMPRESSIBLE_FLUIDS,
@@ -80,6 +84,7 @@ DATASET_METADATA = {
     signed=True,
   ),
   'incompressible_fluids/shear_layer': Metadata(
+    periodic=True,
     data_group='velocity',
     active_variables=ACTIVE_VARS_INCOMPRESSIBLE_FLUIDS,
     target_variables=TARGET_VARS_INCOMPRESSIBLE_FLUIDS,
@@ -87,6 +92,7 @@ DATASET_METADATA = {
     signed=True,
   ),
   'incompressible_fluids/sines': Metadata(
+    periodic=True,
     data_group='velocity',
     active_variables=ACTIVE_VARS_INCOMPRESSIBLE_FLUIDS,
     target_variables=TARGET_VARS_INCOMPRESSIBLE_FLUIDS,
@@ -94,6 +100,7 @@ DATASET_METADATA = {
     signed=True,
   ),
   'incompressible_fluids/vortex_sheet': Metadata(
+    periodic=True,
     data_group='velocity',
     active_variables=ACTIVE_VARS_INCOMPRESSIBLE_FLUIDS,
     target_variables=TARGET_VARS_INCOMPRESSIBLE_FLUIDS,
@@ -102,6 +109,7 @@ DATASET_METADATA = {
   ),
   # compressible_flow: [density, velocity, velocity, pressure, energy]
   'compressible_flow/cloudshock': Metadata(
+    periodic=True,
     data_group='data',
     active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
     target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
@@ -109,6 +117,7 @@ DATASET_METADATA = {
     signed=[False, True, True, False, False],
   ),
   'compressible_flow/gauss': Metadata(
+    periodic=True,
     data_group='data',
     active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
     target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
@@ -116,6 +125,7 @@ DATASET_METADATA = {
     signed=[False, True, True, False, False],
   ),
   'compressible_flow/kh': Metadata(
+    periodic=True,
     data_group='data',
     active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
     target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
@@ -123,6 +133,7 @@ DATASET_METADATA = {
     signed=[False, True, True, False, False],
   ),
   'compressible_flow/richtmyer_meshkov': Metadata(
+    periodic=True,
     data_group='solution',
     active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
     target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
@@ -130,6 +141,7 @@ DATASET_METADATA = {
     signed=[False, True, True, False, False],
   ),
   'compressible_flow/riemann': Metadata(
+    periodic=True,
     data_group='data',
     active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
     target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
@@ -137,6 +149,7 @@ DATASET_METADATA = {
     signed=[False, True, True, False, False],
   ),
   'compressible_flow/riemann_curved': Metadata(
+    periodic=True,
     data_group='data',
     active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
     target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
@@ -144,6 +157,7 @@ DATASET_METADATA = {
     signed=[False, True, True, False, False],
   ),
   'compressible_flow/riemann_kh': Metadata(
+    periodic=True,
     data_group='data',
     active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
     target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
@@ -151,6 +165,7 @@ DATASET_METADATA = {
     signed=[False, True, True, False, False],
   ),
   'compressible_flow/gravity/blast': Metadata(
+    periodic=True,
     data_group='solution',
     active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
     target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
@@ -158,6 +173,7 @@ DATASET_METADATA = {
     signed=[False, True, True, False, False],
   ),
   'compressible_flow/gravity/rayleigh_taylor': Metadata(
+    periodic=True,
     data_group='solution',
     active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
     target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
@@ -166,6 +182,7 @@ DATASET_METADATA = {
   ),
   # reaction_diffusion
   'reaction_diffusion/allen_cahn': Metadata(
+    periodic=False,
     data_group='solution',
     active_variables=[0],
     target_variables=[0],
@@ -174,6 +191,7 @@ DATASET_METADATA = {
   ),
   # wave_equation
   'wave_equation/seismic_20step': Metadata(
+    periodic=False,
     data_group='solution',
     active_variables=[0],
     target_variables=[0],
@@ -181,6 +199,7 @@ DATASET_METADATA = {
     signed=True,
   ),
   'wave_equation/gaussians_15step': Metadata(
+    periodic=False,
     data_group='solution',
     active_variables=[0],
     target_variables=[0],

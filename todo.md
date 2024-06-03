@@ -11,6 +11,8 @@
 - Remove periodic connections and try again with wave_equation datasets
     * Concatenate a feature for the boundary nodes
 
+- Investigate the effect of removing the periodic connections for periodic BC
+
 - Investigate the effect of edge masking with OF=4 on the final error
     * grid2mesh, multimesh, mesh2grid
 
@@ -19,7 +21,6 @@
         - This masking "can" be different in the encoder and the decoder
     * Use edge length in the message-passing
         - Weighted average of the messages with distances as weights
-    * If you're too misreable, plot the edge connections to be absolutely sure about them
 
 - Investigate performance with other resolutions
     * Train with 64x64
