@@ -144,10 +144,6 @@ def train(
 ) -> TrainState:
   """Trains a model and returns the state."""
 
-  # Samples
-  sample_traj = dataset.sample
-  sample_traj = jnp.array(sample_traj)
-
   # Set constants
   num_samples_trn = dataset.nums['train']
   num_times = dataset.shape[1]
@@ -377,6 +373,44 @@ def train(
     t_lag_batch = jnp.delete(t_lag_batch, idx_invalid_pairs, axis=0)
     tau_batch = jnp.delete(tau_batch, idx_invalid_pairs, axis=0)
     u_tgt_batch = jnp.delete(u_tgt_batch, idx_invalid_pairs, axis=0)
+
+    # Add the self-pairs (tau=0)
+    if isinstance(stepper, OutputUpdater):
+      # Index trajectories and times and collect input/output pairs
+      # -> [num_lead_times, batch_size_per_device, 1, ...]
+      _u_lag_batch = jax.vmap(
+          lambda lt: jax.lax.dynamic_slice_in_dim(
+            operand=trajs,
+            start_index=(lt-unroll_offset), slice_size=1, axis=1)
+      )(lead_times)
+      _t_lag_batch = jax.vmap(
+          lambda lt: jax.lax.dynamic_slice_in_dim(
+            operand=times,
+            start_index=(lt-unroll_offset), slice_size=1, axis=1)
+      )(lead_times)
+      _u_tgt_batch = jax.vmap(
+          lambda lt: jax.lax.dynamic_slice_in_dim(
+            operand=trajs,
+            start_index=(lt), slice_size=1, axis=1)
+      )(lead_times)
+      _tau_batch = jnp.tile(
+        jnp.arange(1).reshape(1, 1, 1, 1),
+        reps=(num_lead_times, batch_size_per_device, 1, 1)
+      )
+
+      # Put all pairs along the batch axis
+      # -> [batch_size_per_device * num_lead_times, ...]
+      _u_lag_batch = _u_lag_batch.reshape((num_lead_times*batch_size_per_device), 1, *num_grid_points, num_vars)
+      _t_lag_batch = _t_lag_batch.reshape((num_lead_times*batch_size_per_device), 1)
+      _tau_batch = _tau_batch.reshape((num_lead_times*batch_size_per_device), 1)
+      _u_tgt_batch = _u_tgt_batch.reshape((num_lead_times*batch_size_per_device), 1, *num_grid_points, num_vars)
+
+      # Concatenate with the (tau > 0) pairs
+      # -> [batch_size_per_device * (num_valid_pairs + 1), ...]
+      u_lag_batch = jnp.concatenate([_u_lag_batch, u_lag_batch], axis=0)
+      t_lag_batch = jnp.concatenate([_t_lag_batch, t_lag_batch], axis=0)
+      tau_batch = jnp.concatenate([_tau_batch, tau_batch], axis=0)
+      u_tgt_batch = jnp.concatenate([_u_tgt_batch, u_tgt_batch], axis=0)
 
     # Shuffle and split the pairs
     # -> [num_valid_pairs, batch_size_per_device, ...]
