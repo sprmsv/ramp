@@ -1,20 +1,29 @@
 # NEXT STEPS
 
-- (Repeat and) check E260
-    - Evaluate time inter- and extrapolation::
-        - Compare D=1 with D=4 and D=7
-        * Try concatenate_t=off and/or concatenate_tau=off
+- Streamline the evaluation procedure (using GPUs)
+    * Create a test set in Dataset
+    * Have a single script for all evaluations
+    * Fix the plottings
+    * Separate different evaluations
+    * Parallelize and compile
+    * Measure inferrence time !!
 
-    - Evaluate the effect of `direct_steps` on the final error
-        * Compare the final performance with `direct_steps=1`
+- E260: Compare and fix the stepping method
+
+- Evaluate time inter- and extrapolation:
+    - E260: Compare D=1 with D=4 and D=7
+    - E260: Compare different steppers
+    * Try concatenate_t=off and/or concatenate_tau=off
+
+- Evaluate the effect of `direct_steps` on the final error
+    - E260: Compare the final performance with `direct_steps=1`
+    * Start from trained parameters with direct_steps=1 (turn off scheduling)
 
 - Check the wave_equation datasets (E261)
     * Concatenate a feature for the boundary nodes
+    * Try to avoid overfitting (MP steps, latent size, etc.)
 
 - Investigate the effect of removing the periodic connections for periodic BC (E261 and E262)
-
-- Investigate the effect of edge masking with OF=4 on the final error
-    * grid2mesh, multimesh, mesh2grid
 
 - Continuous-discrete equivariance
     * Mask the nodes during training (p_max=0.5)
@@ -26,27 +35,18 @@
     * Train with 64x64
     * Large overlap factors (4 or 8)
     * Remove grid message-passing
-    - Also check the effect of changing mesh resolution
-
-- Move evaluations and plots to a script
-    * Create a test set in Dataset
-    * Add downsampling in Dataset
 
 - Reproduce experiments for reporting in the thesis
     * pull the latest version
+    * Fix what needs to be fixed
     * 1000 epochs
 
 - Experiment with the baseline models
     - GNO, brandstetter, MeshGraphNets, (FNO), (U-Net), (CNO), (GNOT), (CNN)
 
-- Get space-continuous outputs
-    - Evaluate space inter- and extrapolation
-
-- Adapt for other boundary conditions (e.g., open, Robin)
-
-- adapt for unstructured grids
-
-- adapt for time-independent problems
+- Extend for other boundary conditions (e.g., open, Robin)
+- Extend for unstructured grids
+- Extend for time-independent problems
 
 ## Other
 - Add uncertainty to the errors
