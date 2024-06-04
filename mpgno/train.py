@@ -1003,14 +1003,19 @@ def main(argv):
   with open(DIR / 'stats.pkl', 'wb') as f:
     pickle.dump(file=f, obj=dataset.stats)
 
+  schedule_direct_steps = True
+  if (FLAGS.direct_steps == 1):
+    schedule_direct_steps = False
+
   # Split the epochs
   epochs_u00 = int(FLAGS.epochs // (1 + .2 * FLAGS.unroll_steps))
   if FLAGS.unroll_steps:
     epochs_uxx = int((FLAGS.epochs - epochs_u00) // FLAGS.unroll_steps)
     epochs_uff = epochs_uxx + (FLAGS.epochs - epochs_u00) % FLAGS.unroll_steps
-  epochs_u00_warmup = int(.2 * epochs_u00)
-  epochs_u00_dxx = epochs_u00_warmup // (FLAGS.direct_steps - 1)
-  epochs_u00_dff = (epochs_u00 - epochs_u00_warmup) + epochs_u00_warmup % (FLAGS.direct_steps - 1)
+  if schedule_direct_steps:
+    epochs_u00_warmup = int(.2 * epochs_u00)
+    epochs_u00_dxx = epochs_u00_warmup // (FLAGS.direct_steps - 1)
+    epochs_u00_dff = (epochs_u00 - epochs_u00_warmup) + epochs_u00_warmup % (FLAGS.direct_steps - 1)
 
   # Initialzize the model or use the loaded parameters
   if not params:
@@ -1031,7 +1036,6 @@ def main(argv):
   logging.info(f'Total number of trainable paramters: {n_model_parameters}')
 
   # Train the model without unrolling
-  schedule_direct_steps = True
   epochs_trained = 0
   num_batches = dataset.nums['train'] // FLAGS.batch_size
   num_times = dataset.shape[1]
