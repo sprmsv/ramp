@@ -8,10 +8,10 @@
     - Evaluate the effect of `direct_steps` on the final error
         * Compare the final performance with `direct_steps=1`
 
-- Remove periodic connections and try again with wave_equation datasets
+- Check the wave_equation datasets (E261)
     * Concatenate a feature for the boundary nodes
 
-- Investigate the effect of removing the periodic connections for periodic BC
+- Investigate the effect of removing the periodic connections for periodic BC (E261 and E262)
 
 - Investigate the effect of edge masking with OF=4 on the final error
     * grid2mesh, multimesh, mesh2grid
