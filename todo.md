@@ -2,6 +2,7 @@
 
 - Streamline the evaluation procedure (using GPUs)
     * Create a test set in Dataset
+    * Update your metrics: use POSEIDON
     * Have a single script for all evaluations
     * Fix the plottings
     * Separate different evaluations
@@ -42,11 +43,13 @@
     * 1000 epochs
 
 - Experiment with the baseline models
-    - GNO, brandstetter, MeshGraphNets, (FNO), (U-Net), (CNO), (GNOT), (CNN)
+    - GNO, brandstetter, MeshGraphNets, (scOT), (FNO), (U-Net), (CNO), (GNOT), (CNN)
 
-- Extend for other boundary conditions (e.g., open, Robin)
 - Extend for unstructured grids
+    - Take input at any point and give output at any point
+    - Build the graphs and edges on the fly based on the input
 - Extend for time-independent problems
+- Extend for other boundary conditions (e.g., open, Robin)
 
 ## Other
 - Add uncertainty to the errors
@@ -60,6 +63,8 @@
 - Try data augmentation
     - Try shifting first (approved)
     - Try repeating (physically incorrect)
+
+- Check the internal features of the graph and try to make sense of them
 
 ## Sequential data
 - Implement and try the LSTM idea from presentation-240315-updates

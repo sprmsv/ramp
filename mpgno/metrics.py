@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from copy import copy
+from typing import Sequence
 
 import jax.numpy as jnp
 
@@ -11,8 +12,8 @@ class BatchMetrics:
     mse: Array = None
     l1: Array = None
     l2: Array = None
-    l1_alt: Array = None
-    l2_alt: Array = None
+    l1_agg: Array = None
+    l2_agg: Array = None
 
     def map(self, f):
         for key in self.__dict__.keys():
@@ -32,8 +33,8 @@ class Metrics:
     mse: float = None
     l1: float = None
     l2: float = None
-    l1_alt: float = None
-    l2_alt: float = None
+    l1_agg: float = None
+    l2_agg: float = None
 
 @dataclass
 class EvalMetrics:
@@ -44,113 +45,112 @@ class EvalMetrics:
   def to_dict(self):
       return {key: val.__dict__ for key, val in self.__dict__.items()}
 
-def mse_error(predictions: Array, labels: Array) -> Array:
+def lp_norm(arr: Array, p: int = 2, axis: Sequence[int] = None) -> Array:
+    """
+    Returns the Bochner Lp-norm of an array.
+
+    Args:
+        arr: Point-wise values on a uniform grid with the dimensions
+            [batch, time, space_0, space_1, var]
+        p: Order of the norm. Defaults to 2.
+        axis: The axes for to sum over. Defaults to None.
+
+    Returns:
+        A scalar value for each sample in the batch [batch, *remaining_axes]
+    """
+
+    # Set the axis
+    if axis is None:
+        axis = (1, 2, 3, 4)
+
+    # Sum on timespace (quadrature) and variables
+    abs_pow_sum = jnp.sum(jnp.power(jnp.abs(arr), p), axis=axis)
+    # Take the p-th root
+    pth_root = jnp.power(abs_pow_sum, (1/p))
+
+    return pth_root
+
+def rel_lp_error(gtr: Array, prd: Array, p: int = 2, vars: Sequence[int] = None) -> Array:
+    """
+    Returns the relative Bochner Lp-norm of an array with respect to a ground-truth.
+
+    Args:
+        gtr: Point-wise values of a ground-truth function on a uniform
+            grid with the dimensions [batch, time, space_0, space_1, var]
+        prd: Point-wise values of a predicted function on a uniform
+            grid with the dimensions [batch, time, space_0, space_1, var]
+        p: Order of the norm. Defaults to 2.
+        vars: Index of the variables to use for computing the error. Defaults to None.
+
+    Returns:
+        A scalar value for each sample in the batch [batch,]
+    """
+
+    err = (prd - gtr)
+    if vars is not None:
+        err = err[..., vars]
+    err_norm = lp_norm(err, p=p)
+    gtr_norm = lp_norm(gtr, p=p)
+
+    return (err_norm / gtr_norm)
+
+def rel_lp_error_per_var(gtr: Array, prd: Array, p: int = 2, vars: Sequence[int] = None) -> Array:
+    """
+    Returns the relative Bochner Lp-norm of an array with respect to a ground-truth.
+    The entries of the last axis are interpreted as values of independent scalar-valued
+    functions.
+
+    Args:
+        gtr: Point-wise values of a ground-truth function on a uniform
+            grid with the dimensions [batch, time, space_0, space_1, var]
+        prd: Point-wise values of a predicted function on a uniform
+            grid with the dimensions [batch, time, space_0, space_1, var]
+        p: Order of the norm. Defaults to 2.
+        vars: Index of the variables to use for computing the error. Defaults to None.
+
+    Returns:
+        A scalar value for each sample in the batch [batch, var]
+    """
+
+    err = (prd - gtr)
+    if vars is not None:
+        err = err[..., vars]
+    err_norm = lp_norm(err, p=p, axis=(1, 2, 3))
+    gtr_norm = lp_norm(gtr, p=p, axis=(1, 2, 3))
+
+    return (err_norm / gtr_norm)
+
+def rel_lp_loss(gtr: Array, prd: Array, p: int = 2) -> Array:
+    """
+    Returns the mean relative Bochner Lp-norm of an array with respect to a ground-truth.
+
+    Args:
+        gtr: Point-wise values of a ground-truth function on a uniform
+            grid with the dimensions [batch, time, space_0, space_1, var]
+        prd: Point-wise values of a predicted function on a uniform
+            grid with the dimensions [batch, time, space_0, space_1, var]
+        p: Order of the norm. Defaults to 2.
+
+    Returns:
+        Mean relative Lp-norm over the batch.
+    """
+
+    return jnp.mean(rel_lp_error(gtr, prd, p=p))
+
+def mse_error(gtr: Array, prd: Array) -> Array:
     """
     Returns the mean squared error per variable.
-    All input shapes are [batch_size, num_times_output,
-        num_grid_points_0, num_grid_points_1, num_outputs]
-    Output shape is [batch_size, num_outputs].
+    All input shapes are [batch, time, space_0, space_1, var]
+    Output shape is [batch,].
     """
 
-    mean_err_per_var_squared = jnp.mean(jnp.power(predictions - labels, 2), axis=(1, 2, 3))
+    return jnp.mean(jnp.power(prd - gtr, 2), axis=(1, 2, 3, 4))
 
-    return mean_err_per_var_squared
-
-def rel_l1_error(predictions: Array, labels: Array) -> Array:
-    """
-    Returns the relative L1-norm of the error per variable.
-    All input shapes are [batch_size, num_times_output,
-        num_grid_points_0, num_grid_points_1, num_outputs]
-    Output shape is [batch_size, num_outputs].
-    """
-
-    sum_err_per_var_abs = jnp.sum(jnp.abs(predictions - labels), axis=(1, 2, 3))
-    sum_lab_per_var_abs = jnp.sum(jnp.abs(labels), axis=(1, 2, 3))
-    rel_l1_err_per_var = (sum_err_per_var_abs / sum_lab_per_var_abs)
-
-    return rel_l1_err_per_var
-
-def rel_l2_error(predictions: Array, labels: Array) -> Array:
-    """
-    Returns the relative L2-norm of the error per variable.
-    All input shapes are [batch_size, num_times_output,
-        num_grid_points_0, num_grid_points_1, num_outputs]
-    Output shape is [batch_size, num_outputs].
-    """
-
-    sum_err_per_var_squared = jnp.sum(jnp.power(predictions - labels, 2), axis=(1, 2, 3))
-    sum_lab_per_var_squared = jnp.sum(jnp.power(labels, 2), axis=(1, 2, 3))
-    rel_l2_err_per_var = jnp.sqrt(sum_err_per_var_squared / sum_lab_per_var_squared)
-
-    return rel_l2_err_per_var
-
-def rel_l1_error_sum_vars(predictions: Array, labels: Array) -> Array:
-    """
-    Returns the relative L1-norm of the error for all variables.
-    All input shapes are [batch_size, num_times_output,
-        num_grid_points_0, num_grid_points_1, num_outputs]
-    Output shape is [batch_size,].
-    """
-
-    sum_err_abs = jnp.sum(jnp.abs(predictions - labels), axis=(1, 2, 3, 4))
-    sum_lab_abs = jnp.sum(jnp.abs(labels), axis=(1, 2, 3, 4))
-    rel_l1_err = (sum_err_abs / sum_lab_abs)
-
-    return rel_l1_err
-
-def rel_l2_error_sum_vars(predictions: Array, labels: Array) -> Array:
-    """
-    Returns the relative L2-norm of the error for all variables.
-    All input shapes are [batch_size, num_times_output,
-        num_grid_points_0, num_grid_points_1, num_outputs]
-    Output shape is [batch_size,].
-    """
-
-    sum_err_squared = jnp.sum(jnp.power(predictions - labels, 2), axis=(1, 2, 3, 4))
-    sum_lab_squared = jnp.sum(jnp.power(labels, 2), axis=(1, 2, 3, 4))
-    rel_l2_err = jnp.sqrt(sum_err_squared / sum_lab_squared)
-
-    return rel_l2_err
-
-def mse_loss(predictions: Array, labels: Array) -> ScalarArray:
+def mse_loss(gtr: Array, prd: Array) -> ScalarArray:
     """
     Returns the mean squared error.
-    Input shapes are [batch_size, num_times_output, num_grid_points, num_outputs].
-    Output shape is [1].
+    All input shapes are [batch, time, space_0, space_1, var]
+    Output shape is a scalar.
     """
 
-    return jnp.mean(jnp.power(predictions - labels, 2))
-
-def msre_loss(predictions: Array, labels: Array) -> ScalarArray:
-    """
-    Returns the mean squared relative error.
-    Input shapes are [batch_size, num_times_output, num_grid_points, num_outputs].
-    Output shape is [1].
-    """
-
-    eps = 1e-08
-    return jnp.mean(jnp.power((predictions - labels) / (labels + eps), 2))
-
-def rel_l1_loss(predictions: Array, labels: Array) -> ScalarArray:
-    """
-    Returns the mean relative L1-norm loss.
-    Input shapes are [batch_size, num_times_output, num_grid_points, num_outputs].
-    Output shape is [1].
-    """
-
-    rel_err_per_var = rel_l1_error(predictions, labels)
-    rel_err_agg = jnp.linalg.norm(rel_err_per_var, axis=-1)
-
-    return jnp.mean(rel_err_agg)
-
-def rel_l2_loss(predictions: Array, labels: Array) -> ScalarArray:
-    """
-    Returns the mean relative L2-norm loss.
-    Input shapes are [batch_size, num_times_output, num_grid_points, num_outputs].
-    Output shape is [1].
-    """
-
-    rel_err_per_var = rel_l2_error(predictions, labels)
-    rel_err_agg = jnp.linalg.norm(rel_err_per_var, axis=-1)
-
-    return jnp.mean(rel_err_agg)
+    return jnp.mean(jnp.power(prd - gtr, 2))

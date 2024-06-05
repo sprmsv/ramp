@@ -137,7 +137,7 @@ class TimeDerivativeUpdater(Stepper):
       scale=stats['der']['std'],
     )
 
-    return (d_prd_nrm, d_tgt_nrm)
+    return (d_tgt_nrm, d_prd_nrm)
 
 class ResidualUpdater(Stepper):
 
@@ -228,7 +228,7 @@ class ResidualUpdater(Stepper):
       scale=stats['res']['std'],
     )
 
-    return (r_prd_nrm, r_tgt_nrm)
+    return (r_tgt_nrm, r_prd_nrm)
 
 class OutputUpdater(Stepper):
 
@@ -315,7 +315,7 @@ class OutputUpdater(Stepper):
       scale=stats['trj']['std'],
     )
 
-    return (u_prd_nrm, u_tgt_nrm)
+    return (u_tgt_nrm, u_prd_nrm)
 
 class AutoregressiveStepper:
 

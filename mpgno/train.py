@@ -27,10 +27,9 @@ from mpgno.stepping import OutputUpdater
 from mpgno.dataset import Dataset
 from mpgno.models.mpgno import MPGNO, AbstractOperator
 from mpgno.utils import disable_logging, Array, shuffle_arrays, split_arrays, normalize
-from mpgno.metrics import mse_loss, rel_l1_loss
 from mpgno.metrics import BatchMetrics, Metrics, EvalMetrics
-from mpgno.metrics import mse_error, rel_l2_error, rel_l1_error
-from mpgno.metrics import rel_l1_error_sum_vars, rel_l2_error_sum_vars
+from mpgno.metrics import mse_loss, rel_lp_loss
+from mpgno.metrics import mse_error, rel_lp_error, rel_lp_error_per_var
 
 
 NUM_DEVICES = jax.local_device_count()
@@ -38,7 +37,7 @@ EVAL_FREQ = 50
 
 IDX_FN = 7
 TIME_DOWNSAMPLE_FACTOR = 2
-SPACE_DOWNSAMPLE_FACTOR = 1
+SPACE_DOWNSAMPLE_FACTOR = 2  # TMP
 
 # FLAGS::general
 FLAGS = flags.FLAGS
@@ -143,7 +142,7 @@ def train(
   unroll_steps: int,
   epochs: int,
   epochs_before: int = 0,
-  loss_fn: Callable = rel_l1_loss,
+  loss_fn: Callable = rel_lp_loss,
 ) -> TrainState:
   """Trains a model and returns the state."""
 
@@ -550,6 +549,7 @@ def train(
       u_prd = u_prd.squeeze(axis=2).swapaxes(0, 1)
 
       # Get target variables (velocities) and normalize using global statistics
+      # TODO: Remove if not used
       _vel_prd = normalize(
         arr=u_prd[..., dataset.metadata.target_variables],
         shift=dataset.metadata.stats_target_variables['mean'],
@@ -563,11 +563,11 @@ def train(
 
       # Compute metrics
       batch_metrics = BatchMetrics(
-        mse=(jnp.linalg.norm(mse_error(u_prd, u_tgt[lt]), axis=1) / num_lead_times),
-        l1=(jnp.linalg.norm(rel_l1_error(u_prd, u_tgt[lt]), axis=1) / num_lead_times),
-        l2=(jnp.linalg.norm(rel_l2_error(u_prd, u_tgt[lt]), axis=1) / num_lead_times),
-        l1_alt=(rel_l1_error_sum_vars(_vel_prd, _vel_tgt) / num_lead_times),
-        l2_alt=(rel_l2_error_sum_vars(_vel_prd, _vel_tgt) / num_lead_times),
+        mse=(mse_error(u_tgt[lt], u_prd) / num_lead_times),
+        l1=(rel_lp_error(u_tgt[lt], u_prd, p=1) / num_lead_times),
+        l2=(rel_lp_error(u_tgt[lt], u_prd, p=2) / num_lead_times),
+      l1_agg=(jnp.linalg.norm(rel_lp_error_per_var(u_tgt[lt], u_prd, p=1), ord=1, axis=1) / num_lead_times),
+      l2_agg=(jnp.linalg.norm(rel_lp_error_per_var(u_tgt[lt], u_prd, p=2), ord=2, axis=1) / num_lead_times),
       )
 
       carry += batch_metrics
@@ -579,8 +579,8 @@ def train(
       mse=jnp.zeros(shape=(batch_size_per_device,)),
       l1=jnp.zeros(shape=(batch_size_per_device,)),
       l2=jnp.zeros(shape=(batch_size_per_device,)),
-      l1_alt=jnp.zeros(shape=(batch_size_per_device,)),
-      l2_alt=jnp.zeros(shape=(batch_size_per_device,)),
+      l1_agg=jnp.zeros(shape=(batch_size_per_device,)),
+      l2_agg=jnp.zeros(shape=(batch_size_per_device,)),
     )
     batch_metrics_mean = jax.lax.fori_loop(
       body_fun=get_direct_errors,
@@ -620,6 +620,7 @@ def train(
     )
 
     # Get target variables (velocities) and normalize using global statistics
+    # TODO: Remove if not used
     _vel_prd = normalize(
       arr=u_prd[..., dataset.metadata.target_variables],
       shift=dataset.metadata.stats_target_variables['mean'],
@@ -633,12 +634,13 @@ def train(
 
     # Calculate the errors
     batch_metrics = BatchMetrics(
-      mse=jnp.linalg.norm(mse_error(u_prd, u_tgt), axis=1),
-      l1=jnp.linalg.norm(rel_l1_error(u_prd, u_tgt), axis=1),
-      l2=jnp.linalg.norm(rel_l2_error(u_prd, u_tgt), axis=1),
-      l1_alt=rel_l1_error_sum_vars(_vel_prd, _vel_tgt),
-      l2_alt=rel_l2_error_sum_vars(_vel_prd, _vel_tgt),
+      mse=mse_error(u_tgt, u_prd),
+      l1=rel_lp_error(u_tgt, u_prd, p=1),
+      l2=rel_lp_error(u_tgt, u_prd, p=2),
+      l1_agg=jnp.linalg.norm(rel_lp_error_per_var(u_tgt, u_prd, p=1), ord=1, axis=1),
+      l2_agg=jnp.linalg.norm(rel_lp_error_per_var(u_tgt, u_prd, p=2), ord=2, axis=1),
     )
+
 
     return batch_metrics.__dict__
 
@@ -676,6 +678,7 @@ def train(
       )
 
     # Get target variables (velocities) and normalize using global statistics
+    # TODO: Remove if not used
     _vel_prd = normalize(
       arr=u_prd[..., dataset.metadata.target_variables],
       shift=dataset.metadata.stats_target_variables['mean'],
@@ -689,11 +692,11 @@ def train(
 
     # Calculate the errors
     batch_metrics = BatchMetrics(
-      mse=jnp.linalg.norm(mse_error(u_prd, u_tgt), axis=1),
-      l1=jnp.linalg.norm(rel_l1_error(u_prd, u_tgt), axis=1),
-      l2=jnp.linalg.norm(rel_l2_error(u_prd, u_tgt), axis=1),
-      l1_alt=rel_l1_error_sum_vars(_vel_prd, _vel_tgt),
-      l2_alt=rel_l2_error_sum_vars(_vel_prd, _vel_tgt),
+      mse=mse_error(u_tgt, u_prd),
+      l1=rel_lp_error(u_tgt, u_prd, p=1),
+      l2=rel_lp_error(u_tgt, u_prd, p=2),
+      l1_agg=jnp.linalg.norm(rel_lp_error_per_var(u_tgt, u_prd, p=1), ord=1, axis=1),
+      l2_agg=jnp.linalg.norm(rel_lp_error_per_var(u_tgt, u_prd, p=2), ord=2, axis=1),
     )
 
     return batch_metrics.__dict__
@@ -760,22 +763,22 @@ def train(
       mse=jnp.median(jnp.concatenate([m.mse for m in metrics_direct]), axis=0).item(),
       l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_direct]), axis=0).item(),
       l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_direct]), axis=0).item(),
-      l1_alt=jnp.median(jnp.concatenate([m.l1_alt for m in metrics_direct]), axis=0).item(),
-      l2_alt=jnp.median(jnp.concatenate([m.l2_alt for m in metrics_direct]), axis=0).item(),
+      l1_agg=jnp.median(jnp.concatenate([m.l1_agg for m in metrics_direct]), axis=0).item(),
+      l2_agg=jnp.median(jnp.concatenate([m.l2_agg for m in metrics_direct]), axis=0).item(),
     ) if direct else None
     metrics_rollout = Metrics(
       mse=jnp.median(jnp.concatenate([m.mse for m in metrics_rollout]), axis=0).item(),
       l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_rollout]), axis=0).item(),
       l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_rollout]), axis=0).item(),
-      l1_alt=jnp.median(jnp.concatenate([m.l1_alt for m in metrics_rollout]), axis=0).item(),
-      l2_alt=jnp.median(jnp.concatenate([m.l2_alt for m in metrics_rollout]), axis=0).item(),
+      l1_agg=jnp.median(jnp.concatenate([m.l1_agg for m in metrics_rollout]), axis=0).item(),
+      l2_agg=jnp.median(jnp.concatenate([m.l2_agg for m in metrics_rollout]), axis=0).item(),
     ) if rollout else None
     metrics_final = Metrics(
       mse=jnp.median(jnp.concatenate([m.mse for m in metrics_final]), axis=0).item(),
       l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_final]), axis=0).item(),
       l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_final]), axis=0).item(),
-      l1_alt=jnp.median(jnp.concatenate([m.l1_alt for m in metrics_final]), axis=0).item(),
-      l2_alt=jnp.median(jnp.concatenate([m.l2_alt for m in metrics_final]), axis=0).item(),
+      l1_agg=jnp.median(jnp.concatenate([m.l1_agg for m in metrics_final]), axis=0).item(),
+      l2_agg=jnp.median(jnp.concatenate([m.l2_agg for m in metrics_final]), axis=0).item(),
     ) if final else None
 
     # Build the metrics object
