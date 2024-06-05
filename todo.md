@@ -1,5 +1,7 @@
 # NEXT STEPS
 
+* Add a fixed n_test to train.sh !!
+
 - Streamline the evaluation procedure (using GPUs)
     * Create a test set in Dataset
     * Update your metrics: use POSEIDON

@@ -248,8 +248,8 @@ class Dataset:
     self.idx_modes = {
       # First n_train samples
       'train': jax.random.permutation(key, n_train),
-      # Last n_valid samples before the test samples
-      'valid': np.arange((self.length - n_test - n_valid), (self.length - n_test)),
+      # First n_valid samples after the training samples
+      'valid': np.arange(n_train, (n_train + n_valid)),
       # Last n_test samples
       'test': np.arange((self.length - n_test), self.length),
     }
@@ -265,7 +265,7 @@ class Dataset:
     if self.preload:
       _len_dataset = self.reader[self.data_group].shape[0]
       train_data = self.reader[self.data_group][np.arange(n_train)]
-      valid_data = self.reader[self.data_group][np.arange((_len_dataset - n_test - n_valid), (_len_dataset - n_test))]
+      valid_data = self.reader[self.data_group][np.arange(n_train, (n_train + n_valid))]
       test_data = self.reader[self.data_group][np.arange((_len_dataset - n_test), (_len_dataset))]
       self.data = np.concatenate([train_data, valid_data, test_data], axis=0)
 
