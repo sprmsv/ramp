@@ -94,6 +94,9 @@ flags.DEFINE_integer(name='n_train', default=(2**9), required=False,
 flags.DEFINE_integer(name='n_valid', default=(2**8), required=False,
   help='Number of validation samples'
 )
+flags.DEFINE_integer(name='n_test', default=(2**8), required=False,
+  help='Number of test samples'
+)
 
 # FLAGS::model
 flags.DEFINE_integer(name='num_mesh_nodes', default=64, required=False,
@@ -942,6 +945,7 @@ def main(argv):
     datapath=FLAGS.datapath,
     n_train=FLAGS.n_train,
     n_valid=FLAGS.n_valid,
+    n_test=FLAGS.n_test,
     time_downsample_factor=TIME_DOWNSAMPLE_FACTOR,
     space_downsample_factor=SPACE_DOWNSAMPLE_FACTOR,
     cutoff=(IDX_FN + 1),

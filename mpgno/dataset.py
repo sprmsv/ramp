@@ -216,6 +216,7 @@ class Dataset:
     datapath: str,
     n_train: int = 0,
     n_valid: int = 0,
+    n_test: int = 0,
     preload: bool = False,
     include_passive_variables: bool = False,
     time_downsample_factor: int = 1,
@@ -231,7 +232,7 @@ class Dataset:
       else self.metadata.active_variables)
     self.preload = preload
     self.data = None
-    self.length = ((n_train + n_valid) if self.preload
+    self.length = ((n_train + n_valid + n_test) if self.preload
       else self.reader[self.data_group].shape[0])
     self.cutoff = cutoff if (cutoff is not None) else (self._fetch(0, raw=True)[0].shape[1])
     self.time_downsample_factor = time_downsample_factor
@@ -242,11 +243,15 @@ class Dataset:
       self.metadata.signed = [self.metadata.signed] * self.shape[-1]
 
     # Split the dataset
-    assert (n_train + n_valid) <= self.length
-    self.nums = {'train': n_train, 'valid': n_valid}
+    assert (n_train + n_valid + n_test) <= self.length
+    self.nums = {'train': n_train, 'valid': n_valid, 'test': n_test}
     self.idx_modes = {
-      'train': jax.random.permutation(key, n_train),  # First n_train samples
-      'valid': np.arange((self.length - n_valid), self.length),  # Last n_valid samples
+      # First n_train samples
+      'train': jax.random.permutation(key, n_train),
+      # Last n_valid samples before the test samples
+      'valid': np.arange((self.length - n_test - n_valid), (self.length - n_test)),
+      # Last n_test samples
+      'test': np.arange((self.length - n_test), self.length),
     }
 
     # Instantiate the dataset stats
@@ -260,8 +265,9 @@ class Dataset:
     if self.preload:
       _len_dataset = self.reader[self.data_group].shape[0]
       train_data = self.reader[self.data_group][np.arange(n_train)]
-      valid_data = self.reader[self.data_group][np.arange(_len_dataset - n_valid, _len_dataset)]
-      self.data = np.concatenate([train_data, valid_data], axis=0)
+      valid_data = self.reader[self.data_group][np.arange((_len_dataset - n_test - n_valid), (_len_dataset - n_test))]
+      test_data = self.reader[self.data_group][np.arange((_len_dataset - n_test), (_len_dataset))]
+      self.data = np.concatenate([train_data, valid_data, test_data], axis=0)
 
   def compute_stats(self,
       axes: Sequence[int] = (0,),
@@ -309,6 +315,7 @@ class Dataset:
       traj = self.data[np.sort(idx)]
     else:
       traj = self.reader[self.data_group][np.sort(idx)]
+
     # Move axes
     if len(traj.shape) == 5:
       traj = np.moveaxis(traj, source=(2, 3, 4), destination=(4, 2, 3))
@@ -342,6 +349,9 @@ class Dataset:
 
   def valid(self, idx: Union[int, Sequence]):
     return self._fetch_mode(idx, mode='valid')
+
+  def test(self, idx: Union[int, Sequence]):
+    return self._fetch_mode(idx, mode='test')
 
   def batches(self, mode: str, batch_size: int, key: flax.typing.PRNGKey = None):
     assert batch_size > 0
