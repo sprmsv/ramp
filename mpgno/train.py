@@ -28,16 +28,13 @@ from mpgno.dataset import Dataset
 from mpgno.models.mpgno import MPGNO, AbstractOperator
 from mpgno.utils import disable_logging, Array, shuffle_arrays, split_arrays, normalize
 from mpgno.metrics import BatchMetrics, Metrics, EvalMetrics
-from mpgno.metrics import mse_loss, rel_lp_loss
+from mpgno.metrics import rel_lp_loss
 from mpgno.metrics import mse_error, rel_lp_error, rel_lp_error_per_var
 
 
 NUM_DEVICES = jax.local_device_count()
 EVAL_FREQ = 50
-
-IDX_FN = 7
-TIME_DOWNSAMPLE_FACTOR = 2
-SPACE_DOWNSAMPLE_FACTOR = 2  # TMP
+IDX_FN = 14
 
 # FLAGS::general
 FLAGS = flags.FLAGS
@@ -58,6 +55,12 @@ flags.DEFINE_string(name='params', default=None, required=False,
 )
 flags.DEFINE_integer(name='seed', default=44, required=False,
   help='Seed for random number generator'
+)
+flags.DEFINE_integer(name='time_downsample_factor', default=2, required=False,
+  help='Factor for time downsampling'
+)
+flags.DEFINE_integer(name='space_downsample_factor', default=1, required=False,
+  help='Factor for space downsampling'
 )
 
 # FLAGS::training
@@ -656,13 +659,14 @@ def train(
   ) -> Mapping:
 
     # Set input and target
+    idx_fn = IDX_FN // FLAGS.time_downsample_factor
     u_inp = trajs[:, :1]
     t_inp = times[:, :1]
-    u_tgt = trajs[:, (IDX_FN):(IDX_FN+1)]
+    u_tgt = trajs[:, (idx_fn):(idx_fn+1)]
 
     # Get prediction at the final step
-    _num_jumps = IDX_FN // (direct_steps)
-    _num_direct_steps = IDX_FN % (direct_steps)
+    _num_jumps = idx_fn // (direct_steps)
+    _num_direct_steps = idx_fn % (direct_steps)
     variables = {'params': state.params}
     u_prd = predictor.jump(
       variables=variables,
@@ -751,7 +755,7 @@ def train(
 
       # Evaluate final prediction
       if final:
-        assert IDX_FN < trajs.shape[2]
+        assert (IDX_FN // FLAGS.time_downsample_factor) < trajs.shape[2]
         batch_metrics_final = _evaluate_final_prediction(
           state, stats, trajs, times,
         )
@@ -946,9 +950,9 @@ def main(argv):
     n_train=FLAGS.n_train,
     n_valid=FLAGS.n_valid,
     n_test=FLAGS.n_test,
-    time_downsample_factor=TIME_DOWNSAMPLE_FACTOR,
-    space_downsample_factor=SPACE_DOWNSAMPLE_FACTOR,
-    cutoff=(IDX_FN + 1),
+    time_downsample_factor=FLAGS.time_downsample_factor,
+    space_downsample_factor=FLAGS.space_downsample_factor,
+    cutoff=((IDX_FN // FLAGS.time_downsample_factor) + 1),
     preload=True,
     include_passive_variables=False,
   )

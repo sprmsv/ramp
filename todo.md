@@ -1,15 +1,9 @@
 # NEXT STEPS
 
-* Add a fixed n_test to train.sh !!
-
 - Streamline the evaluation procedure (using GPUs)
-    * Create a test set in Dataset
-    * Update your metrics: use POSEIDON
-    * Have a single script for all evaluations
-    * Fix the plottings
-    * Separate different evaluations
-    * Parallelize and compile
-    * Measure inferrence time !!
+    * Improve your plotting (add initial value too)
+
+- Add the first benchmarks: U-Net / U-ViT / FNO / CNO
 
 - E260: Compare and fix the stepping method
 

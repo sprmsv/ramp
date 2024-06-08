@@ -1,5 +1,6 @@
 from absl import logging
-from typing import Union, Sequence
+from time import time
+from typing import Union, Sequence, Callable
 
 import numpy as np
 import jax
@@ -23,6 +24,12 @@ class disable_logging:
 
   def __exit__(self, exc_type, exc_value, traceback):
     logging.set_verbosity(self.level_init)
+
+def profile(f: Callable, kwargs: dict, repeats: int = 1):
+  t_0 = time()
+  for _ in range(repeats):
+    _ = f(**kwargs)
+  return (time() - t_0)
 
 def shuffle_arrays(key: flax.typing.PRNGKey, arrays: Sequence[Array]) -> Sequence[Array]:
   """Shuffles a set of arrays with the same random permutation along the first axis."""

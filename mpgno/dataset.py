@@ -211,9 +211,9 @@ DATASET_METADATA = {
 class Dataset:
 
   def __init__(self,
-    key: flax.typing.PRNGKey,
     datadir: str,
     datapath: str,
+    key: flax.typing.PRNGKey = None,
     n_train: int = 0,
     n_valid: int = 0,
     n_test: int = 0,
@@ -225,6 +225,8 @@ class Dataset:
   ):
 
     # Set attributes
+    if key is None:
+      key = jax.random.PRNGKey(0)
     self.metadata = DATASET_METADATA[datapath]
     self.data_group = self.metadata.data_group
     self.reader = h5py.File(Path(datadir) / f'{datapath}.nc', 'r')
