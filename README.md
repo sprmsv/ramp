@@ -29,5 +29,5 @@ cd ~/venvs
 python -m virtualenv venv-NAME
 source venv-NAME/bin/activate
 pip install --upgrade "jax[cuda11_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
-pip install jraph flax matplotlib h5py optax
+pip install jraph flax matplotlib h5py optax pandas seaborn
 ```

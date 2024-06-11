@@ -921,6 +921,7 @@ def get_model(model_configs: Mapping[str, Any]) -> AbstractOperator:
   return model
 
 def main(argv):
+  # Check the number of arguments
   if len(argv) > 1:
     raise app.UsageError('Too many command-line arguments.')
 

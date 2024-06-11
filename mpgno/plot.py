@@ -2,6 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import matplotlib.colors
+import seaborn as sns
+import pandas as pd
 
 
 C_BLACK = '#000000'
@@ -29,6 +31,7 @@ CMAP_WRB = matplotlib.colors.LinearSegmentedColormap.from_list(
   N=200,
 )
 
+# TODO: Update
 def animate(trajs, idx_traj=0, symmetric=True, cmaps=CMAP_BBR, vertical=True):
 
   if not isinstance(trajs, list):
@@ -133,9 +136,13 @@ def plot_trajectory(traj, idx_time, idx_traj=0, symmetric=True, ylabels=None):
     label = ylabels[ivar] if ylabels else f'Variable {ivar:02d}'
     axs[ivar, 0].set(ylabel=label);
 
+  for ax in axs.flatten():
+    ax.set_xticks([])
+    ax.set_yticks([])
+
   return fig, axs
 
-def plot_estimations(u_gtr, u_prd, idx_time=-1, idx_traj=0, symmetric=True):
+def plot_estimations(u_gtr, u_prd, idx_out=-1, idx_inp=0, idx_traj=0, symmetric=True, names=None):
 
   _HEIGHT_PER_ROW = 2.5
   _HEIGHT_MARGIN = .2
@@ -145,47 +152,61 @@ def plot_estimations(u_gtr, u_prd, idx_time=-1, idx_traj=0, symmetric=True):
     symmetric = [symmetric] * n_vars
 
   fig, axs = plt.subplots(
-    nrows=n_vars, ncols=3,
-    figsize=(10, _HEIGHT_PER_ROW*n_vars+_HEIGHT_MARGIN),
+    nrows=n_vars, ncols=4,
+    figsize=(12, _HEIGHT_PER_ROW*n_vars+_HEIGHT_MARGIN),
     sharex=True, sharey=True,
   )
-  axs = axs.reshape(n_vars, 3)
+  axs = axs.reshape(n_vars, 4)
 
   u_err = (u_gtr - u_prd)
 
   for ivar in range(n_vars):
-    vmax_gtr = np.max(np.abs(u_gtr[idx_traj, idx_time, ..., ivar]))
+    vmax_gtr = np.max(np.abs(u_gtr[idx_traj, [idx_inp, idx_out], ..., ivar]))
 
     h = axs[ivar, 0].imshow(
-      u_gtr[idx_traj, idx_time, ..., ivar],
+      u_gtr[idx_traj, idx_inp, ..., ivar],
       cmap=(CMAP_BWR if symmetric[ivar] else CMAP_WRB),
       vmax=(vmax_gtr if symmetric[ivar] else None),
       vmin=(-vmax_gtr if symmetric[ivar] else None),
     )
     h = axs[ivar, 1].imshow(
-      u_prd[idx_traj, idx_time, ..., ivar],
+      u_gtr[idx_traj, idx_out, ..., ivar],
       cmap=(CMAP_BWR if symmetric[ivar] else CMAP_WRB),
       vmax=(vmax_gtr if symmetric[ivar] else None),
       vmin=(-vmax_gtr if symmetric[ivar] else None),
     )
-    plt.colorbar(h, ax=axs[ivar, :2], fraction=.05)
     h = axs[ivar, 2].imshow(
-      np.abs(u_err[idx_traj, idx_time, ..., ivar]),
+      u_prd[idx_traj, idx_out, ..., ivar],
+      cmap=(CMAP_BWR if symmetric[ivar] else CMAP_WRB),
+      vmax=(vmax_gtr if symmetric[ivar] else None),
+      vmin=(-vmax_gtr if symmetric[ivar] else None),
+    )
+    plt.colorbar(h, ax=axs[ivar, 0:3], fraction=.1)
+    h = axs[ivar, 3].imshow(
+      np.abs(u_err[idx_traj, idx_out, ..., ivar]),
       cmap=CMAP_WRB,
       vmin=0,
-      vmax=np.max(np.abs(u_err[idx_traj, idx_time, ..., ivar])),
+      vmax=np.max(np.abs(u_err[idx_traj, idx_out, ..., ivar])),
     )
-    plt.colorbar(h, ax=axs[ivar, 2], fraction=.05)
+    plt.colorbar(h, ax=axs[ivar, 3], fraction=.1)
 
-  axs[0, 0].set(title='Ground-truth');
-  axs[0, 1].set(title='Estimate');
-  axs[0, 2].set(title='Absolute error');
+  axs[0, 0].set(title='Input');
+  axs[0, 1].set(title='Ground-truth');
+  axs[0, 2].set(title='Model estimate');
+  axs[0, 3].set(title='Absolute error');
 
-  for ivar in range(n_vars):
-    axs[ivar, 0].set(ylabel=f'Variable {ivar:02d}');
+  if n_vars > 1:
+    for ivar in range(n_vars):
+      label = names[ivar] if names else f'Variable {ivar:02d}'
+      axs[ivar, 0].set(ylabel=label);
+
+  for ax in axs.flatten():
+    ax.set_xticks([])
+    ax.set_yticks([])
 
   return fig, axs
 
+# TODO: Update
 def animate_estimations(u_gtr, u_prd, u_err, idx_traj=0):
   _HEIGHT_PER_ROW = 1.5
   _HEIGHT_MARGIN = .2
@@ -246,45 +267,12 @@ def animate_estimations(u_gtr, u_prd, u_err, idx_traj=0):
 
   return ani, (fig, axs)
 
-def plot_error_accumulation(u_err, idx_time, idx_traj=0):
-  _HEIGHT_PER_ROW = 1.5
-  _HEIGHT_MARGIN = .2
-  _WIDTH_PER_COL = 1.5
-  _WIDTH_MARGIN = .2
-
-  # Because the initial state is removed from the errors
-  idx_time=[i-1 for i in idx_time]
-
-  n_vars = u_err.shape[-1]
-  fig, axs = plt.subplots(
-    nrows=n_vars, ncols=len(idx_time),
-    figsize=(_WIDTH_PER_COL*len(idx_time)+_WIDTH_MARGIN, _HEIGHT_PER_ROW*n_vars+_HEIGHT_MARGIN),
-    sharex=True, sharey=True,
-  )
-
-  for ivar in range(n_vars):
-    for icol in range(len(idx_time)):
-      h = axs[ivar, icol].imshow(
-        np.abs(u_err[idx_traj, idx_time[icol], ..., ivar]),
-        cmap=CMAP_WRB,
-        vmin=0,
-        vmax=np.max(u_err[idx_traj, idx_time, ..., :]),
-      )
-      if ivar == 0:
-        axs[ivar, icol].set(title=f'timestep={idx_time[icol]+1}')
-  plt.colorbar(h, ax=axs, fraction=.02)
-
-  for ivar in range(n_vars):
-    axs[ivar, 0].set(ylabel=f'Variable {ivar:02d}');
-
-  return fig, axs
-
-def plot_ensemble(u_gtr, u_prd, idx_time=-1, idx_traj=0, symmetric=True):
+def plot_ensemble(u_gtr, u_ens, idx_out=-1, idx_traj=0, symmetric=True, names=None):
 
   _HEIGHT_PER_ROW = 2.5
   _HEIGHT_MARGIN = .2
 
-  n_vars = u_prd.shape[-1]
+  n_vars = u_ens.shape[-1]
   if isinstance(symmetric, bool):
     symmetric = [symmetric] * n_vars
 
@@ -293,41 +281,69 @@ def plot_ensemble(u_gtr, u_prd, idx_time=-1, idx_traj=0, symmetric=True):
     figsize=(10, _HEIGHT_PER_ROW*n_vars+_HEIGHT_MARGIN),
     sharex=True, sharey=True,
   )
+  axs = axs.reshape(n_vars, 3)
 
-  u_prd_mean = np.mean(u_prd, axis=0)
-  u_prd_std = np.std(u_prd, axis=0)
-  u_err = (u_gtr - u_prd_mean)
+  u_ens_mean = np.mean(u_ens, axis=0)
+  u_ens_std = np.std(u_ens, axis=0)
+  u_err = (u_gtr - u_ens_mean)
 
   for ivar in range(n_vars):
-    vmax = np.max(np.abs(u_prd_mean[idx_traj, idx_time, ..., ivar]))
+    vmax = np.max(np.abs(u_gtr[idx_traj, idx_out, ..., ivar]))
 
     h = axs[ivar, 0].imshow(
-      u_prd_mean[idx_traj, idx_time, ..., ivar],
+      u_ens_mean[idx_traj, idx_out, ..., ivar],
       cmap=(CMAP_BWR if symmetric[ivar] else CMAP_WRB),
       vmax=(vmax if symmetric[ivar] else None),
       vmin=(-vmax if symmetric[ivar] else None),
     )
-    plt.colorbar(h, ax=axs[ivar, 0], fraction=.05)
+    plt.colorbar(h, ax=axs[ivar, 0], fraction=.1)
     h = axs[ivar, 1].imshow(
-      u_prd_std[idx_traj, idx_time, ..., ivar],
+      u_ens_std[idx_traj, idx_out, ..., ivar],
       cmap=CMAP_WRB,
       vmin=0,
       vmax=None,
     )
-    plt.colorbar(h, ax=axs[ivar, 1], fraction=.05)
+    plt.colorbar(h, ax=axs[ivar, 1], fraction=.1)
     h = axs[ivar, 2].imshow(
-      np.abs(u_err[idx_traj, idx_time, ..., ivar]),
+      np.abs(u_err[idx_traj, idx_out, ..., ivar]),
       cmap=CMAP_WRB,
       vmin=0,
       vmax=None,
     )
-    plt.colorbar(h, ax=axs[ivar, 2], fraction=.05)
+    plt.colorbar(h, ax=axs[ivar, 2], fraction=.1)
 
   axs[0, 0].set(title='Ensemble mean');
   axs[0, 1].set(title='Ensemble std');
   axs[0, 2].set(title='Absolute error');
 
-  for ivar in range(n_vars):
-    axs[ivar, 0].set(ylabel=f'Variable {ivar:02d}');
+  if n_vars > 1:
+    for ivar in range(n_vars):
+      label = names[ivar] if names else f'Variable {ivar:02d}'
+      axs[ivar, 0].set(ylabel=label);
+
+  for ax in axs.flatten():
+    ax.set_xticks([])
+    ax.set_yticks([])
 
   return fig, axs
+
+def plot_error_vs_time(df: pd.DataFrame, idx_fn: int, variable_title: str = 'variable') -> sns.FacetGrid:
+  g = sns.FacetGrid(
+    data=(df[(df['error'] > 0.)]),
+    hue='variable',
+    palette='deep',
+    height=4,
+    aspect=1.2,
+  );
+  g.set_titles(col_template='{col_name}');
+  g.map(sns.scatterplot, 't', 'error');
+  g.map(sns.lineplot, 't', 'error');
+  g.add_legend(title=variable_title);
+  g.set_ylabels(label='Error (%)');
+
+  for ax in g.axes.flatten():
+    ax.grid();
+    ax.axvline(x=idx_fn, linestyle='--', color='black', alpha=.5);
+    ax.set_xticks(df['t'].unique())
+
+  return g

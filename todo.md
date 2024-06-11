@@ -1,11 +1,9 @@
 # NEXT STEPS
 
-- Streamline the evaluation procedure (using GPUs)
-    * Improve your plotting (add initial value too)
-
 - Add the first benchmarks: U-Net / U-ViT / FNO / CNO
 
 - E260: Compare and fix the stepping method
+    - der and res >> out
 
 - Evaluate time inter- and extrapolation:
     - E260: Compare D=1 with D=4 and D=7
@@ -15,10 +13,12 @@
 - Evaluate the effect of `direct_steps` on the final error
     - E260: Compare the final performance with `direct_steps=1`
     * Start from trained parameters with direct_steps=1 (turn off scheduling)
+    - Train/val gap !! try without tau and t
 
 - Check the wave_equation datasets (E261)
     * Concatenate a feature for the boundary nodes
     * Try to avoid overfitting (MP steps, latent size, etc.)
+    - Train/val gap !! try without tau and t
 
 - Investigate the effect of removing the periodic connections for periodic BC (E261 and E262)
 
