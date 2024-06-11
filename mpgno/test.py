@@ -617,7 +617,7 @@ def main(argv):
   # NOTE: One compilation per tau_rollout
   taus_rollout = [2, 4, 8]
   # NOTE: Two compilations per resolution
-  resolutions = [(px, px) for px in [32, 48, 64, 96, 128]]
+  resolutions = [(px, px) for px in [32, 64, 128]]
   noise_levels = [0, .005, .01, .05, .1]
 
   # Set the groundtruth trajectories

@@ -1,33 +1,35 @@
 # NEXT STEPS
 
-- Add the first benchmarks: U-Net / U-ViT / FNO / CNO
+- Update the evaluation
+    * Final time using predictor.unroll with tau_max=1
 
-- E260: Compare and fix the stepping method
-    - der and res >> out
+- Check the evaluation outputs of E260 and E261
+    - Add them to the slides + tidy up the slides
+    - E260: Performance of D=4 with tau=2 vs. D=1
+    - Add resolution-invariance results
 
-- Evaluate time inter- and extrapolation:
-    - E260: Compare D=1 with D=4 and D=7
-    - E260: Compare different steppers
+- Debug the OOM issue
+
+* Think about the reasons of the train/val gap widh D>1
     * Try concatenate_t=off and/or concatenate_tau=off
 
-- Evaluate the effect of `direct_steps` on the final error
-    - E260: Compare the final performance with `direct_steps=1`
-    * Start from trained parameters with direct_steps=1 (turn off scheduling)
-    - Train/val gap !! try without tau and t
+- Launch new trainings with D=4 and D=7
 
-- Check the wave_equation datasets (E261)
-    * Concatenate a feature for the boundary nodes
-    * Try to avoid overfitting (MP steps, latent size, etc.)
-    - Train/val gap !! try without tau and t
+- Avoid train-val gap for wave_equation
+    * Simplify the model (MP steps, latent size, etc.)
+    * try without tau and t
 
-- Investigate the effect of removing the periodic connections for periodic BC (E261 and E262)
+- Add the first benchmarks: U-Net / U-ViT / FNO / CNO
+
+- Implement the new idea for fractional tau
+    - tau=.5 unrolled twice ~ tau=1
+    - tau=.2 unrolled five times ~ tau=1
 
 - Continuous-discrete equivariance
     * Mask the nodes during training (p_max=0.5)
         - This masking "can" be different in the encoder and the decoder
     * Use edge length in the message-passing
         - Weighted average of the messages with distances as weights
-
 - Investigate performance with other resolutions
     * Train with 64x64
     * Large overlap factors (4 or 8)
