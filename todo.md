@@ -1,22 +1,27 @@
 # NEXT STEPS
 
-- Check the evaluation outputs of E260 and E261
-    - Add them to the slides + tidy up the slides
-    - E260: Performance of D=4 with tau=2 vs. D=1
+- Finish the slides
     - Add resolution-invariance results
-
-- Debug the OOM issue
-
-* Think about the reasons of the train/val gap widh D>1
-    * Try concatenate_t=off and/or concatenate_tau=off
+    - Add ideas about boundary nodes
 
 - Launch new trainings with D=4 and D=7
+
+* Think about the reasons of the train/val gap with D>1
+    * Try concatenate_t=off and/or concatenate_tau=off
 
 - Avoid train-val gap for wave_equation
     * Simplify the model (MP steps, latent size, etc.)
     * try without tau and t
 
 - Add the first benchmarks: U-Net / U-ViT / FNO / CNO
+
+- Debug the OOM issue for testing
+    - pmap step.apply instead !!
+    - pmap without jitting apply_fn
+    - Follow train.py and profile_inferrence
+    - Try jax.clear_caches()
+    - Try persistent compilation cache
+    - Try XLA_PYTHON_CLIENT_MEM_FRACTION=.95
 
 - Implement the new idea for fractional tau
     - tau=.5 unrolled twice ~ tau=1

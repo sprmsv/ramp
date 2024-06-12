@@ -610,7 +610,7 @@ def main(argv):
   # Set evaluation settings
   interpolate_tau = True
   tau_min = 1
-  tau_max = time_downsample_factor * (direct_steps + 1)
+  tau_max = time_downsample_factor * (direct_steps + (direct_steps > 1))
   taus_direct = list(range(tau_min, tau_max + 1))
   if not interpolate_tau:
     taus_direct = [tau for tau in taus_direct if (tau % 2) == 0]
