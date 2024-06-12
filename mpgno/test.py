@@ -3,6 +3,8 @@ import pickle
 import shutil
 from typing import Tuple, Type, Mapping, Callable, Any, Sequence
 
+from time import time
+
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -179,25 +181,22 @@ def get_direct_estimations(
   )(lead_times)
   t_inp = lead_times.repeat(repeats=batch_size).reshape(-1, batch_size)
 
-  # Re-align
-  # -> [batch_size_per_device * num_lead_times, ...]
-  u_inp = u_inp.swapaxes(0, 1).reshape(-1, 1, *trajs.shape[2:])
-  t_inp = t_inp.swapaxes(0, 1).reshape(-1, 1)
-
   # Get model estimations
-  # -> [batch_size_per_device * num_lead_times, ...]
-  u_prd = step(
-    variables=variables,
-    stats=stats,
-    u_inp=u_inp,
-    t_inp=(t_inp / time_downsample_factor),
-    tau=(tau / time_downsample_factor),
-    key=key,
-  )
+  # -> [num_lead_times, batch_size_per_device, 1, ...]
+  def _use_step_on_mini_batches(_u_inp, _t_inp):
+    return step(
+      variables=variables,
+      stats=stats,
+      u_inp=_u_inp,
+      t_inp=(_t_inp / time_downsample_factor),
+      tau=(tau / time_downsample_factor),
+      key=key,
+    )
+  u_prd = jax.vmap(_use_step_on_mini_batches)(u_inp, t_inp)
 
-  # Re-align
+  # Re-arrange
   # -> [batch_size_per_device, num_lead_times, ...]
-  u_prd = u_prd.reshape(*trajs.shape)
+  u_prd = u_prd.swapaxes(0, 1).squeeze(axis=2)
 
   return u_prd
 

@@ -1,17 +1,14 @@
 # NEXT STEPS
 
 - Finish the slides
-    - Add resolution-invariance results
+    - Add resolution-invariance results (E291)
     - Add ideas about boundary nodes
+    - (Add impact of direct_steps on final error (E291))
+    - wave_equation (E292)
 
-- Launch new trainings with D=4 and D=7
-
-* Think about the reasons of the train/val gap with D>1
-    * Try concatenate_t=off and/or concatenate_tau=off
-
-- Avoid train-val gap for wave_equation
-    * Simplify the model (MP steps, latent size, etc.)
-    * try without tau and t
+- Check E293 (concatenate_t=off and concatenate_tau=off)
+    - train/val gap with direct_steps
+    - train/val gap for wave_equation
 
 - Add the first benchmarks: U-Net / U-ViT / FNO / CNO
 
