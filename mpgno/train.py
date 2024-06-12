@@ -196,6 +196,11 @@ def train(
     tau_max=direct_steps,
     tau_base=1.,
   )
+  one_step_predictor = AutoregressiveStepper(
+    stepper=stepper,
+    tau_max=1,
+    tau_base=1.,
+  )
 
   # Set the normalization statistics
   stats = {
@@ -617,25 +622,13 @@ def train(
 
     # Get unrolled predictions
     variables = {'params': state.params}
-    u_prd, _ = predictor.unroll(
+    _predictor = one_step_predictor
+    u_prd, _ = _predictor.unroll(
       variables=variables,
       stats=stats,
       u_inp=u_inp,
       t_inp=t_inp,
       num_steps=num_times,
-    )
-
-    # Get target variables (velocities) and normalize using global statistics
-    # TODO: Remove if not used
-    _vel_prd = normalize(
-      arr=u_prd[..., dataset.metadata.target_variables],
-      shift=dataset.metadata.stats_target_variables['mean'],
-      scale=dataset.metadata.stats_target_variables['std'],
-    )
-    _vel_tgt = normalize(
-      arr=u_tgt[..., dataset.metadata.target_variables],
-      shift=dataset.metadata.stats_target_variables['mean'],
-      scale=dataset.metadata.stats_target_variables['std'],
     )
 
     # Calculate the errors
@@ -665,10 +658,11 @@ def train(
     u_tgt = trajs[:, (idx_fn):(idx_fn+1)]
 
     # Get prediction at the final step
-    _num_jumps = idx_fn // (direct_steps)
-    _num_direct_steps = idx_fn % (direct_steps)
+    _predictor = one_step_predictor
+    _num_jumps = idx_fn // _predictor.num_steps_direct
+    _num_direct_steps = idx_fn % _predictor.num_steps_direct
     variables = {'params': state.params}
-    u_prd = predictor.jump(
+    u_prd = _predictor.jump(
       variables=variables,
       stats=stats,
       u_inp=u_inp,
@@ -676,26 +670,13 @@ def train(
       num_jumps=_num_jumps,
     )
     if _num_direct_steps:
-      _, u_prd = predictor.unroll(
+      _, u_prd = _predictor.unroll(
         variables=variables,
         stats=stats,
         u_inp=u_prd,
         t_inp=t_inp,
         num_steps=_num_direct_steps,
       )
-
-    # Get target variables (velocities) and normalize using global statistics
-    # TODO: Remove if not used
-    _vel_prd = normalize(
-      arr=u_prd[..., dataset.metadata.target_variables],
-      shift=dataset.metadata.stats_target_variables['mean'],
-      scale=dataset.metadata.stats_target_variables['std'],
-    )
-    _vel_tgt = normalize(
-      arr=u_tgt[..., dataset.metadata.target_variables],
-      shift=dataset.metadata.stats_target_variables['mean'],
-      scale=dataset.metadata.stats_target_variables['std'],
-    )
 
     # Calculate the errors
     batch_metrics = BatchMetrics(

@@ -1,8 +1,5 @@
 # NEXT STEPS
 
-- Update the evaluation
-    * Final time using predictor.unroll with tau_max=1
-
 - Check the evaluation outputs of E260 and E261
     - Add them to the slides + tidy up the slides
     - E260: Performance of D=4 with tau=2 vs. D=1
