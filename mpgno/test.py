@@ -547,7 +547,7 @@ def main(argv):
     datapath=datapath,
     n_train=0,
     n_valid=0,
-    n_test=4,
+    n_test=min(4, FLAGS.n_test),
     preload=True,
     time_downsample_factor=1,
     space_downsample_factor=1,
@@ -615,7 +615,7 @@ def main(argv):
   if not interpolate_tau:
     taus_direct = [tau for tau in taus_direct if (tau % 2) == 0]
   # NOTE: One compilation per tau_rollout
-  taus_rollout = [2, 4, 8]
+  taus_rollout = [time_downsample_factor * d for d in range(1, direct_steps+1)]
   # NOTE: Two compilations per resolution
   resolutions = [(px, px) for px in [32, 64, 128]]
   noise_levels = [0, .005, .01, .05, .1]
@@ -642,7 +642,7 @@ def main(argv):
 
   # Plot estimation visualizations
   (DIR_FIGS / 'samples').mkdir()
-  for s in range(4):
+  for s in range(min(4, FLAGS.n_test)):
     fig, _ = plot_estimations(
       u_gtr=change_resolution(u_gtr, resolution_train),
       u_prd=u_prd['tau']['rollout'][time_downsample_factor]['u'],
@@ -669,7 +669,7 @@ def main(argv):
   # Compute the errors
   def _get_err_trajectory(_u_gtr, _u_prd):
     _err = [
-      np.median(rel_lp_error(_u_gtr[:, [idx_t]], _u_prd[:, [idx_t]], p=1)).item()
+      np.median(rel_lp_error(_u_gtr[:, [idx_t]], _u_prd[:, [idx_t]], p=1)).item() * 100
       for idx_t in range(_u_gtr.shape[1])
     ]
     return _err
@@ -769,7 +769,7 @@ def main(argv):
 
   # Plot ensemble statistics
   (DIR_FIGS / 'ensemble').mkdir()
-  for s in range(4):
+  for s in range(min(4, FLAGS.n_test)):
     fig, _ = plot_ensemble(
       u_gtr=change_resolution(u_gtr_small, resolution_train),
       u_ens=u_prd_ensemble,
