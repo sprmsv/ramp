@@ -1,17 +1,10 @@
 # NEXT STEPS
 
-- Add the first benchmarks: U-Net
-
-- Debug the OOM issue for get_direct_estimations
-    - pmap step.apply instead !!
-    - Follow train.py and profile_inferrence
-    - Try persistent compilation cache
-
 - Add to slides
     - Add resolution-invariance results (E291)
     - (Add impact of direct_steps on final error (E291))
     - wave_equation (E292)
-    - Results with U-Net
+    - Results with U-Net (E294)
 
 - Check E293 (concatenate_t=off and concatenate_tau=off)
     - train/val gap with direct_steps
