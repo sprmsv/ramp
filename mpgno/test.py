@@ -179,7 +179,7 @@ def get_direct_estimations(
         operand=trajs,
         start_index=(lt), slice_size=1, axis=1)
   )(lead_times)
-  t_inp = lead_times.repeat(repeats=batch_size).reshape(-1, batch_size)
+  t_inp = lead_times.repeat(repeats=batch_size).reshape(-1, batch_size, 1)
 
   # Get model estimations
   # -> [num_lead_times, batch_size_per_device, 1, ...]

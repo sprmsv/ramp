@@ -1025,7 +1025,8 @@ def main(argv):
 
   # Calculate the total number of parameters
   n_model_parameters = np.sum(
-  jax.tree_util.tree_flatten(jax.tree_map(lambda x: np.prod(x.shape).item(), params))[0]).item()
+    jax.tree_util.tree_flatten(jax.tree_map(lambda x: np.prod(x.shape).item(), params))[0]
+  ).item()
   logging.info(f'Total number of trainable paramters: {n_model_parameters}')
 
   # Train the model without unrolling

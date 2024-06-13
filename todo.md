@@ -1,24 +1,21 @@
 # NEXT STEPS
 
-- Finish the slides
+- Add the first benchmarks: U-Net
+
+- Debug the OOM issue for get_direct_estimations
+    - pmap step.apply instead !!
+    - Follow train.py and profile_inferrence
+    - Try persistent compilation cache
+
+- Add to slides
     - Add resolution-invariance results (E291)
-    - Add ideas about boundary nodes
     - (Add impact of direct_steps on final error (E291))
     - wave_equation (E292)
+    - Results with U-Net
 
 - Check E293 (concatenate_t=off and concatenate_tau=off)
     - train/val gap with direct_steps
     - train/val gap for wave_equation
-
-- Add the first benchmarks: U-Net / U-ViT / FNO / CNO
-
-- Debug the OOM issue for testing
-    - pmap step.apply instead !!
-    - pmap without jitting apply_fn
-    - Follow train.py and profile_inferrence
-    - Try jax.clear_caches()
-    - Try persistent compilation cache
-    - Try XLA_PYTHON_CLIENT_MEM_FRACTION=.95
 
 - Implement the new idea for fractional tau
     - tau=.5 unrolled twice ~ tau=1
@@ -29,10 +26,15 @@
         - This masking "can" be different in the encoder and the decoder
     * Use edge length in the message-passing
         - Weighted average of the messages with distances as weights
+
 - Investigate performance with other resolutions
     * Train with 64x64
     * Large overlap factors (4 or 8)
     * Remove grid message-passing
+
+- How does the DFT of the predictions look like?
+
+- Change the resolution in the Fourier space?
 
 - Reproduce experiments for reporting in the thesis
     * pull the latest version
@@ -40,7 +42,7 @@
     * 1000 epochs
 
 - Experiment with the baseline models
-    - GNO, brandstetter, MeshGraphNets, (scOT), (FNO), (U-Net), (CNO), (GNOT), (CNN)
+    - GNO, brandstetter, MeshGraphNets, (scOT), (FNO), (U-Net), (CNO), (GNOT)
 
 - Extend for unstructured grids
     - Take input at any point and give output at any point
