@@ -14,10 +14,15 @@ from mpgno.utils import Array, shuffle_arrays
 
 
 class AbstractOperator(nn.Module):
-  def setup():
+  def setup(self):
     raise NotImplementedError
 
-  def __call__():
+  def __call__(self,
+    u_inp: Array,
+    t_inp: Array = None,
+    tau: Union[float, int] = None,
+    key: flax.typing.PRNGKey = None,
+  ) -> Array:
     raise NotImplementedError
 
   @property

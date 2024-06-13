@@ -20,7 +20,7 @@ from mpgno.dataset import Dataset
 from mpgno.experiments import DIR_EXPERIMENTS
 from mpgno.metrics import rel_lp_error
 from mpgno.models.mpgno import AbstractOperator, MPGNO
-from mpgno.models.mpgno import MPGNO
+from mpgno.models.unet import UNet
 from mpgno.plot import plot_estimations, plot_ensemble, plot_error_vs_time
 from mpgno.stepping import Stepper, TimeDerivativeUpdater, ResidualUpdater, OutputUpdater
 from mpgno.stepping import AutoregressiveStepper
@@ -90,15 +90,17 @@ def profile_inferrence(
 ):
 
   # Configure and build new model
-  configs = model.configs
+  model_configs = model.configs
   if isinstance(model, MPGNO):
-    configs['num_grid_nodes'] = resolution
-    configs['p_dropout_edges_grid2mesh'] = p_edge_masking_grid2mesh
-    configs['p_dropout_edges_multimesh'] = 0.
-    configs['p_dropout_edges_mesh2grid'] = 0.
+    model_configs['num_grid_nodes'] = resolution
+    model_configs['p_dropout_edges_grid2mesh'] = p_edge_masking_grid2mesh
+    model_configs['p_dropout_edges_multimesh'] = 0.
+    model_configs['p_dropout_edges_mesh2grid'] = 0.
+  elif isinstance(model, UNet):
+    pass
   else:
     raise NotImplementedError
-  stepper = stepping(operator=model.__class__(**configs))
+  stepper = stepping(operator=model.__class__(**model_configs))
 
   apply_fn = stepper.apply
   if jit:
@@ -314,16 +316,18 @@ def get_all_estimations(
   # Instantiate the steppers
   for resolution in all_resolutions:
     # Configure and build new model
-    configs = model.configs
+    model_configs = model.configs
     if isinstance(model, MPGNO):
-      configs['num_grid_nodes'] = resolution
-      configs['p_dropout_edges_grid2mesh'] = p_edge_masking_grid2mesh
-      configs['p_dropout_edges_multimesh'] = 0.
-      configs['p_dropout_edges_mesh2grid'] = 0.
+      model_configs['num_grid_nodes'] = resolution
+      model_configs['p_dropout_edges_grid2mesh'] = p_edge_masking_grid2mesh
+      model_configs['p_dropout_edges_multimesh'] = 0.
+      model_configs['p_dropout_edges_mesh2grid'] = 0.
+    elif isinstance(model, UNet):
+      pass
     else:
       raise NotImplementedError
 
-    steppers[resolution] = stepping(operator=model.__class__(**configs))
+    steppers[resolution] = stepping(operator=model.__class__(**model_configs))
     apply_steppers_jit[resolution] = jax.jit(steppers[resolution].apply)
 
     for tau_max in taus_rollout:
@@ -477,16 +481,18 @@ def get_ensemble_estimations(
     return u_prd
 
   # Configure and build new model
-  configs = model.configs
+  model_configs = model.configs
   if isinstance(model, MPGNO):
-    configs['num_grid_nodes'] = resolution_train
-    configs['p_dropout_edges_grid2mesh'] = p_edge_masking_grid2mesh
-    configs['p_dropout_edges_multimesh'] = 0.
-    configs['p_dropout_edges_mesh2grid'] = 0.
+    model_configs['num_grid_nodes'] = resolution_train
+    model_configs['p_dropout_edges_grid2mesh'] = p_edge_masking_grid2mesh
+    model_configs['p_dropout_edges_multimesh'] = 0.
+    model_configs['p_dropout_edges_mesh2grid'] = 0.
+  elif isinstance(model, UNet):
+    pass
   else:
     raise NotImplementedError
 
-  stepper = stepping(operator=model.__class__(**configs))
+  stepper = stepping(operator=model.__class__(**model_configs))
   unroller = AutoregressiveStepper(
     stepper=stepper,
     tau_max=(tau_max / train_flags['time_downsample_factor']),
@@ -564,8 +570,9 @@ def main(argv):
     configs = json.load(f)
   time_downsample_factor = configs['flags']['time_downsample_factor']
   direct_steps = configs['flags']['direct_steps']
+  model_name = configs['flags']['model'].upper()
   model_configs = configs['model_configs']
-  resolution_train = tuple(model_configs['num_grid_nodes'])
+  resolution_train = tuple(configs['resolution'])
   # Read the state
   orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
   mngr = orbax.checkpoint.CheckpointManager(DIR / 'checkpoints')
@@ -583,8 +590,14 @@ def main(argv):
   else:
     raise ValueError
 
-  # Set the model and stepper
-  model = MPGNO(**model_configs)
+  # Set the model
+  if model_name == 'MPGNO':
+    model_class = MPGNO
+  elif model_name == 'UNET':
+    model_class = UNet
+  else:
+    raise ValueError
+  model = model_class(**model_configs)
 
   # Profile
   # NOTE: One compilation

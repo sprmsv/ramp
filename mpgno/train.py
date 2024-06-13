@@ -26,6 +26,7 @@ from mpgno.stepping import ResidualUpdater
 from mpgno.stepping import OutputUpdater
 from mpgno.dataset import Dataset
 from mpgno.models.mpgno import MPGNO, AbstractOperator
+from mpgno.models.unet import UNet
 from mpgno.utils import disable_logging, Array, shuffle_arrays, split_arrays, normalize
 from mpgno.metrics import BatchMetrics, Metrics, EvalMetrics
 from mpgno.metrics import rel_lp_loss
@@ -64,6 +65,9 @@ flags.DEFINE_integer(name='space_downsample_factor', default=1, required=False,
 )
 
 # FLAGS::training
+flags.DEFINE_string(name='model', default=None, required=True,
+  help='Name of the model: ["MPGNO", "UNET"]'
+)
 flags.DEFINE_integer(name='batch_size', default=4, required=False,
   help='Size of a batch of training samples'
 )
@@ -101,7 +105,7 @@ flags.DEFINE_integer(name='n_test', default=(2**8), required=False,
   help='Number of test samples'
 )
 
-# FLAGS::model
+# FLAGS::model::MPGNO
 flags.DEFINE_integer(name='num_mesh_nodes', default=64, required=False,
   help='Number of mesh nodes in each dimension'
 )
@@ -137,6 +141,11 @@ flags.DEFINE_float(name='p_dropout_edges_multimesh', default=0, required=False,
 )
 flags.DEFINE_float(name='p_dropout_edges_mesh2grid', default=0., required=False,
   help='Probability of dropping out edges of mesh2grid'
+)
+
+# FLAGS::model::UNET
+flags.DEFINE_integer(name='unet_features', default=1, required=False,
+  help='Number of features (channels)'
 )
 
 def train(
@@ -893,11 +902,52 @@ def train(
 
   return unreplicate(state)
 
-def get_model(model_configs: Mapping[str, Any]) -> AbstractOperator:
+def get_model(model_name: str, model_configs: Mapping[str, Any], dataset: Dataset) -> AbstractOperator:
+  """
+  Build the model based on the given configurations.
+  """
 
-  model = MPGNO(
-    **model_configs,
-  )
+  # Check the inputs
+  model_name = model_name.upper()
+  assert model_name in ['MPGNO', 'UNET']
+
+  # Set model kwargs
+  if not model_configs:
+    if model_name == 'MPGNO':
+      model_configs = dict(
+        num_outputs=dataset.shape[-1],
+        num_grid_nodes=dataset.shape[2:4],
+        num_mesh_nodes=(FLAGS.num_mesh_nodes, FLAGS.num_mesh_nodes),
+        periodic=dataset.metadata.periodic,
+        concatenate_tau=True,
+        concatenate_t=True,
+        conditional_normalization=False,
+        conditional_norm_latent_size=16,
+        latent_size=FLAGS.latent_size,
+        num_mlp_hidden_layers=FLAGS.num_mlp_hidden_layers,
+        num_message_passing_steps=FLAGS.num_message_passing_steps,
+        num_message_passing_steps_grid=FLAGS.num_message_passing_steps_grid,
+        overlap_factor_grid2mesh=FLAGS.overlap_factor_grid2mesh,
+        overlap_factor_mesh2grid=FLAGS.overlap_factor_mesh2grid,
+        num_multimesh_levels=FLAGS.num_multimesh_levels,
+        node_coordinate_freqs=FLAGS.node_coordinate_freqs,
+        p_dropout_edges_grid2mesh=FLAGS.p_dropout_edges_grid2mesh,
+        p_dropout_edges_multimesh=FLAGS.p_dropout_edges_multimesh,
+        p_dropout_edges_mesh2grid=FLAGS.p_dropout_edges_mesh2grid,
+      )
+    elif model_name == 'UNET':
+      model_configs = dict(
+        features=FLAGS.unet_features,
+        outputs=dataset.shape[-1],
+      )
+
+  # Set the model class
+  if model_name == 'MPGNO':
+    model_class = MPGNO
+  elif model_name == 'UNET':
+    model_class = UNet
+
+  model = model_class(**model_configs)
 
   return model
 
@@ -952,35 +1002,15 @@ def main(argv):
     state = ckpt['state']
     params = state['params']
     with open(DIR_OLD_EXPERIMENT / 'configs.json', 'rb') as f:
-      model_kwargs = json.load(f)['model_configs']
+      model_name = json.load(f)['flags']['model']
+      model_configs = json.load(f)['model_configs']
   else:
     params = None
-    model_kwargs = None
+    model_name = FLAGS.model
+    model_configs = None
 
   # Get the model
-  if not model_kwargs:
-    model_kwargs = dict(
-      num_outputs=dataset.shape[-1],
-      num_grid_nodes=dataset.shape[2:4],
-      num_mesh_nodes=(FLAGS.num_mesh_nodes, FLAGS.num_mesh_nodes),
-      periodic=dataset.metadata.periodic,
-      concatenate_tau=True,
-      concatenate_t=True,
-      conditional_normalization=False,
-      conditional_norm_latent_size=16,
-      latent_size=FLAGS.latent_size,
-      num_mlp_hidden_layers=FLAGS.num_mlp_hidden_layers,
-      num_message_passing_steps=FLAGS.num_message_passing_steps,
-      num_message_passing_steps_grid=FLAGS.num_message_passing_steps_grid,
-      overlap_factor_grid2mesh=FLAGS.overlap_factor_grid2mesh,
-      overlap_factor_mesh2grid=FLAGS.overlap_factor_mesh2grid,
-      num_multimesh_levels=FLAGS.num_multimesh_levels,
-      node_coordinate_freqs=FLAGS.node_coordinate_freqs,
-      p_dropout_edges_grid2mesh=FLAGS.p_dropout_edges_grid2mesh,
-      p_dropout_edges_multimesh=FLAGS.p_dropout_edges_multimesh,
-      p_dropout_edges_mesh2grid=FLAGS.p_dropout_edges_mesh2grid,
-    )
-  model = get_model(model_kwargs)
+  model = get_model(model_name, model_configs, dataset)
 
   # Store the configurations
   DIR = DIR_EXPERIMENTS / f'E{FLAGS.exp}' / FLAGS.datapath / FLAGS.datetime
@@ -989,7 +1019,7 @@ def main(argv):
   flags = {f: FLAGS.get_flag_value(f, default=None) for f in FLAGS}
   with open(DIR / 'configs.json', 'w') as f:
     json.dump(fp=f,
-      obj={'flags': flags, 'model_configs': model.configs},
+      obj={'flags': flags, 'model_configs': model.configs, 'resolution': dataset.shape[2:4]},
       indent=2,
     )
   # Store the statistics
@@ -1027,7 +1057,7 @@ def main(argv):
   n_model_parameters = np.sum(
     jax.tree_util.tree_flatten(jax.tree_map(lambda x: np.prod(x.shape).item(), params))[0]
   ).item()
-  logging.info(f'Total number of trainable paramters: {n_model_parameters}')
+  logging.info(f'Training a {model.__class__.__name__} with {n_model_parameters} parameters')
 
   # Train the model without unrolling
   epochs_trained = 0
