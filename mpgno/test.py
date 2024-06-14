@@ -16,7 +16,7 @@ from flax.jax_utils import replicate
 
 from mpgno.dataset import Dataset
 from mpgno.experiments import DIR_EXPERIMENTS
-from mpgno.metrics import rel_lp_error
+from mpgno.metrics import rel_lp_error_per_var
 from mpgno.models.mpgno import AbstractOperator, MPGNO
 from mpgno.models.unet import UNet
 from mpgno.plot import plot_estimations, plot_ensemble, plot_error_vs_time
@@ -635,7 +635,7 @@ def main(argv):
   taus_rollout = [time_downsample_factor * d for d in range(1, direct_steps+1)]
   # NOTE: Two compilations per resolution
   resolutions = [(px, px) for px in [32, 48, 64, 96, 128]]
-  noise_levels = [0, .005, .01, .05, .1]
+  noise_levels = [0, .002, .005, .01]
 
   # Set the groundtruth trajectories
   u_gtr = next(dataset.batches(mode='test', batch_size=dataset.nums['test']))
@@ -686,7 +686,7 @@ def main(argv):
   # Compute the errors
   def _get_err_trajectory(_u_gtr, _u_prd):
     _err = [
-      np.median(rel_lp_error(_u_gtr[:, [idx_t]], _u_prd[:, [idx_t]], p=1)).item() * 100
+      np.median(jnp.linalg.norm(rel_lp_error_per_var(_u_gtr[:, [idx_t]], _u_prd[:, [idx_t]], p=1)), ord=1, axis=1).item() * 100
       for idx_t in range(_u_gtr.shape[1])
     ]
     return _err

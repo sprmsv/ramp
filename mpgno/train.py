@@ -30,7 +30,7 @@ from mpgno.models.unet import UNet
 from mpgno.utils import disable_logging, Array, shuffle_arrays, split_arrays, normalize
 from mpgno.metrics import BatchMetrics, Metrics, EvalMetrics
 from mpgno.metrics import rel_lp_loss
-from mpgno.metrics import mse_error, rel_lp_error, rel_lp_error_per_var
+from mpgno.metrics import mse_error, rel_lp_error_per_var, rel_lp_error_norm
 
 
 NUM_DEVICES = jax.local_device_count()
@@ -568,26 +568,11 @@ def train(
       )
       u_prd = u_prd.squeeze(axis=2).swapaxes(0, 1)
 
-      # Get target variables (velocities) and normalize using global statistics
-      # TODO: Remove if not used
-      _vel_prd = normalize(
-        arr=u_prd[..., dataset.metadata.target_variables],
-        shift=dataset.metadata.stats_target_variables['mean'],
-        scale=dataset.metadata.stats_target_variables['std'],
-      )
-      _vel_tgt = normalize(
-        arr=u_tgt[lt][..., dataset.metadata.target_variables],
-        shift=dataset.metadata.stats_target_variables['mean'],
-        scale=dataset.metadata.stats_target_variables['std'],
-      )
-
       # Compute metrics
       batch_metrics = BatchMetrics(
         mse=(mse_error(u_tgt[lt], u_prd) / num_lead_times),
-        l1=(rel_lp_error(u_tgt[lt], u_prd, p=1) / num_lead_times),
-        l2=(rel_lp_error(u_tgt[lt], u_prd, p=2) / num_lead_times),
-      l1_agg=(jnp.linalg.norm(rel_lp_error_per_var(u_tgt[lt], u_prd, p=1), ord=1, axis=1) / num_lead_times),
-      l2_agg=(jnp.linalg.norm(rel_lp_error_per_var(u_tgt[lt], u_prd, p=2), ord=2, axis=1) / num_lead_times),
+        l1=(rel_lp_error_norm(u_tgt[lt], u_prd, p=1) / num_lead_times),
+        l2=(rel_lp_error_norm(u_tgt[lt], u_prd, p=2) / num_lead_times),
       )
 
       carry += batch_metrics
@@ -599,8 +584,6 @@ def train(
       mse=jnp.zeros(shape=(batch_size_per_device,)),
       l1=jnp.zeros(shape=(batch_size_per_device,)),
       l2=jnp.zeros(shape=(batch_size_per_device,)),
-      l1_agg=jnp.zeros(shape=(batch_size_per_device,)),
-      l2_agg=jnp.zeros(shape=(batch_size_per_device,)),
     )
     batch_metrics_mean = jax.lax.fori_loop(
       body_fun=get_direct_errors,
@@ -643,10 +626,8 @@ def train(
     # Calculate the errors
     batch_metrics = BatchMetrics(
       mse=mse_error(u_tgt, u_prd),
-      l1=rel_lp_error(u_tgt, u_prd, p=1),
-      l2=rel_lp_error(u_tgt, u_prd, p=2),
-      l1_agg=jnp.linalg.norm(rel_lp_error_per_var(u_tgt, u_prd, p=1), ord=1, axis=1),
-      l2_agg=jnp.linalg.norm(rel_lp_error_per_var(u_tgt, u_prd, p=2), ord=2, axis=1),
+      l1=rel_lp_error_norm(u_tgt, u_prd, p=1),
+      l2=rel_lp_error_norm(u_tgt, u_prd, p=2),
     )
 
 
@@ -690,10 +671,8 @@ def train(
     # Calculate the errors
     batch_metrics = BatchMetrics(
       mse=mse_error(u_tgt, u_prd),
-      l1=rel_lp_error(u_tgt, u_prd, p=1),
-      l2=rel_lp_error(u_tgt, u_prd, p=2),
-      l1_agg=jnp.linalg.norm(rel_lp_error_per_var(u_tgt, u_prd, p=1), ord=1, axis=1),
-      l2_agg=jnp.linalg.norm(rel_lp_error_per_var(u_tgt, u_prd, p=2), ord=2, axis=1),
+      l1=rel_lp_error_norm(u_tgt, u_prd, p=1),
+      l2=rel_lp_error_norm(u_tgt, u_prd, p=2),
     )
 
     return batch_metrics.__dict__
@@ -760,22 +739,16 @@ def train(
       mse=jnp.median(jnp.concatenate([m.mse for m in metrics_direct]), axis=0).item(),
       l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_direct]), axis=0).item(),
       l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_direct]), axis=0).item(),
-      l1_agg=jnp.median(jnp.concatenate([m.l1_agg for m in metrics_direct]), axis=0).item(),
-      l2_agg=jnp.median(jnp.concatenate([m.l2_agg for m in metrics_direct]), axis=0).item(),
     ) if direct else None
     metrics_rollout = Metrics(
       mse=jnp.median(jnp.concatenate([m.mse for m in metrics_rollout]), axis=0).item(),
       l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_rollout]), axis=0).item(),
       l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_rollout]), axis=0).item(),
-      l1_agg=jnp.median(jnp.concatenate([m.l1_agg for m in metrics_rollout]), axis=0).item(),
-      l2_agg=jnp.median(jnp.concatenate([m.l2_agg for m in metrics_rollout]), axis=0).item(),
     ) if rollout else None
     metrics_final = Metrics(
       mse=jnp.median(jnp.concatenate([m.mse for m in metrics_final]), axis=0).item(),
       l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_final]), axis=0).item(),
       l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_final]), axis=0).item(),
-      l1_agg=jnp.median(jnp.concatenate([m.l1_agg for m in metrics_final]), axis=0).item(),
-      l2_agg=jnp.median(jnp.concatenate([m.l2_agg for m in metrics_final]), axis=0).item(),
     ) if final else None
 
     # Build the metrics object
@@ -806,7 +779,7 @@ def train(
     f'LR: {state.opt_state[-1].hyperparams["learning_rate"][0].item() : .2e}',
     f'TIME: {time_tot_pre : 06.1f}s',
     f'GRAD: {0. : .2e}',
-    f'RMSE: {0. : .2e}',
+    f'LOSS: {0. : .2e}',
     f'L2-DR-TRN: {metrics_trn.direct.l2 * 100 : .2f}%',
     f'L1-DR: {metrics_val.direct.l1 * 100 : .2f}%',
     f'L2-DR: {metrics_val.direct.l2 * 100 : .2f}%',
@@ -861,7 +834,7 @@ def train(
         f'LR: {state.opt_state[-1].hyperparams["learning_rate"][0].item() : .2e}',
         f'TIME: {time_tot : 06.1f}s',
         f'GRAD: {grad.item() : .2e}',
-        f'RMSE: {np.sqrt(loss).item() : .2e}',
+        f'LOSS: {loss.item() : .2e}',
         f'L2-DR-TRN: {metrics_trn.direct.l2 * 100 : .2f}%',
         f'L1-DR: {metrics_val.direct.l1 * 100 : .2f}%',
         f'L2-DR: {metrics_val.direct.l2 * 100 : .2f}%',
@@ -896,7 +869,7 @@ def train(
         f'LR: {state.opt_state[-1].hyperparams["learning_rate"][0].item() : .2e}',
         f'TIME: {time_tot : 06.1f}s',
         f'GRAD: {grad.item() : .2e}',
-        f'RMSE: {np.sqrt(loss).item() : .2e}',
+        f'LOSS: {loss.item() : .2e}',
       ]))
 
 

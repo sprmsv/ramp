@@ -1,14 +1,12 @@
 # NEXT STEPS
 
-- Add to slides
-    - Add resolution-invariance results (E291)
-    - (Add impact of direct_steps on final error (E291))
-    - wave_equation (E292)
-    - Results with U-Net (E294)
+- Noise level plots: Horizontal lines
+- Plot residuals
 
-- Check E293 (concatenate_t=off and concatenate_tau=off)
-    - train/val gap with direct_steps
-    - train/val gap for wave_equation
+- Benchmark U-Net to make sure about MPGNO
+- Add resolution-invariance results (E291)
+
+- Check E299: TRAIN + TEST  --> FAILED !!
 
 - Implement the new idea for fractional tau
     - tau=.5 unrolled twice ~ tau=1

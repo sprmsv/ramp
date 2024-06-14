@@ -1,9 +1,8 @@
 """Utility functions for reading the datasets."""
 
-from pathlib import Path
 import h5py
-import numpy as np
-from typing import Any, Union, Sequence
+from pathlib import Path
+from typing import Union, Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -12,15 +11,12 @@ import jax.lax
 import jax.numpy as jnp
 import flax.typing
 
-from mpgno.utils import Array
-from mpgno.utils import normalize
-from mpgno.models.utils import compute_derivatives
-
 
 @dataclass
 class Metadata:
   periodic: bool
   data_group: str
+  source_group: str
   active_variables: Sequence[int]
   target_variables: Sequence[int]
   stats: dict[str, Sequence[float]]
@@ -60,13 +56,13 @@ STATS_WAVE_EQUATION = {
 
 VAR_NAMES_INCOMPRESSIBLE_FLUIDS = ['$v_1$', '$v_2$']
 VAR_NAMES_COMPRESSIBLE_FLOW = ['$\\rho$', '$v_1$', '$v_2$', '$p$', None]
-VAR_NAMES_1 = ['$u$']
 
 DATASET_METADATA = {
   # incompressible_fluids: [velocity, velocity]
   'incompressible_fluids/brownian_bridge': Metadata(
     periodic=True,
     data_group='velocity',
+    source_group=None,
     active_variables=ACTIVE_VARS_INCOMPRESSIBLE_FLUIDS,
     target_variables=TARGET_VARS_INCOMPRESSIBLE_FLUIDS,
     stats=STATS_INCOMPRESSIBLE_FLUIDS,
@@ -76,6 +72,7 @@ DATASET_METADATA = {
   'incompressible_fluids/gaussians': Metadata(
     periodic=True,
     data_group='velocity',
+    source_group=None,
     active_variables=ACTIVE_VARS_INCOMPRESSIBLE_FLUIDS,
     target_variables=TARGET_VARS_INCOMPRESSIBLE_FLUIDS,
     stats=STATS_INCOMPRESSIBLE_FLUIDS,
@@ -85,6 +82,7 @@ DATASET_METADATA = {
   'incompressible_fluids/pwc': Metadata(
     periodic=True,
     data_group='velocity',
+    source_group=None,
     active_variables=ACTIVE_VARS_INCOMPRESSIBLE_FLUIDS,
     target_variables=TARGET_VARS_INCOMPRESSIBLE_FLUIDS,
     stats=STATS_INCOMPRESSIBLE_FLUIDS,
@@ -94,6 +92,7 @@ DATASET_METADATA = {
   'incompressible_fluids/shear_layer': Metadata(
     periodic=True,
     data_group='velocity',
+    source_group=None,
     active_variables=ACTIVE_VARS_INCOMPRESSIBLE_FLUIDS,
     target_variables=TARGET_VARS_INCOMPRESSIBLE_FLUIDS,
     stats=STATS_INCOMPRESSIBLE_FLUIDS,
@@ -103,6 +102,7 @@ DATASET_METADATA = {
   'incompressible_fluids/sines': Metadata(
     periodic=True,
     data_group='velocity',
+    source_group=None,
     active_variables=ACTIVE_VARS_INCOMPRESSIBLE_FLUIDS,
     target_variables=TARGET_VARS_INCOMPRESSIBLE_FLUIDS,
     stats=STATS_INCOMPRESSIBLE_FLUIDS,
@@ -112,6 +112,7 @@ DATASET_METADATA = {
   'incompressible_fluids/vortex_sheet': Metadata(
     periodic=True,
     data_group='velocity',
+    source_group=None,
     active_variables=ACTIVE_VARS_INCOMPRESSIBLE_FLUIDS,
     target_variables=TARGET_VARS_INCOMPRESSIBLE_FLUIDS,
     stats=STATS_INCOMPRESSIBLE_FLUIDS,
@@ -122,6 +123,7 @@ DATASET_METADATA = {
   'compressible_flow/cloudshock': Metadata(
     periodic=True,
     data_group='data',
+    source_group=None,
     active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
     target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
     stats=STATS_COMPRESSIBLE_FLOW,
@@ -131,6 +133,7 @@ DATASET_METADATA = {
   'compressible_flow/gauss': Metadata(
     periodic=True,
     data_group='data',
+    source_group=None,
     active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
     target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
     stats=STATS_COMPRESSIBLE_FLOW,
@@ -140,6 +143,7 @@ DATASET_METADATA = {
   'compressible_flow/kh': Metadata(
     periodic=True,
     data_group='data',
+    source_group=None,
     active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
     target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
     stats=STATS_COMPRESSIBLE_FLOW,
@@ -149,6 +153,7 @@ DATASET_METADATA = {
   'compressible_flow/richtmyer_meshkov': Metadata(
     periodic=True,
     data_group='solution',
+    source_group=None,
     active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
     target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
     stats=STATS_COMPRESSIBLE_FLOW,
@@ -158,6 +163,7 @@ DATASET_METADATA = {
   'compressible_flow/riemann': Metadata(
     periodic=True,
     data_group='data',
+    source_group=None,
     active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
     target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
     stats=STATS_COMPRESSIBLE_FLOW,
@@ -167,6 +173,7 @@ DATASET_METADATA = {
   'compressible_flow/riemann_curved': Metadata(
     periodic=True,
     data_group='data',
+    source_group=None,
     active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
     target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
     stats=STATS_COMPRESSIBLE_FLOW,
@@ -176,6 +183,7 @@ DATASET_METADATA = {
   'compressible_flow/riemann_kh': Metadata(
     periodic=True,
     data_group='data',
+    source_group=None,
     active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
     target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
     stats=STATS_COMPRESSIBLE_FLOW,
@@ -185,6 +193,7 @@ DATASET_METADATA = {
   'compressible_flow/gravity/blast': Metadata(
     periodic=True,
     data_group='solution',
+    source_group=None,
     active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
     target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
     stats=STATS_COMPRESSIBLE_FLOW,
@@ -194,6 +203,7 @@ DATASET_METADATA = {
   'compressible_flow/gravity/rayleigh_taylor': Metadata(
     periodic=True,
     data_group='solution',
+    source_group=None,
     active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
     target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
     stats=STATS_COMPRESSIBLE_FLOW,
@@ -204,30 +214,33 @@ DATASET_METADATA = {
   'reaction_diffusion/allen_cahn': Metadata(
     periodic=False,
     data_group='solution',
+    source_group=None,
     active_variables=[0],
     target_variables=[0],
     stats=STATS_REACTION_DIFFUSION,
     signed=True,
-    names=VAR_NAMES_1,
+    names=['$u$'],
   ),
   # wave_equation
   'wave_equation/seismic_20step': Metadata(
     periodic=False,
     data_group='solution',
+    source_group='c',
     active_variables=[0],
     target_variables=[0],
     stats=STATS_WAVE_EQUATION,
-    signed=True,
-    names=VAR_NAMES_1,
+    signed=[True, False],
+    names=['$u$', '$c$'],
   ),
   'wave_equation/gaussians_15step': Metadata(
     periodic=False,
     data_group='solution',
+    source_group='c',
     active_variables=[0],
     target_variables=[0],
     stats=STATS_WAVE_EQUATION,
-    signed=True,
-    names=VAR_NAMES_1,
+    signed=[True, False],
+    names=['$u$', '$c$'],
   ),
 }
 
@@ -252,11 +265,13 @@ class Dataset:
       key = jax.random.PRNGKey(0)
     self.metadata = DATASET_METADATA[datapath]
     self.data_group = self.metadata.data_group
+    self.source_group = self.metadata.source_group
     self.reader = h5py.File(Path(datadir) / f'{datapath}.nc', 'r')
     self.idx_vars = (None if include_passive_variables
       else self.metadata.active_variables)
     self.preload = preload
     self.data = None
+    self.source = None
     self.length = ((n_train + n_valid + n_test) if self.preload
       else self.reader[self.data_group].shape[0])
     self.cutoff = cutoff if (cutoff is not None) else (self._fetch(0, raw=True)[0].shape[1])
@@ -293,6 +308,11 @@ class Dataset:
       valid_data = self.reader[self.data_group][np.arange(n_train, (n_train + n_valid))]
       test_data = self.reader[self.data_group][np.arange((_len_dataset - n_test), (_len_dataset))]
       self.data = np.concatenate([train_data, valid_data, test_data], axis=0)
+      if self.source_group is not None:
+        train_source = self.reader[self.source_group][np.arange(n_train)]
+        valid_source = self.reader[self.source_group][np.arange(n_train, (n_train + n_valid))]
+        test_source = self.reader[self.source_group][np.arange((_len_dataset - n_test), (_len_dataset))]
+        self.source = np.concatenate([train_source, valid_source, test_source], axis=0)
 
   def compute_stats(self,
       axes: Sequence[int] = (0,),
@@ -350,6 +370,17 @@ class Dataset:
     # Select variables
     if self.idx_vars is not None:
       traj = traj[..., self.idx_vars]
+
+    # Concatenate with source
+    if self.source_group is not None:
+      # Get the source
+      if self.source is not None:
+        source = self.source[np.sort(idx)]
+      else:
+        source = self.reader[self.source_group][np.sort(idx)]
+      source = np.expand_dims(source, axis=(1, 4))
+      source = np.tile(source, reps=(1, traj.shape[1], 1, 1, 1))
+      traj = np.concatenate([traj, source], axis=-1)
 
     # Downsample and cut the trajectories
     if not raw:

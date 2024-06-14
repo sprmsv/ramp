@@ -7,13 +7,13 @@ import jax.numpy as jnp
 from mpgno.utils import Array, ScalarArray
 
 
+EPSILON = 1e-10
+
 @dataclass
 class BatchMetrics:
     mse: Array = None
     l1: Array = None
     l2: Array = None
-    l1_agg: Array = None
-    l2_agg: Array = None
 
     def map(self, f):
         for key in self.__dict__.keys():
@@ -33,8 +33,6 @@ class Metrics:
     mse: float = None
     l1: float = None
     l2: float = None
-    l1_agg: float = None
-    l2_agg: float = None
 
 @dataclass
 class EvalMetrics:
@@ -92,7 +90,7 @@ def rel_lp_error(gtr: Array, prd: Array, p: int = 2, vars: Sequence[int] = None)
     err_norm = lp_norm(err, p=p)
     gtr_norm = lp_norm(gtr, p=p)
 
-    return (err_norm / gtr_norm)
+    return (err_norm / (gtr_norm + EPSILON))
 
 def rel_lp_error_per_var(gtr: Array, prd: Array, p: int = 2, vars: Sequence[int] = None) -> Array:
     """
@@ -118,7 +116,29 @@ def rel_lp_error_per_var(gtr: Array, prd: Array, p: int = 2, vars: Sequence[int]
     err_norm = lp_norm(err, p=p, axis=(1, 2, 3))
     gtr_norm = lp_norm(gtr, p=p, axis=(1, 2, 3))
 
-    return (err_norm / gtr_norm)
+    return (err_norm / (gtr_norm + EPSILON))
+
+def rel_lp_error_norm(gtr: Array, prd: Array, p: int = 2, vars: Sequence[int] = None) -> Array:
+    """
+    Returns the norm of the relative Bochner Lp-norm of an array with respect to a ground-truth.
+    The entries of the last axis are interpreted as values of independent scalar-valued
+    functions. This results in an error vector. The vector norm of the error vector is returned.
+
+    Args:
+        gtr: Point-wise values of a ground-truth function on a uniform
+            grid with the dimensions [batch, time, space_0, space_1, var]
+        prd: Point-wise values of a predicted function on a uniform
+            grid with the dimensions [batch, time, space_0, space_1, var]
+        p: Order of the norm. Defaults to 2.
+        vars: Index of the variables to use for computing the error. Defaults to None.
+
+    Returns:
+        The vector norm of the error vector [batch,]
+    """
+
+    err_per_var = rel_lp_error_per_var(gtr, prd, p=p, vars=vars)
+    err_agg = jnp.linalg.norm(err_per_var, ord=p, axis=1)
+    return err_agg
 
 def rel_lp_loss(gtr: Array, prd: Array, p: int = 2) -> Array:
     """
@@ -135,7 +155,7 @@ def rel_lp_loss(gtr: Array, prd: Array, p: int = 2) -> Array:
         Mean relative Lp-norm over the batch.
     """
 
-    return jnp.mean(rel_lp_error(gtr, prd, p=p))
+    return jnp.mean(rel_lp_error_norm(gtr, prd, p=p))
 
 def mse_error(gtr: Array, prd: Array) -> Array:
     """
