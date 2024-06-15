@@ -1,12 +1,11 @@
 # NEXT STEPS
 
-- Noise level plots: Horizontal lines
-- Plot residuals
+- Debug test OOM issue :: Check shardings, replicates, state, stats, etc.
 
-- Benchmark U-Net to make sure about MPGNO
 - Add resolution-invariance results (E291)
 
-- Check E299: TRAIN + TEST  --> FAILED !!
+- Check E295: wave_equation
+- Check E296: Benchmark U-Net to make sure about MPGNO
 
 - Implement the new idea for fractional tau
     - tau=.5 unrolled twice ~ tau=1
@@ -18,19 +17,16 @@
     * Use edge length in the message-passing
         - Weighted average of the messages with distances as weights
 
-- Investigate performance with other resolutions
-    * Train with 64x64
-    * Large overlap factors (4 or 8)
-    * Remove grid message-passing
-
-- How does the DFT of the predictions look like?
-
-- Change the resolution in the Fourier space?
-
 - Reproduce experiments for reporting in the thesis
     * pull the latest version
     * Fix what needs to be fixed
     * 1000 epochs
+    - Noise level plots: Horizontal lines
+
+- How does the DFT of the predictions look like?
+
+- wave_equation: do not learn identity map for source
+    - Allows you use residual/derivative stepping
 
 - Experiment with the baseline models
     - GNO, brandstetter, MeshGraphNets, (scOT), (FNO), (U-Net), (CNO), (GNOT)
@@ -44,17 +40,17 @@
 ## Other
 - Add uncertainty to the errors
     * No need to retrain anything, just use edge masking
-    - Separate the evaluation script
-
-- Combine initial conditions
-    * Foundation model
-    * Different state domains
 
 - Try data augmentation
     - Try shifting first (approved)
     - Try repeating (physically incorrect)
 
 - Check the internal features of the graph and try to make sense of them
+
+- Add setup.py with setuptools and read use cases:
+    - %pip install --upgrade https://github.com/.../master.zip
+
+- Write docstring and type annotations
 
 ## Sequential data
 - Implement and try the LSTM idea from presentation-240315-updates
@@ -68,9 +64,5 @@
     - Not sure there is an easy solution
 
 - Check LLM tasks (translation, prompt-based text generation, auto-completion)
+
 - Check RNNs and transformers (the whole training scheme changes.. and becomes faster!!)
-
-- Add setup.py with setuptools and read use cases:
-    - %pip install --upgrade https://github.com/.../master.zip
-
-- Write docstring and type annotations
