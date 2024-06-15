@@ -1,7 +1,5 @@
 # NEXT STEPS
 
-- Debug test OOM issue :: Check shardings, replicates, state, stats, etc.
-
 - Add resolution-invariance results (E291)
 
 - Check E295: wave_equation
@@ -20,8 +18,9 @@
 - Reproduce experiments for reporting in the thesis
     * pull the latest version
     * Fix what needs to be fixed
+        - Noise level plots: Horizontal lines
+        - How many epochs? 2000? 1000? 600?
     * 1000 epochs
-    - Noise level plots: Horizontal lines
 
 - How does the DFT of the predictions look like?
 
