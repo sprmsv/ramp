@@ -234,8 +234,11 @@ def get_all_estimations(
 
     # Get model estimations
     # -> [num_lead_times, batch_size_per_device, 1, ...]
-    def _use_step_on_mini_batches(_u_inp, _t_inp):
-      return steppers[resolution].apply(
+    def _use_step_on_mini_batches(carry, x):
+      idx = carry
+      _u_inp = u_inp[idx]
+      _t_inp = t_inp[idx]
+      _u_prd = steppers[resolution].apply(
         variables=variables,
         stats=stats,
         u_inp=_u_inp,
@@ -243,7 +246,15 @@ def get_all_estimations(
         tau=(tau / time_downsample_factor),
         key=key,
       )
-    u_prd = jax.vmap(_use_step_on_mini_batches)(u_inp, t_inp)
+      carry += 1
+      return carry, _u_prd
+
+    _, u_prd = jax.lax.scan(
+      f=_use_step_on_mini_batches,
+      init=0,
+      xs=None,
+      length=trajs.shape[1],
+    )
 
     # Re-arrange
     # -> [batch_size_per_device, num_lead_times, ...]
