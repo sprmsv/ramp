@@ -128,7 +128,7 @@ def plot_trajectory(traj, idx_time, idx_traj=0, symmetric=True, ylabels=None):
         vmax=vmax,
       )
       if ivar == 0:
-        axs[ivar, icol].set(title=f'timestep={idx_time[icol]}')
+        axs[ivar, icol].set(title=f'$t=t_{{{idx_time[icol]}}}$')
 
     plt.colorbar(h, ax=axs[ivar, :], fraction=.02)
 
