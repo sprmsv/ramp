@@ -1,9 +1,8 @@
+import functools
 import json
 import pickle
 import shutil
 from typing import Tuple, Type, Mapping, Callable, Any, Sequence
-
-from time import time
 
 import numpy as np
 import jax
@@ -159,71 +158,6 @@ def profile_inferrence(
   for line in all_msgs:
     logging.info(line)
 
-def get_direct_estimations(
-  step: Stepper.apply,
-  variables,
-  stats,
-  trajs: Array,
-  tau: int,
-  time_downsample_factor: int,
-  key = None,
-) -> Array:
-  """Inputs are of shape [batch_size_per_device, ...]"""
-
-  # Set lead times
-  lead_times = jnp.arange(trajs.shape[1])
-  batch_size = trajs.shape[0]
-
-  # Get inputs for all lead times
-  # -> [num_lead_times, batch_size_per_device, ...]
-  u_inp = jax.vmap(
-      lambda lt: jax.lax.dynamic_slice_in_dim(
-        operand=trajs,
-        start_index=(lt), slice_size=1, axis=1)
-  )(lead_times)
-  t_inp = lead_times.repeat(repeats=batch_size).reshape(-1, batch_size, 1)
-
-  # Get model estimations
-  # -> [num_lead_times, batch_size_per_device, 1, ...]
-  def _use_step_on_mini_batches(_u_inp, _t_inp):
-    return step(
-      variables=variables,
-      stats=stats,
-      u_inp=_u_inp,
-      t_inp=(_t_inp / time_downsample_factor),
-      tau=(tau / time_downsample_factor),
-      key=key,
-    )
-  u_prd = jax.vmap(_use_step_on_mini_batches)(u_inp, t_inp)
-
-  # Re-arrange
-  # -> [batch_size_per_device, num_lead_times, ...]
-  u_prd = u_prd.swapaxes(0, 1).squeeze(axis=2)
-
-  return u_prd
-
-def get_rollout_estimations(
-  unroll: AutoregressiveStepper.unroll,
-  num_steps: int,
-  variables,
-  stats,
-  u_inp: Array,
-  key = None,
-):
-  """Inputs are of shape [batch_size_per_device, ...]"""
-
-  batch_size = u_inp.shape[0]
-  rollout, _ = unroll(
-    variables,
-    stats,
-    u_inp,
-    jnp.array([0.]).repeat(repeats=(batch_size)).reshape(batch_size, 1),
-    num_steps,
-    key,
-  )
-
-  return rollout
-
 def get_all_estimations(
   dataset: Dataset,
   model: AbstractOperator,
@@ -244,73 +178,10 @@ def get_all_estimations(
   state = replicate(state)
   stats = replicate(stats)
 
-  # Get pmapped version of the estimator functions
-  _get_direct_estimations = jax.pmap(get_direct_estimations, static_broadcasted_argnums=(0,))
-  _get_rollout_estimations = jax.pmap(get_rollout_estimations, static_broadcasted_argnums=(0, 1))
-
-  def _get_estimations_in_batches(
-    direct: bool,
-    apply_fn: Callable,
-    tau: int = None,
-    transform: Callable[[Array], Array] = None,
-  ):
-    # Check inputs
-    if direct:
-      assert tau is not None
-
-    # Loop over the batches
-    u_prd = []
-    for batch in dataset.batches(mode='test', batch_size=FLAGS.batch_size):
-      # Transform the batch
-      if transform is not None:
-        batch = transform(batch)
-
-      # Split the batch between devices
-      # -> [NUM_DEVICES, batch_size_per_device, ...]
-      batch = shard(batch)
-
-      # Get the direct predictions
-      if direct:
-        u_prd_batch = _get_direct_estimations(
-          apply_fn,
-          variables={'params': state['params']},
-          stats=stats,
-          trajs=batch,
-          tau=replicate(tau),
-          time_downsample_factor=replicate(train_flags['time_downsample_factor']),
-        )
-        # Replace the tail of the predictions with the head of the input
-        u_prd_batch = jnp.concatenate([batch[:, :, :tau], u_prd_batch[:, :, :-tau]], axis=2)
-
-      # Get the rollout predictions
-      else:
-        num_times = batch.shape[2]
-        u_prd_batch = _get_rollout_estimations(
-          apply_fn,
-          num_times,
-          variables={'params': state['params']},
-          stats=stats,
-          u_inp=batch[:, :, [0]],
-        )
-
-      # Undo the split between devices
-      u_prd_batch = u_prd_batch.reshape(FLAGS.batch_size, *u_prd_batch.shape[2:])
-
-      # Append the prediction
-      u_prd.append(u_prd_batch)
-
-    # Concatenate the predictions
-    u_prd = jnp.concatenate(u_prd, axis=0)
-
-    return u_prd
-
   # Instantiate the steppers
   all_resolutions = set(resolutions + [resolution_train])
   steppers: dict[Any, Stepper] = {res: None for res in all_resolutions}
-  apply_steppers_jit: dict[Any, Stepper.apply] = {res: None for res in all_resolutions}
   unrollers: dict[Any, dict[Any, AutoregressiveStepper]] = {
-    res: {tau: None for tau in taus_rollout} for res in all_resolutions}
-  apply_unroll_jit: dict[Any, dict[Any, AutoregressiveStepper.unroll]] = {
     res: {tau: None for tau in taus_rollout} for res in all_resolutions}
 
   # Instantiate the steppers
@@ -328,7 +199,6 @@ def get_all_estimations(
       raise NotImplementedError
 
     steppers[resolution] = stepping(operator=model.__class__(**model_configs))
-    apply_steppers_jit[resolution] = jax.jit(steppers[resolution].apply)
 
     for tau_max in taus_rollout:
       unrollers[resolution][tau_max] = AutoregressiveStepper(
@@ -336,8 +206,129 @@ def get_all_estimations(
         tau_max=(tau_max / train_flags['time_downsample_factor']),
         tau_base=(1. / train_flags['time_downsample_factor'])
       )
-      apply_unroll_jit[resolution][tau_max] = jax.jit(
-        unrollers[resolution][tau_max].unroll, static_argnums=(4,))
+
+  @functools.partial(jax.pmap, static_broadcasted_argnums=(0,))
+  def _get_direct_estimations(
+    resolution: Tuple[int, int],
+    variables,
+    stats,
+    trajs: Array,
+    tau: int,
+    time_downsample_factor: int,
+    key = None,
+  ) -> Array:
+    """Inputs are of shape [batch_size_per_device, ...]"""
+
+    # Set lead times
+    lead_times = jnp.arange(trajs.shape[1])
+    batch_size = trajs.shape[0]
+
+    # Get inputs for all lead times
+    # -> [num_lead_times, batch_size_per_device, ...]
+    u_inp = jax.vmap(
+        lambda lt: jax.lax.dynamic_slice_in_dim(
+          operand=trajs,
+          start_index=(lt), slice_size=1, axis=1)
+    )(lead_times)
+    t_inp = lead_times.repeat(repeats=batch_size).reshape(-1, batch_size, 1)
+
+    # Get model estimations
+    # -> [num_lead_times, batch_size_per_device, 1, ...]
+    def _use_step_on_mini_batches(_u_inp, _t_inp):
+      return steppers[resolution].apply(
+        variables=variables,
+        stats=stats,
+        u_inp=_u_inp,
+        t_inp=(_t_inp / time_downsample_factor),
+        tau=(tau / time_downsample_factor),
+        key=key,
+      )
+    u_prd = jax.vmap(_use_step_on_mini_batches)(u_inp, t_inp)
+
+    # Re-arrange
+    # -> [batch_size_per_device, num_lead_times, ...]
+    u_prd = u_prd.swapaxes(0, 1).squeeze(axis=2)
+
+    return u_prd
+
+  @functools.partial(jax.pmap, static_broadcasted_argnums=(0, 1, 2,))
+  def _get_rollout_estimations(
+    resolution: Tuple[int, int],
+    tau_max: int,
+    num_steps: int,
+    variables,
+    stats,
+    u_inp: Array,
+    key = None,
+  ):
+    """Inputs are of shape [batch_size_per_device, ...]"""
+
+    batch_size = u_inp.shape[0]
+    rollout, _ = unrollers[resolution][tau_max].unroll(
+      variables,
+      stats,
+      u_inp,
+      jnp.array([0.]).repeat(repeats=(batch_size)).reshape(batch_size, 1),
+      num_steps,
+      key,
+    )
+
+    return rollout
+
+  def _get_estimations_in_batches(
+    direct: bool,
+    resolution: Tuple[int, int],
+    tau: int,
+    transform: Callable[[Array], Array] = None,
+  ):
+
+    # Loop over the batches
+    u_prd = []
+    for batch in dataset.batches(mode='test', batch_size=FLAGS.batch_size):
+      # Transform the batch
+      if transform is not None:
+        batch = transform(batch)
+
+      # Split the batch between devices
+      # -> [NUM_DEVICES, batch_size_per_device, ...]
+      batch = shard(batch)
+
+      # Get the direct predictions
+      if direct:
+        u_prd_batch = _get_direct_estimations(
+          resolution,
+          variables={'params': state['params']},
+          stats=stats,
+          trajs=batch,
+          tau=replicate(tau),
+          time_downsample_factor=replicate(train_flags['time_downsample_factor']),
+        )
+        # Replace the tail of the predictions with the head of the input
+        u_prd_batch = jnp.concatenate([batch[:, :, :tau], u_prd_batch[:, :, :-tau]], axis=2)
+
+      # Get the rollout predictions
+      else:
+        num_times = batch.shape[2]
+        tau_max = tau
+        u_prd_batch = _get_rollout_estimations(
+          resolution,
+          tau_max,
+          num_times,
+          variables={'params': state['params']},
+          stats=stats,
+          u_inp=batch[:, :, [0]],
+        )
+
+      # Undo the split between devices
+      u_prd_batch = u_prd_batch.reshape(FLAGS.batch_size, *u_prd_batch.shape[2:])
+
+      # Append the prediction
+      u_prd.append(u_prd_batch)
+
+    # Concatenate the predictions
+    u_prd = jnp.concatenate(u_prd, axis=0)
+
+    return u_prd
 
   # Instantiate the outputs
   u_prd_tau = {'direct': {}, 'rollout': {}}
@@ -350,7 +341,7 @@ def get_all_estimations(
     u_prd_tau['direct'][tau] = {'resolution': resolution}
     u_prd_tau['direct'][tau]['u'] = _get_estimations_in_batches(
       direct=True,
-      apply_fn=apply_steppers_jit[resolution],
+      resolution=resolution,
       tau=tau,
       transform=(lambda arr: change_resolution(arr, resolution)),
     )
@@ -361,7 +352,8 @@ def get_all_estimations(
     u_prd_tau['rollout'][tau_max] = {'resolution': resolution}
     u_prd_tau['rollout'][tau_max]['u'] = _get_estimations_in_batches(
       direct=False,
-      apply_fn=apply_unroll_jit[resolution][tau_max],
+      resolution=resolution,
+      tau=tau_max,
       transform=(lambda arr: change_resolution(arr, resolution)),
     )
 
@@ -372,14 +364,15 @@ def get_all_estimations(
     u_prd_px['direct'][resolution] = {'resolution': resolution}
     u_prd_px['direct'][resolution]['u'] = _get_estimations_in_batches(
       direct=True,
-      apply_fn=apply_steppers_jit[resolution],
+      resolution=resolution,
       tau=tau,
       transform=(lambda arr: change_resolution(arr, resolution)),
     )
     u_prd_px['rollout'][resolution] = {'resolution': resolution}
     u_prd_px['rollout'][resolution]['u'] = _get_estimations_in_batches(
       direct=False,
-      apply_fn=apply_unroll_jit[resolution][tau_max],
+      resolution=resolution,
+      tau=tau_max,
       transform=(lambda arr: change_resolution(arr, resolution)),
     )
 
@@ -398,7 +391,7 @@ def get_all_estimations(
     u_prd_noise['direct'][noise_level] = {'resolution': resolution}
     u_prd_noise['direct'][noise_level]['u'] = _get_estimations_in_batches(
       direct=True,
-      apply_fn=apply_steppers_jit[resolution],
+      resolution=resolution,
       tau=tau,
       transform=transform,
     )
@@ -406,7 +399,8 @@ def get_all_estimations(
     u_prd_noise['rollout'][noise_level] = {'resolution': resolution}
     u_prd_noise['rollout'][noise_level]['u'] = _get_estimations_in_batches(
       direct=False,
-      apply_fn=apply_unroll_jit[resolution][tau_max],
+      resolution=resolution,
+      tau=tau_max,
       transform=transform,
     )
 
@@ -437,11 +431,48 @@ def get_ensemble_estimations(
   state = replicate(state)
   stats = replicate(stats)
 
-  # Get pmapped version of the estimator functions
-  _get_rollout_estimations = jax.pmap(get_rollout_estimations, static_broadcasted_argnums=(0, 1))
+  # Configure and build new model
+  model_configs = model.configs
+  if isinstance(model, MPGNO):
+    model_configs['num_grid_nodes'] = resolution_train
+    model_configs['p_dropout_edges_grid2mesh'] = p_edge_masking_grid2mesh
+    model_configs['p_dropout_edges_multimesh'] = 0.
+    model_configs['p_dropout_edges_mesh2grid'] = 0.
+  elif isinstance(model, UNet):
+    pass
+  else:
+    raise NotImplementedError
+
+  stepper = stepping(operator=model.__class__(**model_configs))
+  unroller = AutoregressiveStepper(
+    stepper=stepper,
+    tau_max=(tau_max / train_flags['time_downsample_factor']),
+    tau_base=(1. / train_flags['time_downsample_factor'])
+  )
+
+  @functools.partial(jax.pmap, static_broadcasted_argnums=(0,))
+  def _get_rollout_estimations(
+    num_steps: int,
+    variables,
+    stats,
+    u_inp: Array,
+    key = None,
+  ):
+    """Inputs are of shape [batch_size_per_device, ...]"""
+
+    batch_size = u_inp.shape[0]
+    rollout, _ = unroller.unroll(
+      variables,
+      stats,
+      u_inp,
+      jnp.array([0.]).repeat(repeats=(batch_size)).reshape(batch_size, 1),
+      num_steps,
+      key,
+    )
+
+    return rollout
 
   def _get_estimations_in_batches(
-    apply_fn: Callable,
     transform: Callable[[Array], Array] = None,
     key = None,
   ):
@@ -461,7 +492,6 @@ def get_ensemble_estimations(
       # Get the rollout predictions
       num_times = batch.shape[2]
       u_prd_batch = _get_rollout_estimations(
-        apply_fn,
         num_times,
         variables={'params': state['params']},
         stats=stats,
@@ -480,34 +510,12 @@ def get_ensemble_estimations(
 
     return u_prd
 
-  # Configure and build new model
-  model_configs = model.configs
-  if isinstance(model, MPGNO):
-    model_configs['num_grid_nodes'] = resolution_train
-    model_configs['p_dropout_edges_grid2mesh'] = p_edge_masking_grid2mesh
-    model_configs['p_dropout_edges_multimesh'] = 0.
-    model_configs['p_dropout_edges_mesh2grid'] = 0.
-  elif isinstance(model, UNet):
-    pass
-  else:
-    raise NotImplementedError
-
-  stepper = stepping(operator=model.__class__(**model_configs))
-  unroller = AutoregressiveStepper(
-    stepper=stepper,
-    tau_max=(tau_max / train_flags['time_downsample_factor']),
-    tau_base=(1. / train_flags['time_downsample_factor'])
-  )
-  apply_unroll_jit = jax.jit(
-    unroller.unroll, static_argnums=(4,))
-
   # Autoregressive rollout
   u_prd = []
   for _ in range(repeats):
     subkey, key = jax.random.split(key)
     u_prd.append(
       _get_estimations_in_batches(
-        apply_fn=apply_unroll_jit,
         transform=(lambda arr: change_resolution(arr, resolution_train)),
         key=subkey,
       )
