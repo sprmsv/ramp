@@ -92,6 +92,9 @@ flags.DEFINE_string(name='stepper', default='der', required=False,
 flags.DEFINE_integer(name='direct_steps', default=1, required=False,
   help='Maximum number of time steps between input/output pairs during training'
 )
+flags.DEFINE_boolean(name='fractional', default=False, required=False,
+  help='If passed, train with fractional time steps (unrolled)'
+)
 flags.DEFINE_integer(name='n_train', default=(2**9), required=False,
   help='Number of training samples'
 )
@@ -151,6 +154,7 @@ def train(
   state: TrainState,
   dataset: Dataset,
   direct_steps: int,
+  unroll: bool,
   epochs: int,
   epochs_before: int = 0,
   loss_fn: Callable = rel_lp_loss,
@@ -195,11 +199,6 @@ def train(
     stepper = OutputUpdater(operator=model)
   else:
     raise ValueError
-  predictor = AutoregressiveStepper(
-    stepper=stepper,
-    tau_max=direct_steps,
-    tau_base=1.,
-  )
   one_step_predictor = AutoregressiveStepper(
     stepper=stepper,
     tau_max=1,
@@ -246,7 +245,7 @@ def train(
         u_inp: Array,
         t_inp: Array,
         u_tgt: Array,
-        tau: int,
+        tau: Array,
       ) -> Tuple[Array, PyTreeDef]:
         """
         Computes the loss and the gradients of the loss w.r.t the parameters.
@@ -256,7 +255,7 @@ def train(
           params: flax.typing.Collection,
           u_inp: Array,
           t_inp: Array,
-          tau: int,
+          tau: Array,
           u_tgt: Array,
           key: flax.typing.PRNGKey,
         ) -> Array:
@@ -264,21 +263,42 @@ def train(
 
           variables = {'params': params}
 
+          if unroll:
+            # Split tau for unrolling
+            key, subkey = jax.random.split(key)
+            tau_cutoff = .2
+            tau_mid = tau_cutoff + jax.random.uniform(key=subkey, shape=tau.shape) * (tau - 2 * tau_cutoff)
+            # Get intermediary output
+            key, subkey = jax.random.split(key)
+            u_int = stepper.apply(
+              variables=variables,
+              stats=stats,
+              u_inp=u_inp,
+              t_inp=t_inp,
+              tau=tau_mid,
+              key=subkey,
+            )
+            t_int = t_inp + tau_mid
+          else:
+            tau_mid = 0.
+            u_int = u_inp
+            t_int = t_inp
+
           # Get the output
           key, subkey = jax.random.split(key)
           _loss_inputs = stepper.get_loss_inputs(
             variables=variables,
             stats=stats,
-            u_inp=u_inp,
-            t_inp=t_inp,
+            u_inp=u_int,
+            t_inp=t_int,
             u_tgt=u_tgt,
-            tau=tau,
+            tau=(tau - tau_mid),
             key=subkey,
           )
 
           return loss_fn(*_loss_inputs)
 
-        # Use noisy input and compute gradients
+        # Compute gradients
         key, subkey = jax.random.split(key)
         loss, grads = jax.value_and_grad(_compute_loss)(
           params, u_inp, t_inp, tau, u_tgt, key=subkey)
@@ -393,11 +413,6 @@ def train(
       body_fun=_update_state,
       init_val=(_init_state, _init_loss, _init_grads, _init_key)
     )
-
-    # Synchronize loss and gradients
-    # NOTE: Redundent since they are synchronized everytime before being applied
-    # loss = jax.lax.pmean(loss, axis_name='device')
-    # grads = jax.lax.pmean(grads, axis_name='device')
 
     return state, loss, grads
 
@@ -984,22 +999,73 @@ def main(argv):
     optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-08),
   )
   state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
-  for _d in (range(1, FLAGS.direct_steps+1) if schedule_direct_steps else [FLAGS.direct_steps]):
-    key, subkey = jax.random.split(key)
-    if schedule_direct_steps:
-      epochs = (epochs_dff if (_d == FLAGS.direct_steps) else epochs_dxx)
-    else:
-      epochs = FLAGS.epochs
+
+  # Warm-up epochs
+  if schedule_direct_steps:
+    for _d in range(1, FLAGS.direct_steps):
+      key, subkey = jax.random.split(key)
+      state = train(
+        key=subkey,
+        model=model,
+        state=state,
+        dataset=dataset,
+        direct_steps=_d,
+        unroll=False,
+        epochs=epochs_dxx,
+        epochs_before=epochs_trained,
+      )
+      epochs_trained += epochs_dxx
+
+  # Split with and without unrolling
+  if schedule_direct_steps:
+    epochs_rest = epochs_dff
+  else:
+    epochs_rest = FLAGS.epochs
+  epochs_with_unrolling = int(.5 * epochs_rest)
+  epochs_without_unrolling = epochs_rest - epochs_with_unrolling
+
+  if FLAGS.fractional:
+    # Train without unrolling
     state = train(
       key=subkey,
       model=model,
       state=state,
       dataset=dataset,
-      direct_steps=_d,
-      epochs=epochs,
+      direct_steps=FLAGS.direct_steps,
+      unroll=False,
+      epochs=epochs_without_unrolling,
       epochs_before=epochs_trained,
     )
-    epochs_trained += epochs
+    epochs_trained += epochs_without_unrolling
+    # Train with unrolling
+    logging.info('-' * 80)
+    logging.info('WITH UNROLLING')
+    logging.info('-' * 80)
+    state = train(
+      key=subkey,
+      model=model,
+      state=state,
+      dataset=dataset,
+      direct_steps=FLAGS.direct_steps,
+      unroll=True,
+      epochs=epochs_with_unrolling,
+      epochs_before=epochs_trained,
+    )
+    epochs_trained += epochs_with_unrolling
+
+  else:
+    # Train without unrolling
+    state = train(
+      key=subkey,
+      model=model,
+      state=state,
+      dataset=dataset,
+      direct_steps=FLAGS.direct_steps,
+      unroll=False,
+      epochs=epochs_rest,
+      epochs_before=epochs_trained,
+    )
+    epochs_trained += epochs_rest
 
 if __name__ == '__main__':
   logging.set_verbosity('info')
