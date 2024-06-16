@@ -31,122 +31,125 @@ from mpgno.utils import disable_logging, Array, shuffle_arrays, split_arrays, no
 from mpgno.metrics import BatchMetrics, Metrics, EvalMetrics
 from mpgno.metrics import rel_lp_loss
 from mpgno.metrics import mse_error, rel_lp_error_per_var, rel_lp_error_norm
+from mpgno.test import get_direct_estimations
 
 
 NUM_DEVICES = jax.local_device_count()
 EVAL_FREQ = 50
 IDX_FN = 14
 
-# FLAGS::general
 FLAGS = flags.FLAGS
-flags.DEFINE_string(name='exp', default='000', required=False,
-  help='Name of the experiment'
-)
-flags.DEFINE_string(name='datetime', default=None, required=False,
-  help='A string representing the current datetime'
-)
-flags.DEFINE_string(name='datadir', default=None, required=True,
-  help='Path of the folder containing the datasets'
-)
-flags.DEFINE_string(name='datapath', default=None, required=True,
-  help='Relative path inside the data directory'
-)
-flags.DEFINE_string(name='params', default=None, required=False,
-  help='Path of the previous experiment containing the initial parameters'
-)
-flags.DEFINE_integer(name='seed', default=44, required=False,
-  help='Seed for random number generator'
-)
-flags.DEFINE_integer(name='time_downsample_factor', default=2, required=False,
-  help='Factor for time downsampling'
-)
-flags.DEFINE_integer(name='space_downsample_factor', default=1, required=False,
-  help='Factor for space downsampling'
-)
 
-# FLAGS::training
-flags.DEFINE_string(name='model', default=None, required=True,
-  help='Name of the model: ["MPGNO", "UNET"]'
-)
-flags.DEFINE_integer(name='batch_size', default=4, required=False,
-  help='Size of a batch of training samples'
-)
-flags.DEFINE_integer(name='epochs', default=20, required=False,
-  help='Number of training epochs'
-)
-flags.DEFINE_float(name='lr_init', default=1e-05, required=False,
-  help='Initial learning rate in the onecycle scheduler'
-)
-flags.DEFINE_float(name='lr_peak', default=2e-04, required=False,
-  help='Peak learning rate in the onecycle scheduler'
-)
-flags.DEFINE_float(name='lr_base', default=1e-05, required=False,
-  help='Final learning rate in the onecycle scheduler'
-)
-flags.DEFINE_float(name='lr_lowr', default=1e-06, required=False,
-  help='Final learning rate in the exponential decay'
-)
-flags.DEFINE_string(name='stepper', default='der', required=False,
-  help='Type of the stepper'
-)
-flags.DEFINE_integer(name='tau_max', default=1, required=False,
-  help='Maximum number of time steps between input/output pairs during training'
-)
-flags.DEFINE_boolean(name='fractional', default=False, required=False,
-  help='If passed, train with fractional time steps (unrolled)'
-)
-flags.DEFINE_integer(name='n_train', default=(2**9), required=False,
-  help='Number of training samples'
-)
-flags.DEFINE_integer(name='n_valid', default=(2**8), required=False,
-  help='Number of validation samples'
-)
-flags.DEFINE_integer(name='n_test', default=(2**8), required=False,
-  help='Number of test samples'
-)
+def define_flags():
+  # FLAGS::general
+  flags.DEFINE_string(name='exp', default='000', required=False,
+    help='Name of the experiment'
+  )
+  flags.DEFINE_string(name='datetime', default=None, required=False,
+    help='A string representing the current datetime'
+  )
+  flags.DEFINE_string(name='datadir', default=None, required=True,
+    help='Path of the folder containing the datasets'
+  )
+  flags.DEFINE_string(name='datapath', default=None, required=True,
+    help='Relative path inside the data directory'
+  )
+  flags.DEFINE_string(name='params', default=None, required=False,
+    help='Path of the previous experiment containing the initial parameters'
+  )
+  flags.DEFINE_integer(name='seed', default=44, required=False,
+    help='Seed for random number generator'
+  )
+  flags.DEFINE_integer(name='time_downsample_factor', default=2, required=False,
+    help='Factor for time downsampling'
+  )
+  flags.DEFINE_integer(name='space_downsample_factor', default=1, required=False,
+    help='Factor for space downsampling'
+  )
 
-# FLAGS::model::MPGNO
-flags.DEFINE_integer(name='num_mesh_nodes', default=64, required=False,
-  help='Number of mesh nodes in each dimension'
-)
-flags.DEFINE_float(name='overlap_factor_grid2mesh', default=2.0, required=False,
-  help='Overlap factor for grid2mesh edges (encoder)'
-)
-flags.DEFINE_float(name='overlap_factor_mesh2grid', default=2.0, required=False,
-  help='Overlap factor for mesh2grid edges (decoder)'
-)
-flags.DEFINE_integer(name='num_multimesh_levels', default=4, required=False,
-  help='Number of multimesh connection levels (processor)'
-)
-flags.DEFINE_integer(name='node_coordinate_freqs', default=2, required=False,
-  help='Number of frequencies for encoding periodic node coordinates'
-)
-flags.DEFINE_integer(name='latent_size', default=128, required=False,
-  help='Size of latent node and edge features'
-)
-flags.DEFINE_integer(name='num_mlp_hidden_layers', default=1, required=False,
-  help='Number of hidden layers of all MLPs'
-)
-flags.DEFINE_integer(name='num_message_passing_steps', default=18, required=False,
-  help='Number of message-passing steps in the processor'
-)
-flags.DEFINE_integer(name='num_message_passing_steps_grid', default=0, required=False,
-  help='Number of message-passing steps in the decoder'
-)
-flags.DEFINE_float(name='p_dropout_edges_grid2mesh', default=0.5, required=False,
-  help='Probability of dropping out edges of grid2mesh'
-)
-flags.DEFINE_float(name='p_dropout_edges_multimesh', default=0, required=False,
-  help='Probability of dropping out edges of the multi-mesh'
-)
-flags.DEFINE_float(name='p_dropout_edges_mesh2grid', default=0., required=False,
-  help='Probability of dropping out edges of mesh2grid'
-)
+  # FLAGS::training
+  flags.DEFINE_string(name='model', default=None, required=True,
+    help='Name of the model: ["MPGNO", "UNET"]'
+  )
+  flags.DEFINE_integer(name='batch_size', default=4, required=False,
+    help='Size of a batch of training samples'
+  )
+  flags.DEFINE_integer(name='epochs', default=20, required=False,
+    help='Number of training epochs'
+  )
+  flags.DEFINE_float(name='lr_init', default=1e-05, required=False,
+    help='Initial learning rate in the onecycle scheduler'
+  )
+  flags.DEFINE_float(name='lr_peak', default=2e-04, required=False,
+    help='Peak learning rate in the onecycle scheduler'
+  )
+  flags.DEFINE_float(name='lr_base', default=1e-05, required=False,
+    help='Final learning rate in the onecycle scheduler'
+  )
+  flags.DEFINE_float(name='lr_lowr', default=1e-06, required=False,
+    help='Final learning rate in the exponential decay'
+  )
+  flags.DEFINE_string(name='stepper', default='der', required=False,
+    help='Type of the stepper'
+  )
+  flags.DEFINE_integer(name='tau_max', default=1, required=False,
+    help='Maximum number of time steps between input/output pairs during training'
+  )
+  flags.DEFINE_boolean(name='fractional', default=False, required=False,
+    help='If passed, train with fractional time steps (unrolled)'
+  )
+  flags.DEFINE_integer(name='n_train', default=(2**9), required=False,
+    help='Number of training samples'
+  )
+  flags.DEFINE_integer(name='n_valid', default=(2**8), required=False,
+    help='Number of validation samples'
+  )
+  flags.DEFINE_integer(name='n_test', default=(2**8), required=False,
+    help='Number of test samples'
+  )
 
-# FLAGS::model::UNET
-flags.DEFINE_integer(name='unet_features', default=1, required=False,
-  help='Number of features (channels)'
-)
+  # FLAGS::model::MPGNO
+  flags.DEFINE_integer(name='num_mesh_nodes', default=64, required=False,
+    help='Number of mesh nodes in each dimension'
+  )
+  flags.DEFINE_float(name='overlap_factor_grid2mesh', default=2.0, required=False,
+    help='Overlap factor for grid2mesh edges (encoder)'
+  )
+  flags.DEFINE_float(name='overlap_factor_mesh2grid', default=2.0, required=False,
+    help='Overlap factor for mesh2grid edges (decoder)'
+  )
+  flags.DEFINE_integer(name='num_multimesh_levels', default=4, required=False,
+    help='Number of multimesh connection levels (processor)'
+  )
+  flags.DEFINE_integer(name='node_coordinate_freqs', default=2, required=False,
+    help='Number of frequencies for encoding periodic node coordinates'
+  )
+  flags.DEFINE_integer(name='latent_size', default=128, required=False,
+    help='Size of latent node and edge features'
+  )
+  flags.DEFINE_integer(name='num_mlp_hidden_layers', default=1, required=False,
+    help='Number of hidden layers of all MLPs'
+  )
+  flags.DEFINE_integer(name='num_message_passing_steps', default=18, required=False,
+    help='Number of message-passing steps in the processor'
+  )
+  flags.DEFINE_integer(name='num_message_passing_steps_grid', default=0, required=False,
+    help='Number of message-passing steps in the decoder'
+  )
+  flags.DEFINE_float(name='p_dropout_edges_grid2mesh', default=0.5, required=False,
+    help='Probability of dropping out edges of grid2mesh'
+  )
+  flags.DEFINE_float(name='p_dropout_edges_multimesh', default=0, required=False,
+    help='Probability of dropping out edges of the multi-mesh'
+  )
+  flags.DEFINE_float(name='p_dropout_edges_mesh2grid', default=0., required=False,
+    help='Probability of dropping out edges of mesh2grid'
+  )
+
+  # FLAGS::model::UNET
+  flags.DEFINE_integer(name='unet_features', default=1, required=False,
+    help='Number of features (channels)'
+  )
 
 def train(
   key: flax.typing.PRNGKey,
@@ -448,82 +451,38 @@ def train(
 
     return state, loss_epoch, grad_epoch
 
-  @jax.pmap
+  @functools.partial(jax.pmap, static_broadcasted_argnums=(0,))
   def _evaluate_direct_prediction(
+    tau: int,
     state: TrainState,
     stats,
     trajs: Array,
-    times: Array,
   ) -> Mapping:
 
-    # Inputs are of shape [batch_size_per_device, ...]
+    if tau < 1:
+      step = lambda *args, **kwargs: stepper.unroll(*args, **kwargs, num_steps=int(1 / tau))
+      _tau = 1
+    else:
+      step = stepper.apply
+      _tau = tau
 
-    # Set lead times
-    num_lead_times = num_times - tau_max
-    lead_times = jnp.arange(num_times - tau_max)
-
-    # Get input output pairs for all lead times
-    # -> [num_lead_times, batch_size_per_device, ...]
-    u_inp = jax.vmap(
-        lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=trajs,
-          start_index=(lt), slice_size=1, axis=1)
-    )(lead_times)
-    t_inp = jax.vmap(
-        lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=times,
-          start_index=(lt), slice_size=1, axis=1)
-    )(lead_times)
-    u_tgt = jax.vmap(
-        lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=trajs,
-          start_index=(lt+1), slice_size=tau_max, axis=1)
-    )(lead_times)
-
-    def get_direct_errors(lt, carry):
-      carry = BatchMetrics(**carry)
-      def get_direct_prediction(tau, forcing):
-        u_prd = stepper.apply(
-          variables={'params': state.params},
-          stats=stats,
-          u_inp=u_inp[lt],
-          t_inp=t_inp[lt],
-          tau=tau,
-        )
-        return (tau+1), u_prd
-      _, u_prd = jax.lax.scan(
-        f=get_direct_prediction,
-        init=1,
-        xs=None,
-        length=tau_max,
-      )
-      u_prd = u_prd.squeeze(axis=2).swapaxes(0, 1)
-
-      # Compute metrics
-      batch_metrics = BatchMetrics(
-        mse=(mse_error(u_tgt[lt], u_prd) / num_lead_times),
-        l1=(rel_lp_error_norm(u_tgt[lt], u_prd, p=1) / num_lead_times),
-        l2=(rel_lp_error_norm(u_tgt[lt], u_prd, p=2) / num_lead_times),
-      )
-
-      carry += batch_metrics
-
-      return carry.__dict__
+    u_prd = get_direct_estimations(
+      step=step,
+      variables={'params': state.params},
+      stats=stats,
+      trajs=trajs,
+      tau=_tau,
+      time_downsample_factor=1,
+    )
 
     # Get mean errors per each sample in the batch
-    init_metrics = BatchMetrics(
-      mse=jnp.zeros(shape=(batch_size_per_device,)),
-      l1=jnp.zeros(shape=(batch_size_per_device,)),
-      l2=jnp.zeros(shape=(batch_size_per_device,)),
-    )
-    batch_metrics_mean = jax.lax.fori_loop(
-      body_fun=get_direct_errors,
-      lower=0,
-      upper=num_lead_times,
-      init_val=init_metrics.__dict__,
+    batch_metrics = BatchMetrics(
+      mse=mse_error(trajs[:, _tau:], u_prd[:, :-_tau]),
+      l1=rel_lp_error_norm(trajs[:, _tau:], u_prd[:, :-_tau], p=1),
+      l2=rel_lp_error_norm(trajs[:, _tau:], u_prd[:, :-_tau], p=2),
     )
 
-    return batch_metrics_mean
+    return batch_metrics.__dict__
 
   @jax.pmap
   def _evaluate_rollout_prediction(
@@ -617,7 +576,9 @@ def train(
   ) -> EvalMetrics:
     """Evaluates the model on a dataset based on multiple trajectory lengths."""
 
-    metrics_direct: list[BatchMetrics] = []
+    metrics_direct_tau_frac: list[BatchMetrics] = []
+    metrics_direct_tau_min: list[BatchMetrics] = []
+    metrics_direct_tau_max: list[BatchMetrics] = []
     metrics_rollout: list[BatchMetrics] = []
     metrics_final: list[BatchMetrics] = []
 
@@ -633,14 +594,35 @@ def train(
 
       # Evaluate direct prediction
       if direct:
-        batch_metrics_direct = _evaluate_direct_prediction(
-          state, stats, trajs, times,
+        # tau=.5
+        batch_metrics_direct_tau_frac = _evaluate_direct_prediction(
+          .5, state, stats, trajs,
         )
-        batch_metrics_direct = BatchMetrics(**batch_metrics_direct)
+        batch_metrics_direct_tau_frac = BatchMetrics(**batch_metrics_direct_tau_frac)
         # Re-arrange the sub-batches gotten from each device
-        batch_metrics_direct.reshape(shape=(batch_size_per_device * NUM_DEVICES, 1))
+        batch_metrics_direct_tau_frac.reshape(shape=(batch_size_per_device * NUM_DEVICES, 1))
         # Append the metrics to the list
-        metrics_direct.append(batch_metrics_direct)
+        metrics_direct_tau_frac.append(batch_metrics_direct_tau_frac)
+
+        # tau=1
+        batch_metrics_direct_tau_min = _evaluate_direct_prediction(
+          1, state, stats, trajs,
+        )
+        batch_metrics_direct_tau_min = BatchMetrics(**batch_metrics_direct_tau_min)
+        # Re-arrange the sub-batches gotten from each device
+        batch_metrics_direct_tau_min.reshape(shape=(batch_size_per_device * NUM_DEVICES, 1))
+        # Append the metrics to the list
+        metrics_direct_tau_min.append(batch_metrics_direct_tau_min)
+
+        # tau=tau_max
+        batch_metrics_direct_tau_max = _evaluate_direct_prediction(
+          FLAGS.tau_max, state, stats, trajs,
+        )
+        batch_metrics_direct_tau_max = BatchMetrics(**batch_metrics_direct_tau_max)
+        # Re-arrange the sub-batches gotten from each device
+        batch_metrics_direct_tau_max.reshape(shape=(batch_size_per_device * NUM_DEVICES, 1))
+        # Append the metrics to the list
+        metrics_direct_tau_max.append(batch_metrics_direct_tau_max)
 
       # Evaluate rollout prediction
       if rollout:
@@ -666,10 +648,20 @@ def train(
         metrics_final.append(batch_metrics_final)
 
     # Aggregate over the batch dimension and compute norm per variable
-    metrics_direct = Metrics(
-      mse=jnp.median(jnp.concatenate([m.mse for m in metrics_direct]), axis=0).item(),
-      l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_direct]), axis=0).item(),
-      l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_direct]), axis=0).item(),
+    metrics_direct_tau_frac = Metrics(
+      mse=jnp.median(jnp.concatenate([m.mse for m in metrics_direct_tau_frac]), axis=0).item(),
+      l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_direct_tau_frac]), axis=0).item(),
+      l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_direct_tau_frac]), axis=0).item(),
+    ) if direct else None
+    metrics_direct_tau_min = Metrics(
+      mse=jnp.median(jnp.concatenate([m.mse for m in metrics_direct_tau_min]), axis=0).item(),
+      l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_direct_tau_min]), axis=0).item(),
+      l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_direct_tau_min]), axis=0).item(),
+    ) if direct else None
+    metrics_direct_tau_max = Metrics(
+      mse=jnp.median(jnp.concatenate([m.mse for m in metrics_direct_tau_max]), axis=0).item(),
+      l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_direct_tau_max]), axis=0).item(),
+      l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_direct_tau_max]), axis=0).item(),
     ) if direct else None
     metrics_rollout = Metrics(
       mse=jnp.median(jnp.concatenate([m.mse for m in metrics_rollout]), axis=0).item(),
@@ -684,7 +676,9 @@ def train(
 
     # Build the metrics object
     metrics = EvalMetrics(
-      direct=(metrics_direct if direct else Metrics()),
+      direct_tau_frac=(metrics_direct_tau_frac if direct else Metrics()),
+      direct_tau_min=(metrics_direct_tau_min if direct else Metrics()),
+      direct_tau_max=(metrics_direct_tau_max if direct else Metrics()),
       rollout=(metrics_rollout if rollout else Metrics()),
       final=(metrics_final if final else Metrics()),
     )
@@ -710,11 +704,12 @@ def train(
     f'TIME: {time_tot_pre : 06.1f}s',
     f'GRAD: {0. : .2e}',
     f'LOSS: {0. : .2e}',
-    f'L2-DR-TRN: {metrics_trn.direct.l2 * 100 : .2f}%',
-    f'L1-DR: {metrics_val.direct.l1 * 100 : .2f}%',
-    f'L2-DR: {metrics_val.direct.l2 * 100 : .2f}%',
-    f'L1-FN: {metrics_val.final.l1 * 100 : .2f}%',
-    f'L2-FN: {metrics_val.final.l2 * 100 : .2f}%',
+    f'DR-0.5: {metrics_val.direct_tau_frac.l1 * 100 : .2f}%',
+    f'DR-1: {metrics_val.direct_tau_min.l1 * 100 : .2f}%',
+    f'DR-{FLAGS.tau_max}: {metrics_val.direct_tau_max.l1 * 100 : .2f}%',
+    f'FN: {metrics_val.final.l1 * 100 : .2f}%',
+    f'TRN-DR-1: {metrics_trn.direct_tau_min.l1 * 100 : .2f}%',
+    f'TRN-FN: {metrics_trn.final.l1 * 100 : .2f}%',
   ]))
 
   # Set up the checkpoint manager
@@ -725,7 +720,7 @@ def train(
     checkpointer_options = orbax.checkpoint.CheckpointManagerOptions(
       max_to_keep=1,
       keep_period=None,
-      best_fn=(lambda metrics: metrics['valid']['direct']['l2']),
+      best_fn=(lambda metrics: metrics['valid']['direct_tau_min']['l2']),
       best_mode='min',
       create=True,)
     checkpointer_save_args = orbax_utils.save_args_from_target(target={'state': state})
@@ -764,11 +759,12 @@ def train(
         f'TIME: {time_tot : 06.1f}s',
         f'GRAD: {grad.item() : .2e}',
         f'LOSS: {loss.item() : .2e}',
-        f'L2-DR-TRN: {metrics_trn.direct.l2 * 100 : .2f}%',
-        f'L1-DR: {metrics_val.direct.l1 * 100 : .2f}%',
-        f'L2-DR: {metrics_val.direct.l2 * 100 : .2f}%',
-        f'L1-FN: {metrics_val.final.l1 * 100 : .2f}%',
-        f'L2-FN: {metrics_val.final.l2 * 100 : .2f}%',
+        f'DR-0.5: {metrics_val.direct_tau_frac.l1 * 100 : .2f}%',
+        f'DR-1: {metrics_val.direct_tau_min.l1 * 100 : .2f}%',
+        f'DR-{FLAGS.tau_max}: {metrics_val.direct_tau_max.l1 * 100 : .2f}%',
+        f'FN: {metrics_val.final.l1 * 100 : .2f}%',
+        f'TRN-DR-1: {metrics_trn.direct_tau_min.l1 * 100 : .2f}%',
+        f'TRN-FN: {metrics_trn.final.l1 * 100 : .2f}%',
       ]))
 
       with disable_logging(level=logging.FATAL):
@@ -1069,4 +1065,5 @@ def main(argv):
 
 if __name__ == '__main__':
   logging.set_verbosity('info')
+  define_flags()
   app.run(main)

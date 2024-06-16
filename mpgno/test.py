@@ -30,30 +30,32 @@ NUM_DEVICES = jax.local_device_count()
 IDX_FN = 14
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string(name='exp', default=None, required=True,
-  help='Relative path of the experiment'
-)
-flags.DEFINE_string(name='datadir', default=None, required=True,
-  help='Path of the folder containing the datasets'
-)
-flags.DEFINE_integer(name='batch_size', default=4, required=False,
-  help='Size of a batch of training samples'
-)
-flags.DEFINE_integer(name='n_test', default=(2**8), required=False,
-  help='Number of test samples'
-)
-flags.DEFINE_boolean(name='profile', default=False, required=False,
-  help='If passed, inference is profiled with 1 GPU'
-)
-flags.DEFINE_boolean(name='resolution', default=False, required=False,
-  help='If passed, estimations with different resolutions are computed'
-)
-flags.DEFINE_boolean(name='noise', default=False, required=False,
-  help='If passed, estimations for noise control are computed'
-)
-flags.DEFINE_boolean(name='ensemble', default=False, required=False,
-  help='If passed, ensemble samples are generated using model randomness'
-)
+
+def define_flags():
+  flags.DEFINE_string(name='exp', default=None, required=True,
+    help='Relative path of the experiment'
+  )
+  flags.DEFINE_string(name='datadir', default=None, required=True,
+    help='Path of the folder containing the datasets'
+  )
+  flags.DEFINE_integer(name='batch_size', default=4, required=False,
+    help='Size of a batch of training samples'
+  )
+  flags.DEFINE_integer(name='n_test', default=(2**8), required=False,
+    help='Number of test samples'
+  )
+  flags.DEFINE_boolean(name='profile', default=False, required=False,
+    help='If passed, inference is profiled with 1 GPU'
+  )
+  flags.DEFINE_boolean(name='resolution', default=False, required=False,
+    help='If passed, estimations with different resolutions are computed'
+  )
+  flags.DEFINE_boolean(name='noise', default=False, required=False,
+    help='If passed, estimations for noise control are computed'
+  )
+  flags.DEFINE_boolean(name='ensemble', default=False, required=False,
+    help='If passed, ensemble samples are generated using model randomness'
+  )
 
 
 def print_between_dashes(msg):
@@ -891,4 +893,5 @@ def main(argv):
 
 if __name__ == '__main__':
   logging.set_verbosity('info')
+  define_flags()
   app.run(main)

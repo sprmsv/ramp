@@ -36,7 +36,9 @@ class Metrics:
 
 @dataclass
 class EvalMetrics:
-  direct: Metrics = None
+  direct_tau_frac: Metrics = None
+  direct_tau_min: Metrics = None
+  direct_tau_max: Metrics = None
   rollout: Metrics = None
   final: Metrics = None
 

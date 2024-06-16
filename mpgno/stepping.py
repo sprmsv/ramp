@@ -57,7 +57,7 @@ class Stepper(ABC):
       carry = (u_next, t_next)
       return carry, u_out
 
-    tau_tiled = jnp.tile(tau.reshape(1, -1, 1), reps=(num_steps, 1, 1))
+    tau_tiled = jnp.repeat(tau, repeats=num_steps)
     tau_fract = tau_tiled / num_steps
     forcing = tau_fract
     (u_out, _), _ = jax.lax.scan(f=scan_fn_fractional,
