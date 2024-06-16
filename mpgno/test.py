@@ -334,6 +334,7 @@ def get_all_estimations(
   all_resolutions = set(resolutions + [resolution_train])
   steppers: dict[Any, Stepper] = {res: None for res in all_resolutions}
   apply_steppers_jit: dict[Any, Stepper.apply] = {res: None for res in all_resolutions}
+  apply_steppers_twice_jit: dict[Any, Stepper.unroll] = {res: None for res in all_resolutions}
   unrollers: dict[Any, dict[Any, AutoregressiveStepper]] = {
     res: {tau: None for tau in taus_rollout} for res in all_resolutions}
   apply_unroll_jit: dict[Any, dict[Any, AutoregressiveStepper.unroll]] = {
@@ -355,6 +356,9 @@ def get_all_estimations(
 
     steppers[resolution] = stepping(operator=model.__class__(**model_configs))
     apply_steppers_jit[resolution] = jax.jit(steppers[resolution].apply)
+    def apply_steppers_twice(*args, **kwargs):
+      return steppers[resolution].unroll(*args, **kwargs, num_steps=2)
+    apply_steppers_twice_jit[resolution] = jax.jit(apply_steppers_twice)
 
     for tau_max in taus_rollout:
       unrollers[resolution][tau_max] = AutoregressiveStepper(
@@ -373,12 +377,16 @@ def get_all_estimations(
   # Temporal continuity
   resolution = resolution_train
   for tau in taus_direct:
+    if tau == .5:
+      _apply_stepper = apply_steppers_twice_jit[resolution]
+    else:
+      _apply_stepper = apply_steppers_jit[resolution]
     t0 = time()
     u_prd_tau['direct'][tau] = {'resolution': resolution}
     u_prd_tau['direct'][tau]['u'] = _get_estimations_in_batches(
       direct=True,
-      apply_fn=apply_steppers_jit[resolution],
-      tau=tau,
+      apply_fn=_apply_stepper,
+      tau=(tau if tau != .5 else 1),
       transform=(lambda arr: change_resolution(arr, resolution)),
     )
     print_between_dashes(f'tau_direct={tau} \t TIME={time()-t0 : .4f}s')
@@ -664,11 +672,11 @@ def main(argv):
   interpolate_tau = True
   tau_min = 1
   tau_max = time_downsample_factor * (direct_steps + (direct_steps > 1))
-  taus_direct = list(range(tau_min, tau_max + 1))
+  taus_direct = [.5] + list(range(tau_min, tau_max + 1))
   if not interpolate_tau:
     taus_direct = [tau for tau in taus_direct if (tau % 2) == 0]
   # NOTE: One compilation per tau_rollout
-  taus_rollout = [1] + [time_downsample_factor * d for d in range(1, direct_steps+1)]
+  taus_rollout = [.5, 1] + [time_downsample_factor * d for d in range(1, direct_steps+1)]
   # NOTE: Two compilations per resolution
   resolutions = [(px, px) for px in [32, 48, 64, 96, 128]] if FLAGS.resolution else []
   noise_levels = [0, .005, .01, .02] if FLAGS.noise else []

@@ -30,6 +30,41 @@ class Stepper(ABC):
     """
     pass
 
+  def unroll(self,
+    variables,
+    stats,
+    u_inp: Array,
+    t_inp: Array,
+    tau: Array,
+    num_steps: int,
+    key: flax.typing.PRNGKey = None,
+  ):
+    """Apply the stepper multiple times to reach t_inp+tau by dividing tau."""
+
+    def scan_fn_fractional(carry, forcing):
+      u_inp, t_inp = carry
+      tau = forcing
+      u_out = self.apply(
+        variables,
+        stats,
+        u_inp=u_inp,
+        t_inp=t_inp,
+        tau=tau,
+        key=key,
+      )
+      u_next = u_out
+      t_next = t_inp + tau
+      carry = (u_next, t_next)
+      return carry, u_out
+
+    tau_tiled = jnp.tile(tau.reshape(1, -1, 1), reps=(num_steps, 1, 1))
+    tau_fract = tau_tiled / num_steps
+    forcing = tau_fract
+    (u_out, _), _ = jax.lax.scan(f=scan_fn_fractional,
+      init=(u_inp, t_inp), xs=forcing, length=num_steps)
+
+    return u_out
+
   @abstractmethod
   def get_loss_inputs(self,
     variables,
@@ -330,11 +365,18 @@ class AutoregressiveStepper:
     """
 
     # FIXME: Maybe we can benefit from checkpointing scan_fn instead
-    self._apply_operator = jax.checkpoint(stepper.apply)
-    assert tau_max >= tau_base
-    assert tau_max % tau_base == 0
-    self.num_steps_direct = int(tau_max / tau_base)
     self.tau_base = tau_base
+    if tau_max >= tau_base:
+      assert tau_max % tau_base == 0
+      self.num_steps_direct = int(tau_max / tau_base)
+      self._apply_operator = jax.checkpoint(stepper.apply)
+    else:
+      assert tau_base % tau_max == 0
+      self.num_steps_direct = 1
+      num_unrolls_per_step = int(tau_base / tau_max)
+      def _stepper_unroll(*args, **kwargs):
+        return stepper.unroll(*args, **kwargs, num_steps=num_unrolls_per_step)
+      self._apply_operator = jax.checkpoint(_stepper_unroll)
 
   def unroll(self,
     variables: flax.typing.VariableDict,
@@ -356,14 +398,14 @@ class AutoregressiveStepper:
     def scan_fn_direct(carry, forcing):
       u_inp, t_inp = carry
       tau = forcing[0]
-      subkey = forcing[-2:].astype('uint32') if random else None
+      key = forcing[-2:].astype('uint32')
       u_out = self._apply_operator(
         variables,
         stats,
         u_inp=u_inp,
         t_inp=t_inp,
         tau=tau,
-        key=subkey,
+        key=(key if random else None),
       )
       carry = (u_inp, t_inp)  # NOTE: The input is the same for all tau
       return carry, u_out
