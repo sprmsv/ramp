@@ -671,7 +671,7 @@ def main(argv):
   taus_rollout = [1] + [time_downsample_factor * d for d in range(1, direct_steps+1)]
   # NOTE: Two compilations per resolution
   resolutions = [(px, px) for px in [32, 48, 64, 96, 128]] if FLAGS.resolution else []
-  noise_levels = [0, .002, .005, .01] if FLAGS.noise else []
+  noise_levels = [0, .005, .01, .02] if FLAGS.noise else []
 
   # Set the groundtruth trajectories
   u_gtr = next(dataset.batches(mode='test', batch_size=dataset.nums['test']))

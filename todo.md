@@ -1,8 +1,9 @@
 # NEXT STEPS
 
-- Add resolution-invariance results (E291)
+- Check E291 (test): Add resolution-invariance results
 - Check E295: wave_equation
 - Check E296: Benchmark U-Net to make sure about MPGNO
+- Check E299: How many epochs?
 
 - Implement the new idea for fractional tau
     - tau=.5 unrolled twice ~ tau=1
@@ -17,7 +18,6 @@
 - Reproduce experiments for reporting in the thesis
     * pull the latest version
     * Fix what needs to be fixed
-        - Noise level plots: Horizontal lines
         - How many epochs? 2000? 1000? 600?
     * 1000 epochs
 
