@@ -1,7 +1,6 @@
 # NEXT STEPS
 
 - Add resolution-invariance results (E291)
-
 - Check E295: wave_equation
 - Check E296: Benchmark U-Net to make sure about MPGNO
 
