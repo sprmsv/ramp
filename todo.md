@@ -1,5 +1,18 @@
 # NEXT STEPS
 
+- chagne train.job
+    - fractional=false/true
+    - direct_steps -> tau_max
+
+- Improve train evaluation
+    - Separate L2-DR for different tau
+    - Add fractional tau in L2-DR
+
+- Experiments: fractional tau training
+    - With vs. without
+    - gradient cut vs. gradient flow
+    - res vs. der vs. out
+
 - Check E291 (test): Add resolution-invariance results
 - Check E295: wave_equation
 - Check E296: Benchmark U-Net to make sure about MPGNO

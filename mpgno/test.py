@@ -404,7 +404,7 @@ def get_all_estimations(
     print_between_dashes(f'tau_max={tau_max} \t TIME={time()-t0 : .4f}s')
 
   # Spatial continuity
-  tau_max = train_flags['time_downsample_factor'] * train_flags['direct_steps']
+  tau_max = train_flags['time_downsample_factor'] * train_flags['tau_max']
   tau = train_flags['time_downsample_factor']
   for resolution in resolutions:
     t0 = time()
@@ -426,7 +426,7 @@ def get_all_estimations(
     print_between_dashes(f'resolution={resolution} (rollout) \t TIME={time()-t0 : .4f}s')
 
   # Noise control
-  tau_max = train_flags['time_downsample_factor'] * train_flags['direct_steps']
+  tau_max = train_flags['time_downsample_factor'] * train_flags['tau_max']
   tau = train_flags['time_downsample_factor']
   resolution = resolution_train
   for noise_level in noise_levels:
@@ -617,7 +617,7 @@ def main(argv):
   with open(DIR / 'configs.json', 'rb') as f:
     configs = json.load(f)
   time_downsample_factor = configs['flags']['time_downsample_factor']
-  direct_steps = configs['flags']['direct_steps']
+  tau_max_train = configs['flags']['tau_max']
   model_name = configs['flags']['model'].upper()
   model_configs = configs['model_configs']
   resolution_train = tuple(configs['resolution'])
@@ -671,12 +671,12 @@ def main(argv):
   # Set evaluation settings
   interpolate_tau = True
   tau_min = 1
-  tau_max = time_downsample_factor * (direct_steps + (direct_steps > 1))
+  tau_max = time_downsample_factor * (tau_max_train + (tau_max_train > 1))
   taus_direct = [.5] + list(range(tau_min, tau_max + 1))
   if not interpolate_tau:
     taus_direct = [tau for tau in taus_direct if (tau % 2) == 0]
   # NOTE: One compilation per tau_rollout
-  taus_rollout = [.5, 1] + [time_downsample_factor * d for d in range(1, direct_steps+1)]
+  taus_rollout = [.5, 1] + [time_downsample_factor * d for d in range(1, tau_max_train+1)]
   # NOTE: Two compilations per resolution
   resolutions = [(px, px) for px in [32, 48, 64, 96, 128]] if FLAGS.resolution else []
   noise_levels = [0, .005, .01, .02] if FLAGS.noise else []

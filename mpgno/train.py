@@ -89,7 +89,7 @@ flags.DEFINE_float(name='lr_lowr', default=1e-06, required=False,
 flags.DEFINE_string(name='stepper', default='der', required=False,
   help='Type of the stepper'
 )
-flags.DEFINE_integer(name='direct_steps', default=1, required=False,
+flags.DEFINE_integer(name='tau_max', default=1, required=False,
   help='Maximum number of time steps between input/output pairs during training'
 )
 flags.DEFINE_boolean(name='fractional', default=False, required=False,
@@ -153,7 +153,7 @@ def train(
   model: nn.Module,
   state: TrainState,
   dataset: Dataset,
-  direct_steps: int,
+  tau_max: int,
   unroll: bool,
   epochs: int,
   epochs_before: int = 0,
@@ -181,11 +181,11 @@ def train(
   # Define the permissible lead times
   num_lead_times = num_times - 1
   assert num_lead_times > 0
-  assert direct_steps < num_times
-  num_lead_times_full = max(0, num_times - direct_steps)
+  assert tau_max < num_times
+  num_lead_times_full = max(0, num_times - tau_max)
   num_lead_times_part = num_lead_times - num_lead_times_full
   num_valid_pairs = (
-    num_lead_times_full * direct_steps
+    num_lead_times_full * tau_max
     + (num_lead_times_part * (num_lead_times_part+1) // 2)
   )
   lead_times = jnp.arange(num_times - 1)
@@ -337,31 +337,31 @@ def train(
     u_tgt_batch = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
           operand=jnp.concatenate([trajs, jnp.zeros_like(trajs)], axis=1),
-          start_index=(lt+1), slice_size=direct_steps, axis=1)
+          start_index=(lt+1), slice_size=tau_max, axis=1)
     )(lead_times)
 
     # Repeat inputs along the time axis to match with u_tgt
-    # -> [num_lead_times, batch_size_per_device, direct_steps, ...]
-    u_inp_batch = jnp.tile(u_inp_batch, reps=(1, 1, direct_steps, 1, 1, 1))
-    t_inp_batch = jnp.tile(t_inp_batch, reps=(1, 1, direct_steps, 1, 1, 1))
+    # -> [num_lead_times, batch_size_per_device, tau_max, ...]
+    u_inp_batch = jnp.tile(u_inp_batch, reps=(1, 1, tau_max, 1, 1, 1))
+    t_inp_batch = jnp.tile(t_inp_batch, reps=(1, 1, tau_max, 1, 1, 1))
     tau_batch = jnp.tile(
-      (jnp.arange(1, direct_steps+1)).reshape(1, 1, direct_steps, 1),
+      (jnp.arange(1, tau_max+1)).reshape(1, 1, tau_max, 1),
       reps=(num_lead_times, batch_size_per_device, 1, 1)
     )
 
     # Put all pairs along the batch axis
-    # -> [batch_size_per_device * num_lead_times * direct_steps, ...]
-    u_inp_batch = u_inp_batch.reshape((num_lead_times*batch_size_per_device*direct_steps), 1, *num_grid_points, num_vars)
-    t_inp_batch = t_inp_batch.reshape((num_lead_times*batch_size_per_device*direct_steps), 1)
-    tau_batch = tau_batch.reshape((num_lead_times*batch_size_per_device*direct_steps), 1)
-    u_tgt_batch = u_tgt_batch.reshape((num_lead_times*batch_size_per_device*direct_steps), 1, *num_grid_points, num_vars)
+    # -> [batch_size_per_device * num_lead_times * tau_max, ...]
+    u_inp_batch = u_inp_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1, *num_grid_points, num_vars)
+    t_inp_batch = t_inp_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1)
+    tau_batch = tau_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1)
+    u_tgt_batch = u_tgt_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1, *num_grid_points, num_vars)
 
     # Remove the invalid pairs
     # -> [batch_size_per_device * num_valid_pairs, ...]
-    offset_full_lead_times = (num_times - direct_steps) * direct_steps * batch_size_per_device
+    offset_full_lead_times = (num_times - tau_max) * tau_max * batch_size_per_device
     idx_invalid_pairs = np.array([
-      (offset_full_lead_times + (_d * batch_size_per_device + _b) * direct_steps - (_n + 1))
-      for _d in range(direct_steps - 1)
+      (offset_full_lead_times + (_d * batch_size_per_device + _b) * tau_max - (_n + 1))
+      for _d in range(tau_max - 1)
       for _b in range(1, batch_size_per_device + 1)
       for _n in range(_d + 1)
     ]).astype(int)
@@ -459,8 +459,8 @@ def train(
     # Inputs are of shape [batch_size_per_device, ...]
 
     # Set lead times
-    num_lead_times = num_times - direct_steps
-    lead_times = jnp.arange(num_times - direct_steps)
+    num_lead_times = num_times - tau_max
+    lead_times = jnp.arange(num_times - tau_max)
 
     # Get input output pairs for all lead times
     # -> [num_lead_times, batch_size_per_device, ...]
@@ -477,7 +477,7 @@ def train(
     u_tgt = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
           operand=trajs,
-          start_index=(lt+1), slice_size=direct_steps, axis=1)
+          start_index=(lt+1), slice_size=tau_max, axis=1)
     )(lead_times)
 
     def get_direct_errors(lt, carry):
@@ -495,7 +495,7 @@ def train(
         f=get_direct_prediction,
         init=1,
         xs=None,
-        length=direct_steps,
+        length=tau_max,
       )
       u_prd = u_prd.squeeze(axis=2).swapaxes(0, 1)
 
@@ -704,7 +704,7 @@ def train(
   # Report the initial evaluations
   time_tot_pre = time() - time_int_pre
   logging.info('\t'.join([
-    f'DRCT: {direct_steps : 02d}',
+    f'DRCT: {tau_max : 02d}',
     f'EPCH: {epochs_before : 04d}/{FLAGS.epochs : 04d}',
     f'LR: {state.opt_state[-1].hyperparams["learning_rate"][0].item() : .2e}',
     f'TIME: {time_tot_pre : 06.1f}s',
@@ -758,7 +758,7 @@ def train(
       # Log the results
       time_tot = time() - time_int
       logging.info('\t'.join([
-        f'DRCT: {direct_steps : 02d}',
+        f'DRCT: {tau_max : 02d}',
         f'EPCH: {epochs_before + epoch : 04d}/{FLAGS.epochs : 04d}',
         f'LR: {state.opt_state[-1].hyperparams["learning_rate"][0].item() : .2e}',
         f'TIME: {time_tot : 06.1f}s',
@@ -792,7 +792,7 @@ def train(
       # Log the results
       time_tot = time() - time_int
       logging.info('\t'.join([
-        f'DRCT: {direct_steps : 02d}',
+        f'DRCT: {tau_max : 02d}',
         f'EPCH: {epochs_before + epoch : 04d}/{FLAGS.epochs : 04d}',
         f'LR: {state.opt_state[-1].hyperparams["learning_rate"][0].item() : .2e}',
         f'TIME: {time_tot : 06.1f}s',
@@ -891,7 +891,7 @@ def main(argv):
   )
   dataset.compute_stats(
     axes=(0, 1, 2, 3),
-    residual_steps=FLAGS.direct_steps,
+    residual_steps=FLAGS.tau_max,
   )
 
   # Read the checkpoint
@@ -927,15 +927,15 @@ def main(argv):
   with open(DIR / 'stats.pkl', 'wb') as f:
     pickle.dump(file=f, obj=dataset.stats)
 
-  schedule_direct_steps = True
-  if (FLAGS.direct_steps == 1):
-    schedule_direct_steps = False
+  schedule_tau_max = True
+  if (FLAGS.tau_max == 1):
+    schedule_tau_max = False
 
   # Split the epochs
-  if schedule_direct_steps:
+  if schedule_tau_max:
     epochs_warmup = int(.2 * FLAGS.epochs)
-    epochs_dxx = epochs_warmup // (FLAGS.direct_steps - 1)
-    epochs_dff = (FLAGS.epochs - epochs_warmup) + epochs_warmup % (FLAGS.direct_steps - 1)
+    epochs_dxx = epochs_warmup // (FLAGS.tau_max - 1)
+    epochs_dff = (FLAGS.epochs - epochs_warmup) + epochs_warmup % (FLAGS.tau_max - 1)
 
   # Initialzize the model or use the loaded parameters
   if not params:
@@ -962,16 +962,16 @@ def main(argv):
   num_times = dataset.shape[1]
   num_lead_times = num_times - 1
   assert num_lead_times > 0
-  num_lead_times_full = max(0, num_times - FLAGS.direct_steps)
+  num_lead_times_full = max(0, num_times - FLAGS.tau_max)
   num_lead_times_part = num_lead_times - num_lead_times_full
   transition_steps = 0
-  for _d in (range(1, FLAGS.direct_steps+1) if schedule_direct_steps else [FLAGS.direct_steps]):
+  for _d in (range(1, FLAGS.tau_max+1) if schedule_tau_max else [FLAGS.tau_max]):
     num_valid_pairs_d = (
       num_lead_times_full * _d
       + (num_lead_times_part * (num_lead_times_part+1) // 2)
     )
-    if schedule_direct_steps:
-      epochs_d = (epochs_dff if (_d == FLAGS.direct_steps) else epochs_dxx)
+    if schedule_tau_max:
+      epochs_d = (epochs_dff if (_d == FLAGS.tau_max) else epochs_dxx)
     else:
       epochs_d = FLAGS.epochs
     transition_steps +=  epochs_d * num_batches * num_valid_pairs_d
@@ -1001,15 +1001,15 @@ def main(argv):
   state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
 
   # Warm-up epochs
-  if schedule_direct_steps:
-    for _d in range(1, FLAGS.direct_steps):
+  if schedule_tau_max:
+    for _d in range(1, FLAGS.tau_max):
       key, subkey = jax.random.split(key)
       state = train(
         key=subkey,
         model=model,
         state=state,
         dataset=dataset,
-        direct_steps=_d,
+        tau_max=_d,
         unroll=False,
         epochs=epochs_dxx,
         epochs_before=epochs_trained,
@@ -1017,7 +1017,7 @@ def main(argv):
       epochs_trained += epochs_dxx
 
   # Split with and without unrolling
-  if schedule_direct_steps:
+  if schedule_tau_max:
     epochs_rest = epochs_dff
   else:
     epochs_rest = FLAGS.epochs
@@ -1031,7 +1031,7 @@ def main(argv):
       model=model,
       state=state,
       dataset=dataset,
-      direct_steps=FLAGS.direct_steps,
+      tau_max=FLAGS.tau_max,
       unroll=False,
       epochs=epochs_without_unrolling,
       epochs_before=epochs_trained,
@@ -1046,7 +1046,7 @@ def main(argv):
       model=model,
       state=state,
       dataset=dataset,
-      direct_steps=FLAGS.direct_steps,
+      tau_max=FLAGS.tau_max,
       unroll=True,
       epochs=epochs_with_unrolling,
       epochs_before=epochs_trained,
@@ -1060,7 +1060,7 @@ def main(argv):
       model=model,
       state=state,
       dataset=dataset,
-      direct_steps=FLAGS.direct_steps,
+      tau_max=FLAGS.tau_max,
       unroll=False,
       epochs=epochs_rest,
       epochs_before=epochs_trained,
