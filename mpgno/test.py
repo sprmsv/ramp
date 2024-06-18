@@ -371,10 +371,25 @@ def get_all_estimations(
       apply_unroll_jit[resolution][tau_max] = jax.jit(
         unrollers[resolution][tau_max].unroll, static_argnums=(4,))
 
+  # Set the groundtruth solutions
+  u_gtr = next(dataset.batches(mode='test', batch_size=dataset.nums['test']))
+
   # Instantiate the outputs
-  u_prd_tau = {'direct': {}, 'rollout': {}}
-  u_prd_px = {'direct': {}, 'rollout': {}}
-  u_prd_noise = {'direct': {}, 'rollout': {}}
+  errors = {error_type: {
+      key: {'direct': {}, 'rollout': {}}
+      for key in ['tau', 'px', 'noise']
+    }
+    for error_type in ['l1', 'l2']
+  }
+  u_prd_rollout = None
+
+  # Define a auxiliary function for getting the median of the errors
+  def _get_err_trajectory(_u_gtr, _u_prd, p):
+    _err = [
+      np.median(rel_lp_error_norm(_u_gtr[:, [idx_t]], _u_prd[:, [idx_t]], p=p)).item() * 100
+      for idx_t in range(_u_gtr.shape[1])
+    ]
+    return _err
 
   # Temporal continuity
   resolution = resolution_train
@@ -384,51 +399,95 @@ def get_all_estimations(
     else:
       _apply_stepper = apply_steppers_jit[resolution]
     t0 = time()
-    u_prd_tau['direct'][tau] = {'resolution': resolution}
-    u_prd_tau['direct'][tau]['u'] = _get_estimations_in_batches(
+    u_prd = _get_estimations_in_batches(
       direct=True,
       apply_fn=_apply_stepper,
       tau=(tau if tau != .5 else 1),
       transform=(lambda arr: change_resolution(arr, resolution)),
     )
+    errors['l1']['tau']['direct'][tau] = _get_err_trajectory(
+      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+      _u_prd=u_prd,
+      p=1,
+    )
+    errors['l2']['tau']['direct'][tau] = _get_err_trajectory(
+      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+      _u_prd=u_prd,
+      p=2,
+    )
+    del u_prd
     print_between_dashes(f'tau_direct={tau} \t TIME={time()-t0 : .4f}s')
 
   # Autoregressive rollout
   resolution = resolution_train
   for tau_max in taus_rollout:
     t0 = time()
-    u_prd_tau['rollout'][tau_max] = {'resolution': resolution}
-    u_prd_tau['rollout'][tau_max]['u'] = _get_estimations_in_batches(
+    u_prd = _get_estimations_in_batches(
       direct=False,
       apply_fn=apply_unroll_jit[resolution][tau_max],
       transform=(lambda arr: change_resolution(arr, resolution)),
     )
+    errors['l1']['tau']['rollout'][tau_max] = _get_err_trajectory(
+      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+      _u_prd=u_prd,
+      p=1,
+    )
+    errors['l2']['tau']['rollout'][tau_max] = _get_err_trajectory(
+      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+      _u_prd=u_prd,
+      p=2,
+    )
+    if tau_max == train_flags['time_downsample_factor']:
+      u_prd_rollout = u_prd[:, [0, IDX_FN, -1]]
+    del u_prd
     print_between_dashes(f'tau_max={tau_max} \t TIME={time()-t0 : .4f}s')
 
   # Spatial continuity
-  tau_max = train_flags['time_downsample_factor'] * train_flags['tau_max']
+  tau_max = train_flags['time_downsample_factor']
   tau = train_flags['time_downsample_factor']
   for resolution in resolutions:
+    # Direct
     t0 = time()
-    u_prd_px['direct'][resolution] = {'resolution': resolution}
-    u_prd_px['direct'][resolution]['u'] = _get_estimations_in_batches(
+    u_prd = _get_estimations_in_batches(
       direct=True,
       apply_fn=apply_steppers_jit[resolution],
       tau=tau,
       transform=(lambda arr: change_resolution(arr, resolution)),
     )
+    errors['l1']['px']['direct'][resolution] = _get_err_trajectory(
+      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+      _u_prd=u_prd,
+      p=1,
+    )
+    errors['l2']['px']['direct'][resolution] = _get_err_trajectory(
+      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+      _u_prd=u_prd,
+      p=2,
+    )
+    del u_prd
     print_between_dashes(f'resolution={resolution} (direct) \t TIME={time()-t0 : .4f}s')
+    # Rollout
     t0 = time()
-    u_prd_px['rollout'][resolution] = {'resolution': resolution}
-    u_prd_px['rollout'][resolution]['u'] = _get_estimations_in_batches(
+    u_prd = _get_estimations_in_batches(
       direct=False,
       apply_fn=apply_unroll_jit[resolution][tau_max],
       transform=(lambda arr: change_resolution(arr, resolution)),
     )
+    errors['l1']['px']['rollout'][resolution] = _get_err_trajectory(
+      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+      _u_prd=u_prd,
+      p=1,
+    )
+    errors['l2']['px']['rollout'][resolution] = _get_err_trajectory(
+      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+      _u_prd=u_prd,
+      p=2,
+    )
+    del u_prd
     print_between_dashes(f'resolution={resolution} (rollout) \t TIME={time()-t0 : .4f}s')
 
   # Noise control
-  tau_max = train_flags['time_downsample_factor'] * train_flags['tau_max']
+  tau_max = train_flags['time_downsample_factor']
   tau = train_flags['time_downsample_factor']
   resolution = resolution_train
   for noise_level in noise_levels:
@@ -440,31 +499,45 @@ def get_all_estimations(
       return arr
     # Direct estimations
     t0 = time()
-    u_prd_noise['direct'][noise_level] = {'resolution': resolution}
-    u_prd_noise['direct'][noise_level]['u'] = _get_estimations_in_batches(
+    u_prd = _get_estimations_in_batches(
       direct=True,
       apply_fn=apply_steppers_jit[resolution],
       tau=tau,
       transform=transform,
     )
+    errors['l1']['noise']['direct'][noise_level] = _get_err_trajectory(
+      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+      _u_prd=u_prd,
+      p=1,
+    )
+    errors['l2']['noise']['direct'][noise_level] = _get_err_trajectory(
+      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+      _u_prd=u_prd,
+      p=2,
+    )
+    del u_prd
     print_between_dashes(f'noise_level={noise_level} (direct) \t TIME={time()-t0 : .4f}s')
     # Rollout estimations
     t0 = time()
-    u_prd_noise['rollout'][noise_level] = {'resolution': resolution}
-    u_prd_noise['rollout'][noise_level]['u'] = _get_estimations_in_batches(
+    u_prd = _get_estimations_in_batches(
       direct=False,
       apply_fn=apply_unroll_jit[resolution][tau_max],
       transform=transform,
     )
+    errors['l1']['noise']['rollout'][noise_level] = _get_err_trajectory(
+      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+      _u_prd=u_prd,
+      p=1,
+    )
+    errors['l2']['noise']['rollout'][noise_level] = _get_err_trajectory(
+      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+      _u_prd=u_prd,
+      p=2,
+    )
+    del u_prd
     print_between_dashes(f'noise_level={noise_level} (rollout) \t TIME={time()-t0 : .4f}s')
 
-  u_prd = {
-    'tau': u_prd_tau,
-    'px': u_prd_px,
-    'noise': u_prd_noise,
-  }
-
-  return u_prd
+  return errors, u_prd_rollout
 
 def get_ensemble_estimations(
   repeats: int,
@@ -559,7 +632,7 @@ def get_ensemble_estimations(
         apply_fn=apply_unroll_jit,
         transform=(lambda arr: change_resolution(arr, resolution_train)),
         key=subkey,
-      )
+      )[:, [0, IDX_FN, -1]]
     )
     print_between_dashes(f'ensemble_repeat={i} \t TIME={time()-t0 : .4f}s')
   u_prd = np.stack(u_prd)
@@ -688,7 +761,7 @@ def main(argv):
   u_gtr_small = next(dataset_small.batches(mode='test', batch_size=dataset_small.nums['test']))
 
   # Get model estimations with all settings
-  u_prd = get_all_estimations(
+  errors, u_prd = get_all_estimations(
     dataset=dataset,
     model=model,
     stepping=stepping,
@@ -707,9 +780,9 @@ def main(argv):
   (DIR_FIGS / 'samples').mkdir()
   for s in range(min(4, FLAGS.n_test)):
     fig, _ = plot_estimations(
-      u_gtr=change_resolution(u_gtr, resolution_train),
-      u_prd=u_prd['tau']['rollout'][time_downsample_factor]['u'],
-      idx_out=IDX_FN,
+      u_gtr=change_resolution(u_gtr[:, [0, IDX_FN, -1]], resolution_train),
+      u_prd=u_prd,
+      idx_out=1,
       idx_inp=0,
       idx_traj=s,
       symmetric=dataset.metadata.signed,
@@ -718,9 +791,9 @@ def main(argv):
     fig.savefig(DIR_FIGS / 'samples' / f'rollout-fn-s{s:02d}.png')
     plt.close(fig)
     fig, _ = plot_estimations(
-      u_gtr=change_resolution(u_gtr, resolution_train),
-      u_prd=u_prd['tau']['rollout'][time_downsample_factor]['u'],
-      idx_out=-1,
+      u_gtr=change_resolution(u_gtr[:, [0, IDX_FN, -1]], resolution_train),
+      u_prd=u_prd,
+      idx_out=2,
       idx_inp=0,
       idx_traj=s,
       symmetric=dataset.metadata.signed,
@@ -729,65 +802,21 @@ def main(argv):
     fig.savefig(DIR_FIGS / 'samples' / f'rollout-ex-s{s:02d}.png')
     plt.close(fig)
 
-  # Compute the errors
-  def _get_err_trajectory(_u_gtr, _u_prd, p):
-    _err = [
-      np.median(rel_lp_error_norm(_u_gtr[:, [idx_t]], _u_prd[:, [idx_t]], p=p)).item() * 100
-      for idx_t in range(_u_gtr.shape[1])
-    ]
-    return _err
-  errors_l1 = {
-    key: {
-      'direct': {
-        str(subkey): _get_err_trajectory(
-          _u_gtr=change_resolution(u_gtr, resolution=u_prd[key]['direct'][subkey]['resolution']),
-          _u_prd=u_prd[key]['direct'][subkey]['u'],
-          p=1,
-        )
-        for subkey in u_prd[key]['direct'].keys()
-      },
-      'rollout': {
-        str(subkey): _get_err_trajectory(
-          _u_gtr=change_resolution(u_gtr, resolution=u_prd[key]['rollout'][subkey]['resolution']),
-          _u_prd=u_prd[key]['rollout'][subkey]['u'],
-          p=1,
-        )
-        for subkey in u_prd[key]['rollout'].keys()
-      },
-    }
-    for key in u_prd.keys()
-  }
-  errors_l2 = {
-    key: {
-      'direct': {
-        str(subkey): _get_err_trajectory(
-          _u_gtr=change_resolution(u_gtr, resolution=u_prd[key]['direct'][subkey]['resolution']),
-          _u_prd=u_prd[key]['direct'][subkey]['u'],
-          p=2,
-        )
-        for subkey in u_prd[key]['direct'].keys()
-      },
-      'rollout': {
-        str(subkey): _get_err_trajectory(
-          _u_gtr=change_resolution(u_gtr, resolution=u_prd[key]['rollout'][subkey]['resolution']),
-          _u_prd=u_prd[key]['rollout'][subkey]['u'],
-          p=2,
-        )
-        for subkey in u_prd[key]['rollout'].keys()
-      },
-    }
-    for key in u_prd.keys()
-  }
-
   # Store the errors
+  for error_type in errors.keys():
+    for key in errors[error_type]['px'].keys():
+      errors[error_type]['px'][key] = {
+        str(resolution): errors[error_type]['px'][key][resolution]
+        for resolution in errors[error_type]['px'][key].keys()
+      }
   with open(DIR_TESTS / 'errors.json', 'w') as f:
-    json.dump(obj={'l1': errors_l1, 'l2': errors_l2}, fp=f)
+    json.dump(obj=errors, fp=f)
 
   # Print minimum errors
-  l1_final = min([errors_l1['tau']['rollout'][str(tau)][IDX_FN] for tau in taus_rollout])
-  l2_final = min([errors_l2['tau']['rollout'][str(tau)][IDX_FN] for tau in taus_rollout])
-  l1_extra = min([errors_l2['tau']['rollout'][str(tau)][-1] for tau in taus_rollout])
-  l2_extra = min([errors_l2['tau']['rollout'][str(tau)][-1] for tau in taus_rollout])
+  l1_final = min([errors['l1']['tau']['rollout'][tau][IDX_FN] for tau in taus_rollout])
+  l2_final = min([errors['l2']['tau']['rollout'][tau][IDX_FN] for tau in taus_rollout])
+  l1_extra = min([errors['l2']['tau']['rollout'][tau][-1] for tau in taus_rollout])
+  l2_extra = min([errors['l2']['tau']['rollout'][tau][-1] for tau in taus_rollout])
   print_between_dashes(f'ERROR AT t={IDX_FN} \t l1: {l1_final : .2f}% \t l2: {l2_final : .2f}%')
   print_between_dashes(f'ERROR AT t={dataset.shape[1]-1} \t l1: {l1_extra : .2f}% \t l2: {l2_extra : .2f}%')
 
@@ -799,7 +828,7 @@ def main(argv):
     df = df.melt(id_vars=['t'], value_name='error')
     return df
   # Set which errors to plot
-  errors_plot = errors_l1
+  errors_plot = errors['l1']
   # Temporal continuity
   g = plot_error_vs_time(
     df=errors_to_df(errors_plot['tau']['direct']),
@@ -860,7 +889,7 @@ def main(argv):
       stats=stats,
       resolution_train=resolution_train,
       train_flags=configs['flags'],
-      tau_max=2,
+      tau_max=time_downsample_factor,
       p_edge_masking_grid2mesh=0.5,
       key=subkey,
     )
@@ -869,9 +898,9 @@ def main(argv):
     (DIR_FIGS / 'ensemble').mkdir()
     for s in range(min(4, FLAGS.n_test)):
       fig, _ = plot_ensemble(
-        u_gtr=change_resolution(u_gtr_small, resolution_train),
+        u_gtr=change_resolution(u_gtr_small[:, [0, IDX_FN, -1]], resolution_train),
         u_ens=u_prd_ensemble,
-        idx_out=IDX_FN,
+        idx_out=1,
         idx_traj=s,
         symmetric=dataset_small.metadata.signed,
         names=dataset_small.metadata.names,
@@ -879,9 +908,9 @@ def main(argv):
       fig.savefig(DIR_FIGS / 'ensemble' / f'rollout-fn-s{s:02d}.png')
       plt.close(fig)
       fig, _ = plot_ensemble(
-        u_gtr=change_resolution(u_gtr_small, resolution_train),
+        u_gtr=change_resolution(u_gtr_small[:, [0, IDX_FN, -1]], resolution_train),
         u_ens=u_prd_ensemble,
-        idx_out=-1,
+        idx_out=2,
         idx_traj=s,
         symmetric=dataset_small.metadata.signed,
         names=dataset_small.metadata.names,
