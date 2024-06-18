@@ -818,7 +818,7 @@ def get_model(model_name: str, model_configs: Mapping[str, Any], dataset: Datase
         periodic=dataset.metadata.periodic,
         concatenate_tau=True,
         concatenate_t=True,
-        conditional_normalization=False,
+        conditional_normalization=True,
         conditional_norm_latent_size=16,
         latent_size=FLAGS.latent_size,
         num_mlp_hidden_layers=FLAGS.num_mlp_hidden_layers,
@@ -836,6 +836,7 @@ def get_model(model_name: str, model_configs: Mapping[str, Any], dataset: Datase
       model_configs = dict(
         features=FLAGS.unet_features,
         outputs=dataset.shape[-1],
+        conditional_norm_latent_size=16,
       )
 
   # Set the model class

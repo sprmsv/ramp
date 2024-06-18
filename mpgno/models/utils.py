@@ -89,6 +89,7 @@ class ConditionedNorm(nn.Module):
 
   latent_size: Sequence[int]
   correction_size: int = 1
+  convolutional: bool = False
 
   def setup(self):
     self.mlp_scale = nn.Sequential(
@@ -111,7 +112,15 @@ class ConditionedNorm(nn.Module):
   def __call__(self, c, x):
     scale = 1 + c * self.mlp_scale(c)
     bias = c * self.mlp_bias(c)
-    return x * scale + bias
+    shape = x.shape
+    if self.convolutional:
+      x = x.reshape(shape[0], -1, shape[3])
+      x = x.swapaxes(0, 1)
+    x = x * scale + bias
+    if self.convolutional:
+      x = x.swapaxes(0, 1)
+      x = x.reshape(*shape)
+    return x
 
 class LinearConditionedNorm(nn.Module):
   """

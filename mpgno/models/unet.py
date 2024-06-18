@@ -6,6 +6,7 @@ import flax.typing
 from flax import linen as nn
 
 from mpgno.models.mpgno import AbstractOperator
+from mpgno.models.utils import ConditionedNorm
 from mpgno.utils import Array
 
 
@@ -13,13 +14,19 @@ from mpgno.utils import Array
 
 class Encoder(nn.Module):
   features: int
+  conditional_norm_latent_size: int
 
   @nn.compact
-  def __call__(self, x):
+  def __call__(self, x, tau):
     z1 = nn.Conv(self.features * 2, kernel_size=(3, 3))(x)
     z1 = nn.swish(z1)
     z1 = nn.Conv(self.features * 2, kernel_size=(7, 7))(z1)
     z1 = nn.LayerNorm()(z1)
+    z1 = ConditionedNorm(
+      latent_size=self.conditional_norm_latent_size,
+      correction_size=(self.features * 2),
+      convolutional=True,
+    )(tau, z1)
     z1 = nn.swish(z1)
     z1_pool = nn.avg_pool(z1, window_shape=(2, 2), strides=(2, 2))
 
@@ -27,6 +34,11 @@ class Encoder(nn.Module):
     z2 = nn.swish(z2)
     z2 = nn.Conv(self.features * 4, kernel_size=(5, 5))(z2)
     z2 = nn.LayerNorm()(z2)
+    z2 = ConditionedNorm(
+      latent_size=self.conditional_norm_latent_size,
+      correction_size=(self.features * 4),
+      convolutional=True,
+    )(tau, z2)
     z2 = nn.swish(z2)
     z2_pool = nn.avg_pool(z2, window_shape=(2, 2), strides=(2, 2))
 
@@ -34,6 +46,11 @@ class Encoder(nn.Module):
     z3 = nn.swish(z3)
     z3 = nn.Conv(self.features * 8, kernel_size=(3, 3))(z3)
     z3 = nn.LayerNorm()(z3)
+    z3 = ConditionedNorm(
+      latent_size=self.conditional_norm_latent_size,
+      correction_size=(self.features * 8),
+      convolutional=True,
+    )(tau, z3)
     z3 = nn.swish(z3)
     # z3_dropout = nn.Dropout(0.5, deterministic=False)(z3)
     z3_dropout = z3
@@ -43,6 +60,11 @@ class Encoder(nn.Module):
     z4 = nn.swish(z4)
     z4 = nn.Conv(self.features * 16, kernel_size=(3, 3))(z4)
     z4 = nn.LayerNorm()(z4)
+    z4 = ConditionedNorm(
+      latent_size=self.conditional_norm_latent_size,
+      correction_size=(self.features * 16),
+      convolutional=True,
+    )(tau, z4)
     z4 = nn.swish(z4)
     # z4_dropout = nn.Dropout(0.5, deterministic=False)(z4)
     z4_dropout = z4
@@ -52,9 +74,10 @@ class Encoder(nn.Module):
 class Decoder(nn.Module):
   features: int
   outputs: int
+  conditional_norm_latent_size: int
 
   @nn.compact
-  def __call__(self, z1, z2, z3_dropout, z4_dropout):
+  def __call__(self, z1, z2, z3_dropout, z4_dropout, tau):
     z5_up = jax.image.resize(
       z4_dropout,
       shape=(z4_dropout.shape[0], z4_dropout.shape[1] * 2, z4_dropout.shape[2] * 2, z4_dropout.shape[3]),
@@ -67,6 +90,11 @@ class Decoder(nn.Module):
     z5 = nn.swish(z5)
     z5 = nn.Conv(self.features * 8, kernel_size=(3, 3))(z5)
     z5 = nn.LayerNorm()(z5)
+    z5 = ConditionedNorm(
+      latent_size=self.conditional_norm_latent_size,
+      correction_size=(self.features * 8),
+      convolutional=True,
+    )(tau, z5)
     z5 = nn.swish(z5)
 
     z6_up = jax.image.resize(
@@ -81,6 +109,11 @@ class Decoder(nn.Module):
     z6 = nn.swish(z6)
     z6 = nn.Conv(self.features * 4, kernel_size=(3, 3))(z6)
     z6 = nn.LayerNorm()(z6)
+    z6 = ConditionedNorm(
+      latent_size=self.conditional_norm_latent_size,
+      correction_size=(self.features * 4),
+      convolutional=True,
+    )(tau, z6)
     z6 = nn.swish(z6)
 
     z7_up = jax.image.resize(
@@ -95,6 +128,11 @@ class Decoder(nn.Module):
     z7 = nn.swish(z7)
     z7 = nn.Conv(self.features * 2, kernel_size=(3, 3))(z7)
     z7 = nn.LayerNorm()(z7)
+    z7 = ConditionedNorm(
+      latent_size=self.conditional_norm_latent_size,
+      correction_size=(self.features * 2),
+      convolutional=True,
+    )(tau, z7)
     z7 = nn.swish(z7)
 
     y = nn.Conv(self.outputs, kernel_size=(1, 1))(z7)
@@ -102,14 +140,22 @@ class Decoder(nn.Module):
     return y
 
 class UNet(AbstractOperator):
-  features: int = 32
-  outputs: int = 1
+  features: int
+  outputs: int
+  conditional_norm_latent_size: int
   concatenate_tau: bool = True
   concatenate_t: bool = True
 
   def setup(self):
-    self.encoder = Encoder(features=self.features)
-    self.decoder = Decoder(features=self.features, outputs=self.outputs)
+    self.encoder = Encoder(
+      features=self.features,
+      conditional_norm_latent_size=self.conditional_norm_latent_size,
+    )
+    self.decoder = Decoder(
+      features=self.features,
+      outputs=self.outputs,
+      conditional_norm_latent_size=self.conditional_norm_latent_size,
+    )
 
   def __call__(self,
     u_inp: Array,
@@ -144,8 +190,8 @@ class UNet(AbstractOperator):
       forced_features.append(jnp.tile(t_inp.reshape(-1, 1, 1, 1), reps=(1, *u_inp.shape[1:3], 1)))
     input = jnp.concatenate([u_inp, *forced_features], axis=-1)
 
-    z1, z2, z3_dropout, z4_dropout = self.encoder(input)
-    output = self.decoder(z1, z2, z3_dropout, z4_dropout)
+    z1, z2, z3_dropout, z4_dropout = self.encoder(input, tau)
+    output = self.decoder(z1, z2, z3_dropout, z4_dropout, tau)
     output = jnp.expand_dims(output, axis=1)
 
     return output
