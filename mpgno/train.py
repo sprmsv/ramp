@@ -266,45 +266,45 @@ def train(
 
           variables = {'params': params}
 
-          if unroll:
-            # Split tau for unrolling
-            key, subkey = jax.random.split(key)
-            tau_cutoff = .2
-            tau_mid = tau_cutoff + jax.random.uniform(key=subkey, shape=tau.shape) * (tau - 2 * tau_cutoff)
-            # Get intermediary output
-            key, subkey = jax.random.split(key)
-            u_int = stepper.apply(
-              variables=variables,
-              stats=stats,
-              u_inp=u_inp,
-              t_inp=t_inp,
-              tau=tau_mid,
-              key=subkey,
-            )
-            t_int = t_inp + tau_mid
-          else:
-            tau_mid = 0.
-            u_int = u_inp
-            t_int = t_inp
-
           # Get the output
           key, subkey = jax.random.split(key)
           _loss_inputs = stepper.get_loss_inputs(
             variables=variables,
             stats=stats,
-            u_inp=u_int,
-            t_inp=t_int,
+            u_inp=u_inp,
+            t_inp=t_inp,
             u_tgt=u_tgt,
-            tau=(tau - tau_mid),
+            tau=tau,
             key=subkey,
           )
 
           return loss_fn(*_loss_inputs)
 
+        if unroll:
+          # Split tau for unrolling
+          key, subkey = jax.random.split(key)
+          tau_cutoff = .2
+          tau_mid = tau_cutoff + jax.random.uniform(key=subkey, shape=tau.shape) * (tau - 2 * tau_cutoff)
+          # Get intermediary output
+          key, subkey = jax.random.split(key)
+          u_int = stepper.apply(
+            variables={'params': params},
+            stats=stats,
+            u_inp=u_inp,
+            t_inp=t_inp,
+            tau=tau_mid,
+            key=subkey,
+          )
+          t_int = t_inp + tau_mid
+        else:
+          tau_mid = 0.
+          u_int = u_inp
+          t_int = t_inp
+
         # Compute gradients
         key, subkey = jax.random.split(key)
         loss, grads = jax.value_and_grad(_compute_loss)(
-          params, u_inp, t_inp, tau, u_tgt, key=subkey)
+          params, u_int, t_int, (tau - tau_mid), u_tgt, key=subkey)
 
         return loss, grads
 

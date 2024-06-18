@@ -1,30 +1,15 @@
 # NEXT STEPS
 
-- Experiments: fractional tau training
-    - With vs. without
-    - gradient cut vs. gradient flow
-    - res vs. der vs. out
-
-- Check E291 (test): Add resolution-invariance results
-- Check E295: wave_equation
-- Check E296: Benchmark U-Net to make sure about MPGNO
-- Check E299: How many epochs?
-
-- Implement the new idea for fractional tau
-    - tau=.5 unrolled twice ~ tau=1
-    - tau=.2 unrolled five times ~ tau=1
-
-- Continuous-discrete equivariance
-    * Mask the nodes during training (p_max=0.5)
-        - This masking "can" be different in the encoder and the decoder
-    * Use edge length in the message-passing
-        - Weighted average of the messages with distances as weights
+- Update slides ::
+    - Check E295: wave_equation :: Add example plots (E299)
+    - Check E297 (+ add to slides)
+        - Check test figures (E299) for tau=4,6 and other fractional tau
+        - Update learning curves with E298 !! DR-4 is not affected either !! + better stability
+        - gradient cut (E298) vs. gradient flow (E297)
 
 - Reproduce experiments for reporting in the thesis
     * pull the latest version
-    * Fix what needs to be fixed
-        - How many epochs? 2000? 1000? 600?
-    * 1000 epochs
+    * 1200 / 2000 epochs
 
 - How does the DFT of the predictions look like?
 
