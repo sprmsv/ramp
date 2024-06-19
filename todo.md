@@ -1,29 +1,21 @@
 # NEXT STEPS
 
-- Update launch.sh and train.job
-    - node_latent_size
-    - edge_latent_size
-    - mlp_hidden_size
-
 - Update slides ::
     - Check E295: wave_equation :: Add example plots (E299)
-    - Check E297 (+ add to slides)
-        - Check test figures (E299) for tau=4,6 and other fractional tau
-        - Update learning curves with E298 !! DR-4 is not affected either !! + better stability
-        - gradient cut (E298) vs. gradient flow (E297)
-        - Check new experiments with CondNorm (E297 and E298)
-            - Recheck der vs. res vs. out
-                - Better DR-0.5 with der?
-            - Recheck learning curves with tau_max=4 and tau_max=1 (der)
-            - Recheck gradient cut (E298) vs. gradient flow (E297)
-                - Better DR-4 with E298?
+    - Check new experiments with CondNorm (E297 and E298)
+        - Update learning curves with E298 !! DR-4 is not affected either !!
+        - Recheck der vs. res vs. out
+            - Better DR-0.5 with der?
+        - Recheck learning curves with tau_max=4 and tau_max=1 (der)
+        - Recheck gradient cut (E298) vs. gradient flow (E297)
+            - Better DR-4 with E298?
 
 - Reproduce experiments for reporting in the thesis
     * Check E299 dry run
     * pull the latest version
     * 1000 / 1200 / 2000 epochs (time)
 
-- experiment edge_latent_size=64
+- experiment with edge_latent_size=64
 
 - Inspect intermediates of different datasets (add to slides)
 

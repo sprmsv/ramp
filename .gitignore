@@ -168,5 +168,6 @@ venv*/
 .DS_Store
 *.job
 launch.sh
+*.sh
 slurm-*.out
 out/*
