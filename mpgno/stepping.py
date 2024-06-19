@@ -13,6 +13,17 @@ class Stepper(ABC):
   def __init__(self, operator: AbstractOperator):
     self._apply_operator = operator.apply
 
+  def normalize_inputs(self, stats, u_inp, t_inp, tau):
+    u_inp_nrm = normalize(
+      u_inp,
+      shift=stats['trj']['mean'],
+      scale=stats['trj']['std'],
+    )
+    t_inp_nrm = t_inp / stats['time']['max']
+    tau_nrm = tau / stats['time']['max']
+
+    return u_inp_nrm, t_inp_nrm, tau_nrm
+
   @abstractmethod
   def apply(self,
     variables,
@@ -83,6 +94,29 @@ class Stepper(ABC):
     """
     pass
 
+  def get_intermediates(self,
+    variables,
+    stats,
+    u_inp: Array,
+    t_inp: Array,
+    tau: Array,
+    key: flax.typing.PRNGKey = None,
+  ):
+    # Normalize inputs
+    u_inp_nrm, t_inp_nrm, tau_nrm = self.normalize_inputs(stats, u_inp, t_inp, tau)
+
+    # Get predicted normalized derivatives
+    _, state = self._apply_operator(
+      variables,
+      u_inp=u_inp_nrm,
+      t_inp=t_inp_nrm,
+      tau=tau_nrm,
+      key=key,
+      capture_intermediates=True,
+    )
+
+    return state['intermediates']
+
 class TimeDerivativeUpdater(Stepper):
 
   def apply(self,
@@ -101,13 +135,7 @@ class TimeDerivativeUpdater(Stepper):
     """
 
     # Normalize inputs
-    u_inp_nrm = normalize(
-      u_inp,
-      shift=stats['trj']['mean'],
-      scale=stats['trj']['std'],
-    )
-    tau_nrm = tau / stats['time']['max']
-    t_inp_nrm = t_inp / stats['time']['max']
+    u_inp_nrm, t_inp_nrm, tau_nrm = self.normalize_inputs(stats, u_inp, t_inp, tau)
 
     # Get predicted normalized derivatives
     d_prd_nrm = self._apply_operator(
@@ -147,13 +175,7 @@ class TimeDerivativeUpdater(Stepper):
     """
 
     # Normalize inputs
-    u_inp_nrm = normalize(
-      u_inp,
-      shift=stats['trj']['mean'],
-      scale=stats['trj']['std'],
-    )
-    tau_nrm = tau / stats['time']['max']
-    t_inp_nrm = t_inp / stats['time']['max']
+    u_inp_nrm, t_inp_nrm, tau_nrm = self.normalize_inputs(stats, u_inp, t_inp, tau)
 
     # Get predicted normalized derivatives
     d_prd_nrm = self._apply_operator(
@@ -192,13 +214,7 @@ class ResidualUpdater(Stepper):
     """
 
     # Normalize inputs
-    u_inp_nrm = normalize(
-      u_inp,
-      shift=stats['trj']['mean'],
-      scale=stats['trj']['std'],
-    )
-    tau_nrm = tau / stats['time']['max']
-    t_inp_nrm = t_inp / stats['time']['max']
+    u_inp_nrm, t_inp_nrm, tau_nrm = self.normalize_inputs(stats, u_inp, t_inp, tau)
 
     # Get predicted normalized derivative
     r_prd_nrm = self._apply_operator(
@@ -238,13 +254,7 @@ class ResidualUpdater(Stepper):
     """
 
     # Normalize inputs
-    u_inp_nrm = normalize(
-      u_inp,
-      shift=stats['trj']['mean'],
-      scale=stats['trj']['std'],
-    )
-    tau_nrm = tau / stats['time']['max']
-    t_inp_nrm = t_inp / stats['time']['max']
+    u_inp_nrm, t_inp_nrm, tau_nrm = self.normalize_inputs(stats, u_inp, t_inp, tau)
 
     # Get predicted normalized residuals
     r_prd_nrm = self._apply_operator(
@@ -283,13 +293,7 @@ class OutputUpdater(Stepper):
     """
 
     # Normalize inputs
-    u_inp_nrm = normalize(
-      u_inp,
-      shift=stats['trj']['mean'],
-      scale=stats['trj']['std'],
-    )
-    tau_nrm = tau / stats['time']['max']
-    t_inp_nrm = t_inp / stats['time']['max']
+    u_inp_nrm, t_inp_nrm, tau_nrm = self.normalize_inputs(stats, u_inp, t_inp, tau)
 
     # Get predicted normalized output
     u_prd_nrm = self._apply_operator(
@@ -326,13 +330,7 @@ class OutputUpdater(Stepper):
     """
 
     # Normalize inputs
-    u_inp_nrm = normalize(
-      u_inp,
-      shift=stats['trj']['mean'],
-      scale=stats['trj']['std'],
-    )
-    tau_nrm = tau / stats['time']['max']
-    t_inp_nrm = t_inp / stats['time']['max']
+    u_inp_nrm, t_inp_nrm, tau_nrm = self.normalize_inputs(stats, u_inp, t_inp, tau)
 
     # Get predicted normalized output
     u_prd_nrm = self._apply_operator(

@@ -451,6 +451,19 @@ class MPGNO(AbstractOperator):
 
     return graph
 
+  @staticmethod
+  def features2grid(feats, num_nodes) -> Array:
+    batch_size = feats.shape[1]
+    num_feats = feats.shape[-1]
+    output = jnp.moveaxis(
+      feats.reshape(
+        num_nodes[0], num_nodes[1], batch_size, 1, num_feats
+      ),
+      source=(0, 1, 2, 3),
+      destination=(2, 3, 0, 1),
+    )
+    return output
+
   def __call__(self,
     u_inp: Array,
     t_inp: Array = None,
@@ -500,29 +513,43 @@ class MPGNO(AbstractOperator):
     # -> [num_mesh_nodes, batch_size, latent_size], [num_grid_nodes, batch_size, latent_size]
     subkey, key = jax.random.split(key) if (key is not None) else (None, None)
     (latent_mesh_nodes, latent_grid_nodes) = self._run_grid2mesh_gnn(grid_node_features, tau, key=subkey)
+    self.sow(
+      col='intermediates', name='grid_encoded',
+      value=self.features2grid(latent_grid_nodes, self.num_grid_nodes)
+    )
+    self.sow(
+      col='intermediates', name='mesh_encoded',
+      value=self.features2grid(latent_mesh_nodes, self.num_mesh_nodes)
+    )
 
     # Run message-passing in the multimesh.
     # -> [num_mesh_nodes, batch_size, latent_size]
     subkey, key = jax.random.split(key) if (key is not None) else (None, None)
     updated_latent_mesh_nodes = self._run_mesh_gnn(latent_mesh_nodes, tau, key=subkey)
+    self.sow(
+      col='intermediates', name='mesh_processed',
+      value=self.features2grid(updated_latent_mesh_nodes, self.num_mesh_nodes)
+    )
 
     # Transfer data from the mesh to the grid.
     # -> [num_grid_nodes, batch_size, latent_size]
     subkey, key = jax.random.split(key) if (key is not None) else (None, None)
     updated_latent_grid_nodes = self._run_mesh2grid_gnn(updated_latent_mesh_nodes, latent_grid_nodes, tau, key=subkey)
+    self.sow(
+      col='intermediates', name='grid_decoded',
+      value=self.features2grid(updated_latent_grid_nodes, self.num_grid_nodes)
+    )
 
     # Run message passing in the grid.
     # -> [num_grid_nodes, batch_size, num_outputs]
     output_grid_nodes = self._run_grid2grid_gnn(updated_latent_grid_nodes, latent_grid_nodes, tau)
+    self.sow(
+      col='intermediates', name='grid_output',
+      value=self.features2grid(output_grid_nodes, self.num_grid_nodes)
+    )
 
     # Reshape the output to [batch_size, 1, num_grid_nodes, num_outputs]
-    output = jnp.moveaxis(
-      output_grid_nodes.reshape(
-        self.num_grid_nodes[0], self.num_grid_nodes[1], batch_size, 1, self.num_outputs
-      ),
-      source=(0, 1, 2, 3),
-      destination=(2, 3, 0, 1),
-    )
+    output = self.features2grid(output_grid_nodes, self.num_grid_nodes)
 
     return output
 
