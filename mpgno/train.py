@@ -124,11 +124,17 @@ def define_flags():
   flags.DEFINE_integer(name='node_coordinate_freqs', default=2, required=False,
     help='Number of frequencies for encoding periodic node coordinates'
   )
-  flags.DEFINE_integer(name='latent_size', default=128, required=False,
-    help='Size of latent node and edge features'
+  flags.DEFINE_integer(name='node_latent_size', default=128, required=False,
+    help='Size of latent node features'
+  )
+  flags.DEFINE_integer(name='edge_latent_size', default=128, required=False,
+    help='Size of latent edge features'
   )
   flags.DEFINE_integer(name='num_mlp_hidden_layers', default=1, required=False,
     help='Number of hidden layers of all MLPs'
+  )
+  flags.DEFINE_integer(name='mlp_hidden_size', default=128, required=False,
+    help='Size of latent edge features'
   )
   flags.DEFINE_integer(name='num_message_passing_steps', default=18, required=False,
     help='Number of message-passing steps in the processor'
@@ -820,8 +826,10 @@ def get_model(model_name: str, model_configs: Mapping[str, Any], dataset: Datase
         concatenate_t=True,
         conditional_normalization=True,
         conditional_norm_latent_size=16,
-        latent_size=FLAGS.latent_size,
+        node_latent_size=FLAGS.node_latent_size,
+        edge_latent_size=FLAGS.edge_latent_size,
         num_mlp_hidden_layers=FLAGS.num_mlp_hidden_layers,
+        mlp_hidden_size=FLAGS.mlp_hidden_size,
         num_message_passing_steps=FLAGS.num_message_passing_steps,
         num_message_passing_steps_grid=FLAGS.num_message_passing_steps_grid,
         overlap_factor_grid2mesh=FLAGS.overlap_factor_grid2mesh,

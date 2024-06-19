@@ -1,5 +1,10 @@
 # NEXT STEPS
 
+- Update launch.sh and train.job
+    - node_latent_size
+    - edge_latent_size
+    - mlp_hidden_size
+
 - Update slides ::
     - Check E295: wave_equation :: Add example plots (E299)
     - Check E297 (+ add to slides)
@@ -17,6 +22,8 @@
     * Check E299 dry run
     * pull the latest version
     * 1000 / 1200 / 2000 epochs (time)
+
+- experiment edge_latent_size=64
 
 - Inspect intermediates of different datasets (add to slides)
 

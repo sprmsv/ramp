@@ -45,8 +45,10 @@ class MPGNO(AbstractOperator):
   concatenate_tau: bool = True
   conditional_normalization: bool = False
   conditional_norm_latent_size: int = 16
-  latent_size: int = 128
+  node_latent_size: int = 128
+  edge_latent_size: int = 128
   num_mlp_hidden_layers: int = 2
+  mlp_hidden_size: int = 128
   num_message_passing_steps: int = 18
   num_message_passing_steps_grid: int = 2
   overlap_factor_grid2mesh: float = 1.
@@ -184,9 +186,9 @@ class MPGNO(AbstractOperator):
     self._grid2mesh_gnn = DeepTypedGraphNet(
       embed_nodes=True,  # Embed raw features of the grid and mesh nodes.
       embed_edges=True,  # Embed raw features of the grid2mesh edges.
-      edge_latent_size=dict(grid2mesh=self.latent_size),
-      node_latent_size=dict(mesh_nodes=self.latent_size, grid_nodes=self.latent_size),
-      mlp_hidden_size=self.latent_size,
+      edge_latent_size=dict(grid2mesh=self.edge_latent_size),
+      node_latent_size=dict(mesh_nodes=self.node_latent_size, grid_nodes=self.node_latent_size),
+      mlp_hidden_size=self.mlp_hidden_size,
       mlp_num_hidden_layers=self.num_mlp_hidden_layers,
       num_message_passing_steps=1,
       use_layer_norm=True,
@@ -204,9 +206,9 @@ class MPGNO(AbstractOperator):
     self._mesh_gnn = DeepTypedGraphNet(
       embed_nodes=False,  # Node features already embdded by previous layers.
       embed_edges=True,  # Embed raw features of the multi-mesh edges.
-      edge_latent_size=dict(mesh=self.latent_size),
-      node_latent_size=dict(mesh_nodes=self.latent_size),
-      mlp_hidden_size=self.latent_size,
+      edge_latent_size=dict(mesh=self.edge_latent_size),
+      node_latent_size=dict(mesh_nodes=self.node_latent_size),
+      mlp_hidden_size=self.mlp_hidden_size,
       mlp_num_hidden_layers=self.num_mlp_hidden_layers,
       num_message_passing_steps=self.num_message_passing_steps,
       use_layer_norm=True,
@@ -224,9 +226,9 @@ class MPGNO(AbstractOperator):
     self._mesh2grid_gnn = DeepTypedGraphNet(
       embed_nodes=False,  # Node features already embdded by previous layers.
       embed_edges=True,  # Embed raw features of the mesh2grid edges.
-      edge_latent_size=dict(mesh2grid=self.latent_size),
-      node_latent_size=dict(mesh_nodes=self.latent_size, grid_nodes=self.latent_size),
-      mlp_hidden_size=self.latent_size,
+      edge_latent_size=dict(mesh2grid=self.edge_latent_size),
+      node_latent_size=dict(mesh_nodes=self.node_latent_size, grid_nodes=self.node_latent_size),
+      mlp_hidden_size=self.mlp_hidden_size,
       mlp_num_hidden_layers=self.num_mlp_hidden_layers,
       num_message_passing_steps=1,
       use_layer_norm=True,
@@ -246,9 +248,9 @@ class MPGNO(AbstractOperator):
       node_output_size=dict(grid_nodes=self.num_outputs),
       embed_nodes=False,  # Node features already embdded by previous layers.
       embed_edges=True,  # Embed raw features of the grid2grid edges.
-      edge_latent_size=dict(grid2grid=self.latent_size),
-      node_latent_size=dict(grid_nodes=(self.latent_size * 2)),
-      mlp_hidden_size=self.latent_size,
+      edge_latent_size=dict(grid2grid=self.edge_latent_size),
+      node_latent_size=dict(grid_nodes=(self.node_latent_size * 2)),
+      mlp_hidden_size=self.mlp_hidden_size,
       mlp_num_hidden_layers=self.num_mlp_hidden_layers,
       num_message_passing_steps=self.num_message_passing_steps_grid,
       use_layer_norm=True,
