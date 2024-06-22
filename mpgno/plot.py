@@ -67,8 +67,8 @@ def animate(trajs, idx_traj=0, symmetric=True, cmaps=CMAP_BBR, vertical=True):
         vmax = np.max(np.abs(trajs[j][idx_traj, :, ..., i]))
         vmin = -vmax
       else:
-        vmax = None
-        vmin = None
+        vmax = np.max(trajs[j][idx_traj, :, ..., i])
+        vmin = np.min(trajs[j][idx_traj, :, ..., i])
 
       idx = (n_trjs * i + j) if vertical else (n_vars * j + i)
       h = axs.flatten()[idx].imshow(
@@ -117,8 +117,8 @@ def plot_trajectory(traj, idx_time, idx_traj=0, symmetric=True, ylabels=None):
       vmin = -vmax
     else:
       cmap = CMAP_WRB
-      vmax = None
-      vmin = None
+      vmax = np.max(traj[idx_traj, idx_time, ..., ivar])
+      vmin = np.min(traj[idx_traj, idx_time, ..., ivar])
 
     for icol in range(len(idx_time)):
       h = axs[ivar, icol].imshow(
@@ -163,6 +163,7 @@ def plot_estimations(u_gtr, u_prd, idx_out=-1, idx_inp=0, idx_traj=0, symmetric=
   for ivar in range(n_vars):
     vmax_gtr = np.max(np.abs(u_gtr[idx_traj, [idx_inp, idx_out], ..., ivar]))
 
+    # TODO: TMP DO NOT USE vmin/vmax=None !! They share the colorbar !!
     h = axs[ivar, 0].imshow(
       u_gtr[idx_traj, idx_inp, ..., ivar],
       cmap=(CMAP_BWR if symmetric[ivar] else CMAP_WRB),

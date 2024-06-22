@@ -1,37 +1,19 @@
 # NEXT STEPS
 
-- Update slides ::
-    - Check E295: wave_equation :: Add example plots (E299)
-    - Check new experiments with CondNorm (E297 and E298)
-        - Update learning curves with E298 !! DR-4 is not affected either !!
-        - Recheck der vs. res vs. out
-            - Better DR-0.5 with der?
-        - Recheck learning curves with tau_max=4 and tau_max=1 (der)
-        - Recheck gradient cut (E298) vs. gradient flow (E297)
-            - Better DR-4 with E298?
-
-- Reproduce experiments for reporting in the thesis
-    * Check E299 dry run
-    * pull the latest version
-    * 1000 / 1200 / 2000 epochs (time)
-
-- experiment with edge_latent_size=64
+- E3xx: Check final experiments
 
 - Inspect intermediates of different datasets (add to slides)
+    - Try decoding the intermediates of the processor
+    - Try more processor steps than 18
 
 - How does the DFT of the predictions look like?
 
-- wave_equation: do not learn identity map for source
-    - Allows you use residual/derivative stepping
+- experiment with edge_latent_size=64
+- experiment with num_processor_repetitions !! + correct it in the thesis
 
-- Experiment with the baseline models
-    - GNO, brandstetter, MeshGraphNets, (scOT), (FNO), (U-Net), (CNO), (GNOT)
-
-- Extend for unstructured grids
-    - Take input at any point and give output at any point
-    - Build the graphs and edges on the fly based on the input
-- Extend for time-independent problems
-- Extend for other boundary conditions (e.g., open, Robin)
+- Experiment without parameter sharing
+    - Check overfitting and overall performance
+    - Compute parameter efficiency
 
 ## Other
 - Add uncertainty to the errors
@@ -41,12 +23,22 @@
     - Try shifting first (approved)
     - Try repeating (physically incorrect)
 
-- Check the internal features of the graph and try to make sense of them
-
 - Add setup.py with setuptools and read use cases:
     - %pip install --upgrade https://github.com/.../master.zip
 
 - Write docstring and type annotations
+
+- Experiment with the baseline models
+    - GNO, brandstetter, MeshGraphNets, (scOT), (FNO), (U-Net), (CNO), (GNOT)
+
+- wave_equation: do not learn identity map for source
+    - Allows you use residual/derivative stepping
+
+- Extend for unstructured grids
+    - Take input at any point and give output at any point
+    - Build the graphs and edges on the fly based on the input
+- Extend for time-independent problems
+- Extend for other boundary conditions (e.g., open, Robin)
 
 ## Sequential data
 - Implement and try the LSTM idea from presentation-240315-updates

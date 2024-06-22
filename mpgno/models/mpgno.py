@@ -281,6 +281,8 @@ class MPGNO(AbstractOperator):
     # Get relative positions
     zeta_grid_rel = self.zeta_grid - self.zeta_mesh[idx_mesh_node[0], idx_mesh_node[1]]
     # Mirror relative positions because of periodic boudnary conditions
+    # TODO: TRY: Do not mirror
+    # NOTE: Long connections are long connections, even if they cross the boundary
     if self.periodic:
       zeta_grid_rel = np.where(zeta_grid_rel >= 1., (zeta_grid_rel - 2.), zeta_grid_rel)
       zeta_grid_rel = np.where(zeta_grid_rel < -1., (zeta_grid_rel + 2.), zeta_grid_rel)
