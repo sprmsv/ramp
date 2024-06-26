@@ -24,10 +24,12 @@ python -m mpgno.train python --datadir 'path_to_data' --datapath 'relative_path_
 Steps for setting up the environment on the Euler cluster:
 ```bash
 module purge
-module load gcc/8.2.0 python_gpu/3.11.2
+module load stack/.2024-05-silent gcc/13.2.0 python/3.11.6_cuda
 cd ~/venvs
+python -m pip install --user virtualenv
 python -m virtualenv venv-NAME
 source venv-NAME/bin/activate
-pip install --upgrade "jax[cuda11_pip]" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+pip install --upgrade pip
+pip install --upgrade "jax[cuda12]"
 pip install jraph flax matplotlib h5py optax pandas seaborn
 ```

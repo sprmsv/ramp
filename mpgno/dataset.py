@@ -33,9 +33,11 @@ class Metadata:
 
 ACTIVE_VARS_INCOMPRESSIBLE_FLUIDS = [0, 1]
 ACTIVE_VARS_COMPRESSIBLE_FLOW = [0, 1, 2, 3]
+ACTIVE_VARS_COMPRESSIBLE_FLOW_GRAVITY = [0, 1, 2, 3, 5]
 
 TARGET_VARS_INCOMPRESSIBLE_FLUIDS = [0, 1]
 TARGET_VARS_COMPRESSIBLE_FLOW = [1, 2]
+TARGET_VARS_COMPRESSIBLE_FLOW_GRAVITY = [1, 2]
 
 STATS_INCOMPRESSIBLE_FLUIDS = {
   'mean': [0., 0.],
@@ -54,8 +56,9 @@ STATS_WAVE_EQUATION = {
   'std': [1.],
 }
 
-VAR_NAMES_INCOMPRESSIBLE_FLUIDS = ['$v_1$', '$v_2$']
-VAR_NAMES_COMPRESSIBLE_FLOW = ['$\\rho$', '$v_1$', '$v_2$', '$p$', None]
+VAR_NAMES_INCOMPRESSIBLE_FLUIDS = ['$v_x$', '$v_y$']
+VAR_NAMES_COMPRESSIBLE_FLOW = ['$\\rho$', '$v_x$', '$v_y$', '$p$']
+VAR_NAMES_COMPRESSIBLE_FLOW_GRAVITY = ['$\\rho$', '$v_x$', '$v_y$', '$p$', '$\\phi$']
 
 DATASET_METADATA = {
   # incompressible_fluids: [velocity, velocity]
@@ -194,6 +197,7 @@ DATASET_METADATA = {
     periodic=True,
     data_group='solution',
     source_group=None,
+    # TODO: Where is the gravitational field?
     active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
     target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
     stats=STATS_COMPRESSIBLE_FLOW,
@@ -204,11 +208,11 @@ DATASET_METADATA = {
     periodic=True,
     data_group='solution',
     source_group=None,
-    active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
-    target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
-    stats=STATS_COMPRESSIBLE_FLOW,
-    signed=[False, True, True, False, False],
-    names=VAR_NAMES_COMPRESSIBLE_FLOW,
+    active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW_GRAVITY,
+    target_variables=TARGET_VARS_COMPRESSIBLE_FLOW_GRAVITY,
+    stats=STATS_COMPRESSIBLE_FLOW,  # TODO: Update with the stats of the last variable
+    signed=[False, True, True, False, False, False],
+    names=VAR_NAMES_COMPRESSIBLE_FLOW_GRAVITY,
   ),
   # reaction_diffusion
   'reaction_diffusion/allen_cahn': Metadata(

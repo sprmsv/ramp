@@ -403,7 +403,7 @@ def train(
       )
       # Update the carried loss and gradients of the subbatch
       _loss_updated = _loss_carried + _loss_subbatch / num_valid_pairs
-      _grads_updated = jax.tree_map(
+      _grads_updated = jax.tree_util.tree_map(
         lambda g_old, g_new: (g_old + g_new / num_valid_pairs),
         _grads_carried,
         _grads_subbatch,
@@ -414,7 +414,7 @@ def train(
     # Loop over the pairs
     _init_state = state
     _init_loss = 0.
-    _init_grads = jax.tree_map(lambda p: jnp.zeros_like(p), state.params)
+    _init_grads = jax.tree_util.tree_map(lambda p: jnp.zeros_like(p), state.params)
     key, _init_key = jax.random.split(key)
     state, loss, grads, _ = jax.lax.fori_loop(
       lower=0,
@@ -453,7 +453,7 @@ def train(
       # NOTE: Using the first element of replicated loss and grads
       loss_epoch += loss[0] * FLAGS.batch_size / num_samples_trn
       grad_epoch += np.mean(jax.tree_util.tree_flatten(
-        jax.tree_map(jnp.mean, jax.tree_map(lambda g: jnp.abs(g[0]), grads)))[0]) / num_batches
+        jax.tree_util.tree_map(jnp.mean, jax.tree_util.tree_map(lambda g: jnp.abs(g[0]), grads)))[0]) / num_batches
 
     return state, loss_epoch, grad_epoch
 
@@ -957,7 +957,7 @@ def main(argv):
 
   # Calculate the total number of parameters
   n_model_parameters = np.sum(
-    jax.tree_util.tree_flatten(jax.tree_map(lambda x: np.prod(x.shape).item(), params))[0]
+    jax.tree_util.tree_flatten(jax.tree_util.tree_map(lambda x: np.prod(x.shape).item(), params))[0]
   ).item()
   logging.info(f'Training a {model.__class__.__name__} with {n_model_parameters} parameters')
 

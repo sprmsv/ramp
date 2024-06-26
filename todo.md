@@ -1,6 +1,9 @@
 # NEXT STEPS
 
 - E3xx: Check final experiments
+- Check out [model size measures](https://medium.com/@nikitamalviya/evaluation-of-object-detection-models-flops-fps-latency-params-size-memory-storage-map-8dc9c7763cfe)
+
+- Get E300 for GCE-RT dataset with gravity !!
 
 - Inspect intermediates of different datasets (add to slides)
     - Try decoding the intermediates of the processor
@@ -39,6 +42,16 @@
     - Build the graphs and edges on the fly based on the input
 - Extend for time-independent problems
 - Extend for other boundary conditions (e.g., open, Robin)
+
+- Add multi-level SRGNO:
+    - Make the encoder modular
+    - Apply encoder with multiple mesh resolutions
+        1. All from the grid
+        2. Hierarchical, down-scale step by step
+    - Apply message-passing on all the meshes independently
+    - Decode from multiple meshe resolutions
+        1. All directly to the grid
+        2. Hierarchical, up-scale step by step
 
 ## Sequential data
 - Implement and try the LSTM idea from presentation-240315-updates

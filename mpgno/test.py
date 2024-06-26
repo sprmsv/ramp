@@ -701,7 +701,7 @@ def main(argv):
   mngr = orbax.checkpoint.CheckpointManager(DIR / 'checkpoints')
   best_checkpointed_step = mngr.best_step()
   ckpt = orbax_checkpointer.restore(directory=(DIR / 'checkpoints' / str(best_checkpointed_step) / 'default'))
-  state = jax.tree_map(jnp.array, ckpt['state'])
+  state = jax.tree_util.tree_map(jnp.array, ckpt['state'])
 
   # Set the stepper type
   if configs['flags']['stepper'] == 'out':
