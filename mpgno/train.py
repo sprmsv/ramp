@@ -726,7 +726,7 @@ def train(
     checkpointer_options = orbax.checkpoint.CheckpointManagerOptions(
       max_to_keep=1,
       keep_period=None,
-      best_fn=(lambda metrics: metrics['valid']['direct_tau_min']['l2']),
+      best_fn=(lambda metrics: metrics['valid']['final']['l2']),
       best_mode='min',
       create=True,)
     checkpointer_save_args = orbax_utils.save_args_from_target(target={'state': state})
@@ -908,8 +908,9 @@ def main(argv):
     state = ckpt['state']
     params = state['params']
     with open(DIR_OLD_EXPERIMENT / 'configs.json', 'rb') as f:
-      model_name = json.load(f)['flags']['model']
-      model_configs = json.load(f)['model_configs']
+      old_configs = json.load(f)
+      model_name = old_configs['flags']['model']
+      model_configs = old_configs['model_configs']
   else:
     params = None
     model_name = FLAGS.model

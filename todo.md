@@ -3,33 +3,40 @@
 - E3xx: Check final experiments
 - Check out [model size measures](https://medium.com/@nikitamalviya/evaluation-of-object-detection-models-flops-fps-latency-params-size-memory-storage-map-8dc9c7763cfe)
 
-- Get E300 for GCE-RT dataset with gravity !!
-
 - Inspect intermediates of different datasets (add to slides)
     - Try decoding the intermediates of the processor
     - Try more processor steps than 18
 
 - How does the DFT of the predictions look like?
 
-- experiment with edge_latent_size=64
+- Get rid of the NVIDIA driver compatiblity message: parallel compilation possibly faster
+
+- Add setup.py with setuptools and read use cases:
+    - %pip install --upgrade https://github.com/.../master.zip
+
+- Write docstring and type annotations
+
+# Future work
+
+- Read gladstone2024mesh + li2020multipole and present them to Mishra
+    - Read them with details and be careful !
+    - The ideas are VERY similar and the performance is close
+    - Maybe we need to benchmark gladstone2024mesh too
+    - We should be careful with what we focus on:
+        - a possibility is focusing on this new paradigm for down and upsampling layers
+
 - experiment with num_processor_repetitions !! + correct it in the thesis
 
 - Experiment without parameter sharing
     - Check overfitting and overall performance
     - Compute parameter efficiency
 
-## Other
 - Add uncertainty to the errors
     * No need to retrain anything, just use edge masking
 
 - Try data augmentation
     - Try shifting first (approved)
     - Try repeating (physically incorrect)
-
-- Add setup.py with setuptools and read use cases:
-    - %pip install --upgrade https://github.com/.../master.zip
-
-- Write docstring and type annotations
 
 - Experiment with the baseline models
     - GNO, brandstetter, MeshGraphNets, (scOT), (FNO), (U-Net), (CNO), (GNOT)
@@ -44,12 +51,15 @@
 - Extend for other boundary conditions (e.g., open, Robin)
 
 - Add multi-level SRGNO:
-    - Make the encoder modular
+    - Make the encoder and decoder modular
+        - Define graph downsampling and upsampling layers
+        - You can give up the long-range connections in mesh to allow for unstructured "mesh"
+        - Or improve the long-range connection strategy to allow for unstructured "mesh" (Check )
     - Apply encoder with multiple mesh resolutions
         1. All from the grid
         2. Hierarchical, down-scale step by step
     - Apply message-passing on all the meshes independently
-    - Decode from multiple meshe resolutions
+    - Decode from multiple mesh resolutions
         1. All directly to the grid
         2. Hierarchical, up-scale step by step
 
