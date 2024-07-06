@@ -1,5 +1,5 @@
-from dataclasses import dataclass
 from copy import copy
+from dataclasses import dataclass
 from typing import Sequence
 
 import jax.numpy as jnp

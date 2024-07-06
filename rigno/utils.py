@@ -2,10 +2,10 @@ from absl import logging
 from time import time
 from typing import Union, Sequence, Callable
 
-import numpy as np
+import flax.typing
 import jax
 import jax.numpy as jnp
-import flax.typing
+import numpy as np
 
 
 Array = Union[jnp.ndarray, np.ndarray]

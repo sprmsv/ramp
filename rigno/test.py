@@ -1,16 +1,16 @@
 import json
 import pickle
 import shutil
-from typing import Tuple, Type, Mapping, Callable, Any, Sequence
 from time import time
+from typing import Tuple, Type, Mapping, Callable, Any, Sequence
 
-import numpy as np
 import jax
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
+import numpy as np
 import orbax.checkpoint
 import pandas as pd
 import scipy.ndimage
-import matplotlib.pyplot as plt
 from absl import app, flags, logging
 from flax.training.common_utils import shard, shard_prng_key
 from flax.jax_utils import replicate
@@ -56,7 +56,6 @@ def define_flags():
   flags.DEFINE_boolean(name='ensemble', default=False, required=False,
     help='If passed, ensemble samples are generated using model randomness'
   )
-
 
 def print_between_dashes(msg):
   logging.info('-' * 80)

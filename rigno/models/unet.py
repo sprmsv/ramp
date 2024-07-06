@@ -1,15 +1,13 @@
 from typing import Union
 
-import jax
-from jax import numpy as jnp
 import flax.typing
+import jax
 from flax import linen as nn
+from jax import numpy as jnp
 
 from rigno.models.rigno import AbstractOperator
 from rigno.models.utils import ConditionedNorm
 from rigno.utils import Array
-
-
 
 
 class Encoder(nn.Module):

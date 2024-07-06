@@ -8,8 +8,6 @@ from typing import NamedTuple, Any, Union, Tuple, Mapping, TypeVar
 ArrayLike = Union[Any]  # np.ndarray, jnp.ndarray, tf.tensor
 ArrayLikeTree = Union[Any, ArrayLike]  # Nest of ArrayLike
 
-_T = TypeVar('_T')
-
 
 # All tensors have a 'flat_batch_axis', which is similar to the leading
 # axes of graph_tuples:

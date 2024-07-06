@@ -1,37 +1,37 @@
-from datetime import datetime
-import functools
-from time import time
-from typing import Tuple, Any, Mapping, Iterable, Callable
 import json
 import pickle
+import functools
+from datetime import datetime
+from time import time
+from typing import Tuple, Any, Mapping, Iterable, Callable
 
-from absl import app, flags, logging
-import jax
-import jax.numpy as jnp
-from jax.tree_util import PyTreeDef
-import numpy as np
-import optax
 import flax.linen as nn
 import flax.typing
+import jax
+import jax.numpy as jnp
+import numpy as np
+import optax
+import orbax.checkpoint
+from absl import app, flags, logging
 from flax.training import orbax_utils
 from flax.training.train_state import TrainState
 from flax.training.common_utils import shard, shard_prng_key
 from flax.jax_utils import replicate, unreplicate
-import orbax.checkpoint
+from jax.tree_util import PyTreeDef
 
+from rigno.dataset import Dataset
 from rigno.experiments import DIR_EXPERIMENTS
+from rigno.metrics import BatchMetrics, Metrics, EvalMetrics
+from rigno.metrics import rel_lp_loss
+from rigno.metrics import mse_error, rel_lp_error_per_var, rel_lp_error_norm
+from rigno.models.rigno import RIGNO, AbstractOperator
+from rigno.models.unet import UNet
 from rigno.stepping import AutoregressiveStepper
 from rigno.stepping import TimeDerivativeUpdater
 from rigno.stepping import ResidualUpdater
 from rigno.stepping import OutputUpdater
-from rigno.dataset import Dataset
-from rigno.models.rigno import RIGNO, AbstractOperator
-from rigno.models.unet import UNet
-from rigno.utils import disable_logging, Array, shuffle_arrays, split_arrays, normalize
-from rigno.metrics import BatchMetrics, Metrics, EvalMetrics
-from rigno.metrics import rel_lp_loss
-from rigno.metrics import mse_error, rel_lp_error_per_var, rel_lp_error_norm
 from rigno.test import get_direct_estimations
+from rigno.utils import disable_logging, Array, shuffle_arrays, split_arrays, normalize
 
 
 NUM_DEVICES = jax.local_device_count()
@@ -68,7 +68,7 @@ def define_flags():
   )
 
   # FLAGS::training
-  flags.DEFINE_string(name='model', default='RIGNO', required=True,
+  flags.DEFINE_string(name='model', default=None, required=True,
     help='Name of the model: ["RIGNO", "UNET"]'
   )
   flags.DEFINE_integer(name='batch_size', default=2, required=False,
@@ -913,7 +913,7 @@ def main(argv):
       model_configs = old_configs['model_configs']
   else:
     params = None
-    model_name = FLAGS.model
+    model_name = FLAGS.model or 'RIGNO'
     model_configs = None
 
   # Get the model

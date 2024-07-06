@@ -2,9 +2,9 @@
 
 from typing import Sequence, Callable
 
+import flax.linen as nn
 import jax.numpy as jnp
 import jax.tree_util as tree
-import flax.linen as nn
 
 from rigno.utils import Array, calculate_fd_derivative
 

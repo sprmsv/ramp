@@ -1,10 +1,10 @@
 from typing import Sequence, Tuple, Union
 
-import numpy as np
+import flax.typing
 import jax.numpy as jnp
 import jax.random
+import numpy as np
 from flax import linen as nn
-import flax.typing
 
 from rigno.graph.typed_graph import (
     TypedGraph, EdgeSet, EdgeSetKey,

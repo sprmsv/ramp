@@ -1,15 +1,15 @@
 """Utility functions for reading the datasets."""
 
 import h5py
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Union, Sequence
-from dataclasses import dataclass
 
-import numpy as np
+import flax.typing
 import jax
 import jax.lax
 import jax.numpy as jnp
-import flax.typing
+import numpy as np
 
 
 @dataclass
