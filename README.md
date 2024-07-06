@@ -11,16 +11,16 @@ mesh with nodes that each represent a sub-region of the domain, and
 only interact with each other.
 The following figure draws a schematic of how the information is
 transmitted from the original mesh to the regional mesh and vice-versa.
-<p align="center"> <img src="assets/encode-process-decode.svg" alt="encode-process-decode" width="500"/> </p>
+<p align="center"> <img src="assets/encode-process-decode.png" alt="encode-process-decode" width="500"/> </p>
 
 Complex boundary conditions can easily be imposed to the structure
 of the graphs via cross-boundary edges or node types.
 Here is a schematic of the graph structure used in RIGNO for a 1D problem with periodic boundary conditions.
-<p align="center"> <img src="assets/graphs-1d-periodic.svg" alt="graphs-1d-periodic" width="500"/> </p>
+<p align="center"> <img src="assets/graphs-1d-periodic.png" alt="graphs-1d-periodic" width="500"/> </p>
 
 The following flowchart summarizes the message passing in a single
 pass of a RIGNO.
-<p align="center"> <img src="assets/message-passing-flowchart.svg" alt="message-passing-flowchart" width="500"/> </p>
+<p align="center"> <img src="assets/message-passing-flowchart.png" alt="message-passing-flowchart" width="500"/> </p>
 
 
 ## Setup
