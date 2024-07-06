@@ -1,9 +1,26 @@
 # RIGNO: Region Interaction Graph Neural Operator
 
-RIGNO is a graph-based neural network framework for operator learning. Once trained, it can be applied autoregressively on the initial condition of a time-dependant partial differential equation (PDE) to estimate the solution of the PDE at a later time.
+RIGNO is a graph neural network architecture for operator learning that is discretization invariant, easily
+adaptable to unstructured meshes, and robust to input noise.
+Focusing on time-dependent partial differential equations, we utilize training techniques with temporal solution
+trajectories to impose continuity in time, which allows trained operators to effectively perform time interpolation
+and time extrapolation without compromising accuracy.
 
-Here is a schematic of the graph structure used in RIGNO for a 1D problem with periodic boundary conditions, although it has been primarily developed and validated on 2D problems:
-<p align="center"> <img src="assets/multimesh-periodic.svg" alt="multimesh-periodic" width="500"/> </p>
+The main message-passing happens in the space of a low-resolution
+mesh with nodes that each represent a sub-region of the domain, and
+only interact with each other.
+The following figure draws a schematic of how the information is
+transmitted from the original mesh to the regional mesh and vice-versa.
+<p align="center"> <img src="assets/encode-process-decode.svg" alt="encode-process-decode" width="500"/> </p>
+
+Complex boundary conditions can easily be imposed to the structure
+of the graphs via cross-boundary edges or node types.
+Here is a schematic of the graph structure used in RIGNO for a 1D problem with periodic boundary conditions.
+<p align="center"> <img src="assets/graphs-1d-periodic.svg" alt="graphs-1d-periodic" width="500"/> </p>
+
+The following flowchart summarizes the message passing in a single
+pass of a RIGNO.
+<p align="center"> <img src="assets/message-passing-flowchart.svg" alt="message-passing-flowchart" width="500"/> </p>
 
 
 ## Setup
