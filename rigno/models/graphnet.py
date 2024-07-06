@@ -32,9 +32,9 @@ import jax.numpy as jnp
 import flax.linen as nn
 import jraph
 
-from mpgno.graph.typed_graph import TypedGraph
-from mpgno.graph.typed_graph_net import GraphMapFeatures, InteractionNetwork
-from mpgno.models.utils import AugmentedMLP
+from rigno.graph.typed_graph import TypedGraph
+from rigno.graph.typed_graph_net import GraphMapFeatures, InteractionNetwork
+from rigno.models.utils import AugmentedMLP
 
 
 class DeepTypedGraphNet(nn.Module):

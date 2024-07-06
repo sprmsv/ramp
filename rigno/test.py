@@ -15,15 +15,15 @@ from absl import app, flags, logging
 from flax.training.common_utils import shard, shard_prng_key
 from flax.jax_utils import replicate
 
-from mpgno.dataset import Dataset
-from mpgno.experiments import DIR_EXPERIMENTS
-from mpgno.metrics import rel_lp_error_norm
-from mpgno.models.mpgno import AbstractOperator, MPGNO
-from mpgno.models.unet import UNet
-from mpgno.plot import plot_estimations, plot_ensemble, plot_error_vs_time
-from mpgno.stepping import Stepper, TimeDerivativeUpdater, ResidualUpdater, OutputUpdater
-from mpgno.stepping import AutoregressiveStepper
-from mpgno.utils import Array, disable_logging, profile
+from rigno.dataset import Dataset
+from rigno.experiments import DIR_EXPERIMENTS
+from rigno.metrics import rel_lp_error_norm
+from rigno.models.rigno import AbstractOperator, RIGNO
+from rigno.models.unet import UNet
+from rigno.plot import plot_estimations, plot_ensemble, plot_error_vs_time
+from rigno.stepping import Stepper, TimeDerivativeUpdater, ResidualUpdater, OutputUpdater
+from rigno.stepping import AutoregressiveStepper
+from rigno.utils import Array, disable_logging, profile
 
 
 NUM_DEVICES = jax.local_device_count()
@@ -109,7 +109,7 @@ def profile_inferrence(
 
   # Configure and build new model
   model_configs = model.configs
-  if isinstance(model, MPGNO):
+  if isinstance(model, RIGNO):
     model_configs['num_grid_nodes'] = resolution
     model_configs['p_dropout_edges_grid2mesh'] = p_edge_masking_grid2mesh
     model_configs['p_dropout_edges_multimesh'] = 0.
@@ -346,7 +346,7 @@ def get_all_estimations(
   for resolution in all_resolutions:
     # Configure and build new model
     model_configs = model.configs
-    if isinstance(model, MPGNO):
+    if isinstance(model, RIGNO):
       model_configs['num_grid_nodes'] = resolution
       model_configs['p_dropout_edges_grid2mesh'] = p_edge_masking_grid2mesh
       model_configs['p_dropout_edges_multimesh'] = 0.
@@ -603,7 +603,7 @@ def get_ensemble_estimations(
 
   # Configure and build new model
   model_configs = model.configs
-  if isinstance(model, MPGNO):
+  if isinstance(model, RIGNO):
     model_configs['num_grid_nodes'] = resolution_train
     model_configs['p_dropout_edges_grid2mesh'] = p_edge_masking_grid2mesh
     model_configs['p_dropout_edges_multimesh'] = 0.
@@ -714,8 +714,8 @@ def main(argv):
     raise ValueError
 
   # Set the model
-  if model_name == 'MPGNO':
-    model_class = MPGNO
+  if model_name == 'RIGNO':
+    model_class = RIGNO
   elif model_name == 'UNET':
     model_class = UNet
   else:

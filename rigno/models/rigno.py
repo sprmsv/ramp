@@ -6,11 +6,11 @@ import jax.random
 from flax import linen as nn
 import flax.typing
 
-from mpgno.graph.typed_graph import (
+from rigno.graph.typed_graph import (
     TypedGraph, EdgeSet, EdgeSetKey,
     EdgesIndices, NodeSet, Context)
-from mpgno.models.deep_typed_graph_net import DeepTypedGraphNet
-from mpgno.utils import Array, shuffle_arrays
+from rigno.models.graphnet import DeepTypedGraphNet
+from rigno.utils import Array, shuffle_arrays
 
 
 class AbstractOperator(nn.Module):
@@ -33,7 +33,7 @@ class AbstractOperator(nn.Module):
     }
     return configs
 
-class MPGNO(AbstractOperator):
+class RIGNO(AbstractOperator):
   """TODO: Add docstrings"""
   # NOTE: Only fixed dx is supported for now
 

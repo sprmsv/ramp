@@ -4,7 +4,7 @@ from typing import Sequence
 
 import jax.numpy as jnp
 
-from mpgno.utils import Array, ScalarArray
+from rigno.utils import Array, ScalarArray
 
 
 EPSILON = 1e-10

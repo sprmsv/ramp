@@ -19,19 +19,19 @@ from flax.training.common_utils import shard, shard_prng_key
 from flax.jax_utils import replicate, unreplicate
 import orbax.checkpoint
 
-from mpgno.experiments import DIR_EXPERIMENTS
-from mpgno.stepping import AutoregressiveStepper
-from mpgno.stepping import TimeDerivativeUpdater
-from mpgno.stepping import ResidualUpdater
-from mpgno.stepping import OutputUpdater
-from mpgno.dataset import Dataset
-from mpgno.models.mpgno import MPGNO, AbstractOperator
-from mpgno.models.unet import UNet
-from mpgno.utils import disable_logging, Array, shuffle_arrays, split_arrays, normalize
-from mpgno.metrics import BatchMetrics, Metrics, EvalMetrics
-from mpgno.metrics import rel_lp_loss
-from mpgno.metrics import mse_error, rel_lp_error_per_var, rel_lp_error_norm
-from mpgno.test import get_direct_estimations
+from rigno.experiments import DIR_EXPERIMENTS
+from rigno.stepping import AutoregressiveStepper
+from rigno.stepping import TimeDerivativeUpdater
+from rigno.stepping import ResidualUpdater
+from rigno.stepping import OutputUpdater
+from rigno.dataset import Dataset
+from rigno.models.rigno import RIGNO, AbstractOperator
+from rigno.models.unet import UNet
+from rigno.utils import disable_logging, Array, shuffle_arrays, split_arrays, normalize
+from rigno.metrics import BatchMetrics, Metrics, EvalMetrics
+from rigno.metrics import rel_lp_loss
+from rigno.metrics import mse_error, rel_lp_error_per_var, rel_lp_error_norm
+from rigno.test import get_direct_estimations
 
 
 NUM_DEVICES = jax.local_device_count()
@@ -68,10 +68,10 @@ def define_flags():
   )
 
   # FLAGS::training
-  flags.DEFINE_string(name='model', default=None, required=True,
-    help='Name of the model: ["MPGNO", "UNET"]'
+  flags.DEFINE_string(name='model', default='RIGNO', required=True,
+    help='Name of the model: ["RIGNO", "UNET"]'
   )
-  flags.DEFINE_integer(name='batch_size', default=4, required=False,
+  flags.DEFINE_integer(name='batch_size', default=2, required=False,
     help='Size of a batch of training samples'
   )
   flags.DEFINE_integer(name='epochs', default=20, required=False,
@@ -108,14 +108,14 @@ def define_flags():
     help='Number of test samples'
   )
 
-  # FLAGS::model::MPGNO
+  # FLAGS::model::RIGNO
   flags.DEFINE_integer(name='num_mesh_nodes', default=64, required=False,
     help='Number of mesh nodes in each dimension'
   )
-  flags.DEFINE_float(name='overlap_factor_grid2mesh', default=2.0, required=False,
+  flags.DEFINE_float(name='overlap_factor_grid2mesh', default=4.0, required=False,
     help='Overlap factor for grid2mesh edges (encoder)'
   )
-  flags.DEFINE_float(name='overlap_factor_mesh2grid', default=2.0, required=False,
+  flags.DEFINE_float(name='overlap_factor_mesh2grid', default=4.0, required=False,
     help='Overlap factor for mesh2grid edges (decoder)'
   )
   flags.DEFINE_integer(name='num_multimesh_levels', default=4, required=False,
@@ -145,10 +145,10 @@ def define_flags():
   flags.DEFINE_float(name='p_dropout_edges_grid2mesh', default=0.5, required=False,
     help='Probability of dropping out edges of grid2mesh'
   )
-  flags.DEFINE_float(name='p_dropout_edges_multimesh', default=0, required=False,
+  flags.DEFINE_float(name='p_dropout_edges_multimesh', default=0.5, required=False,
     help='Probability of dropping out edges of the multi-mesh'
   )
-  flags.DEFINE_float(name='p_dropout_edges_mesh2grid', default=0., required=False,
+  flags.DEFINE_float(name='p_dropout_edges_mesh2grid', default=0.5, required=False,
     help='Probability of dropping out edges of mesh2grid'
   )
 
@@ -812,11 +812,11 @@ def get_model(model_name: str, model_configs: Mapping[str, Any], dataset: Datase
 
   # Check the inputs
   model_name = model_name.upper()
-  assert model_name in ['MPGNO', 'UNET']
+  assert model_name in ['RIGNO', 'UNET']
 
   # Set model kwargs
   if not model_configs:
-    if model_name == 'MPGNO':
+    if model_name == 'RIGNO':
       model_configs = dict(
         num_outputs=dataset.shape[-1],
         num_grid_nodes=dataset.shape[2:4],
@@ -848,8 +848,8 @@ def get_model(model_name: str, model_configs: Mapping[str, Any], dataset: Datase
       )
 
   # Set the model class
-  if model_name == 'MPGNO':
-    model_class = MPGNO
+  if model_name == 'RIGNO':
+    model_class = RIGNO
   elif model_name == 'UNET':
     model_class = UNet
 

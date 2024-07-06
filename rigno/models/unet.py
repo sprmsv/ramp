@@ -5,9 +5,9 @@ from jax import numpy as jnp
 import flax.typing
 from flax import linen as nn
 
-from mpgno.models.mpgno import AbstractOperator
-from mpgno.models.utils import ConditionedNorm
-from mpgno.utils import Array
+from rigno.models.rigno import AbstractOperator
+from rigno.models.utils import ConditionedNorm
+from rigno.utils import Array
 
 
 

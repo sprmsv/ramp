@@ -328,12 +328,12 @@ def plot_ensemble(u_gtr, u_ens, idx_out=-1, idx_traj=0, symmetric=True, names=No
 
   return fig, axs
 
-def plot_error_vs_time(df: pd.DataFrame, idx_fn: int, variable_title: str = 'variable') -> sns.FacetGrid:
+def plot_error_vs_time(df: pd.DataFrame, idx_fn: int, variable_title: str = 'variable', palette: str = None) -> sns.FacetGrid:
   g = sns.FacetGrid(
     data=(df[(df['error'] > 0.)]),
     hue='variable',
-    palette='deep',
-    height=4,
+    palette=palette,
+    height=5,
     aspect=1.2,
   );
   g.set_titles(col_template='{col_name}');

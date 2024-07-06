@@ -4,8 +4,8 @@ import jax
 import jax.numpy as jnp
 import flax.typing
 
-from mpgno.utils import Array, normalize, unnormalize
-from mpgno.models.mpgno import AbstractOperator
+from rigno.utils import Array, normalize, unnormalize
+from rigno.models.rigno import AbstractOperator
 
 
 class Stepper(ABC):
