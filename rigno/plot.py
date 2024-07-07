@@ -348,3 +348,48 @@ def plot_error_vs_time(df: pd.DataFrame, idx_fn: int, variable_title: str = 'var
     ax.set_xticks(df['t'].unique())
 
   return g
+
+def plot_intermediates(features, idx_traj: int = 0, idx_time: int = 0, share_cmap: bool = False):
+  _HEIGHT_PER_ROW = 2
+  _HEIGHT_MARGIN = .2
+  _WIDTH_PER_COL = 2
+  _WIDTH_MARGIN = .2
+
+  COL_WRAP = 6
+  n_vars = features.shape[-1]
+  if n_vars > COL_WRAP:
+    n_rows = n_vars // COL_WRAP
+    n_cols = COL_WRAP
+  else:
+    n_rows = 1
+    n_cols = n_vars
+
+  fig, axs = plt.subplots(
+    nrows=n_rows,
+    ncols=n_cols,
+    figsize=(_WIDTH_PER_COL*n_cols+_WIDTH_MARGIN, _HEIGHT_PER_ROW*n_rows+_HEIGHT_MARGIN),
+    sharex=True, sharey=True,
+  )
+  if (n_cols * n_rows) == 1:
+    axs = np.array(axs)
+  axs = axs.reshape(n_rows * n_cols)
+
+  for ivar in range(n_vars):
+    cmap = CMAP_BWR
+    if share_cmap:
+      vmax = np.max(np.abs(features[idx_traj, idx_time, ..., :]))
+    else:
+      vmax = np.max(np.abs(features[idx_traj, idx_time, ..., ivar]))
+    vmin = -vmax
+    h = axs[ivar].imshow(
+      features[idx_traj, idx_time, ..., ivar],
+      cmap=cmap,
+      vmin=vmin,
+      vmax=vmax,
+    )
+
+  for ax in axs.flatten():
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+  return fig, axs

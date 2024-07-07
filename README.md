@@ -25,7 +25,7 @@ pass of a RIGNO.
 The following figure illustrates the estimates produced by a RIGNO with 2.7 million parameters trained on 1024 solution trajectories
 of the incompressible Navier-Stokes equations in a two-dimensional
 square domain with periodic boundary conditions. The time difference
-between the input and output is 0.7s.
+between the input and the output is 0.7s.
 
 <p align="center"> <img src="assets/NS-Gauss-fn.png" alt="NS-Gauss-fn" width="900"/> </p>
 
