@@ -10,7 +10,25 @@
     - The ideas are VERY similar and the performance is close
     - Maybe we need to benchmark gladstone2024mesh too
     - We should be careful with what we focus on:
-        - a possibility is focusing on this new paradigm for down and upsampling layers
+        - a possibility is focusing on this new paradigm for down and up-scaling layers
+
+## SOME UNANSWERED QUESTIONS
+
+- Instable with tau_max = 7
+
+- Why NS-SVS + NS-Sines do not generalize on time??
+
+- Is resolution 32 too low to capture the HF signals?
+  - Super-resolution works when trained with 64x64
+  - Sub-res works too when trained with 128x128
+
+- Is noise injection helpful for us?
+    - It seems like that for every other architecture out there, noise injection
+        reduces rollout errors. For us, at least training unrolling, did not bring
+        any good, but maybe Gaussian noise injection does.
+        On the other hand, without doing ANYTHING, we are able to control the noise,
+        and even the self-induced rollout noises are damped (check rollout errors
+        with high tau_max). Investigate if this is particular to our architecture.
 
 ## Architectural Experiments
 
@@ -78,6 +96,9 @@
     - Perturbed input
         - keep/remove Fourier modes
         - Perturb IC parameters
+
+## Pre-training
+- Read thesis
 
 ## Adaptive inference
 - Adaptive time step

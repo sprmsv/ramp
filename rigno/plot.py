@@ -333,19 +333,22 @@ def plot_error_vs_time(df: pd.DataFrame, idx_fn: int, variable_title: str = 'var
     data=(df[(df['error'] > 0.)]),
     hue='variable',
     palette=palette,
-    height=5,
-    aspect=1.2,
+    height=4,
+    aspect=.8,
   );
   g.set_titles(col_template='{col_name}');
-  g.map(sns.scatterplot, 't', 'error');
-  g.map(sns.lineplot, 't', 'error');
+  g.map(sns.scatterplot, 't', 'error', marker='o', s=30, alpha=1);
+  g.map(sns.lineplot, 't', 'error', linewidth=2, alpha=.8);
   g.add_legend(title=variable_title);
   g.set_ylabels(label='Error (%)');
 
+  sns.move_legend(g, loc='right', bbox_to_anchor=(1.02, .5))
+
   for ax in g.axes.flatten():
-    ax.grid();
-    ax.axvline(x=idx_fn, linestyle='--', color='black', alpha=.5);
-    ax.set_xticks(df['t'].unique())
+    ax.axvline(x=idx_fn, linestyle='--', color='black', linewidth=2, alpha=.5);
+    ax.set_xticks([t for t in df['t'].unique() if (t%2 == 0)], minor=False);
+    ax.set_xticks([t for t in df['t'].unique()], minor=True);
+    ax.grid(which='major');
 
   return g
 
