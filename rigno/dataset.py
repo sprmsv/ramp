@@ -11,17 +11,22 @@ import jax.lax
 import jax.numpy as jnp
 import numpy as np
 
+from rigno.utils import Array, shuffle_arrays
+
 
 @dataclass
 class Metadata:
   periodic: bool
   data_group: str
-  source_group: str
+  coeff_group: str
+  domain_t: tuple[int, int]
+  domain_x: tuple[int, int]
+  domain_y: tuple[int, int]
+  domain_z: tuple[int, int]
   active_variables: Sequence[int]
   target_variables: Sequence[int]
-  stats: dict[str, Sequence[float]]
-  signed: Union[bool, Sequence[bool]] = True
-  names: Sequence[str] = None
+  signed: dict[str, Union[bool, Sequence[bool]]]
+  names: dict[str, Sequence[str]]
 
   @property
   def stats_target_variables(self) -> dict[str, np.array]:
@@ -31,222 +36,290 @@ class Metadata:
     }
     return _stats
 
-ACTIVE_VARS_INCOMPRESSIBLE_FLUIDS = [0, 1]
-ACTIVE_VARS_COMPRESSIBLE_FLOW = [0, 1, 2, 3]
-ACTIVE_VARS_COMPRESSIBLE_FLOW_GRAVITY = [0, 1, 2, 3, 5]
+ACTIVE_VARS_NS = [0, 1]
+ACTIVE_VARS_CE = [0, 1, 2, 3]
+ACTIVE_VARS_GCE = [0, 1, 2, 3, 5]
+ACTIVE_VARS_RD = [0]
+ACTIVE_VARS_WE = [0]
 
-TARGET_VARS_INCOMPRESSIBLE_FLUIDS = [0, 1]
-TARGET_VARS_COMPRESSIBLE_FLOW = [1, 2]
-TARGET_VARS_COMPRESSIBLE_FLOW_GRAVITY = [1, 2]
+TARGET_VARS_NS = [0, 1]
+TARGET_VARS_CE = [1, 2]
+TARGET_VARS_GCE = [1, 2]
+TARGET_VARS_RD = [0]
+TARGET_VARS_WE = [0]
 
-STATS_INCOMPRESSIBLE_FLUIDS = {
-  'mean': [0., 0.],
-  'std': [.391, .356],
-}
-STATS_COMPRESSIBLE_FLOW = {
-  'mean': [.80, 0., 0., .553, None],
-  'std': [.31, .391, .365, .185, None],
-}
-STATS_REACTION_DIFFUSION = {
-  'mean': [0.],
-  'std': [1.],
-}
-STATS_WAVE_EQUATION = {
-  'mean': [0.],
-  'std': [1.],
-}
+SIGNED_NS = {'u': [True, True], 'c': None}
+SIGNED_CE = {'u': [False, True, True, False, False], 'c': None}
+SIGNED_GCE = {'u': [False, True, True, False, False, False], 'c': None}
+SIGNED_RD = {'u': [True], 'c': None}
+SIGNED_WE = {'u': [True], 'c': [False]}
 
-VAR_NAMES_INCOMPRESSIBLE_FLUIDS = ['$v_x$', '$v_y$']
-VAR_NAMES_COMPRESSIBLE_FLOW = ['$\\rho$', '$v_x$', '$v_y$', '$p$']
-VAR_NAMES_COMPRESSIBLE_FLOW_GRAVITY = ['$\\rho$', '$v_x$', '$v_y$', '$p$', '$\\phi$']
+NAMES_NS = {'u': ['$v_x$', '$v_y$'], 'c': None}
+NAMES_CE = {'u': ['$\\rho$', '$v_x$', '$v_y$', '$p$'], 'c': None}
+NAMES_GCE = {'u': ['$\\rho$', '$v_x$', '$v_y$', '$p$', 'E', '$\\phi$'], 'c': None}
+NAMES_RD = {'u': ['$u$'], 'c': None}
+NAMES_WE = {'u': ['$u$'], 'c': ['$c$']}
 
 DATASET_METADATA = {
   # incompressible_fluids: [velocity, velocity]
   'incompressible_fluids/brownian_bridge': Metadata(
     periodic=True,
     data_group='velocity',
-    source_group=None,
-    active_variables=ACTIVE_VARS_INCOMPRESSIBLE_FLUIDS,
-    target_variables=TARGET_VARS_INCOMPRESSIBLE_FLUIDS,
-    stats=STATS_INCOMPRESSIBLE_FLUIDS,
-    signed=True,
-    names=VAR_NAMES_INCOMPRESSIBLE_FLUIDS,
+    coeff_group=None,
+    domain_t=(0, 1),
+    domain_x=(0, 1),
+    domain_y=(0, 1),
+    domain_z=(0, 1),
+    active_variables=ACTIVE_VARS_NS,
+    target_variables=TARGET_VARS_NS,
+    signed=SIGNED_NS,
+    names=NAMES_NS,
   ),
   'incompressible_fluids/gaussians': Metadata(
     periodic=True,
     data_group='velocity',
-    source_group=None,
-    active_variables=ACTIVE_VARS_INCOMPRESSIBLE_FLUIDS,
-    target_variables=TARGET_VARS_INCOMPRESSIBLE_FLUIDS,
-    stats=STATS_INCOMPRESSIBLE_FLUIDS,
-    signed=True,
-    names=VAR_NAMES_INCOMPRESSIBLE_FLUIDS,
+    coeff_group=None,
+    domain_t=(0, 1),
+    domain_x=(0, 1),
+    domain_y=(0, 1),
+    domain_z=(0, 1),
+    active_variables=ACTIVE_VARS_NS,
+    target_variables=TARGET_VARS_NS,
+    signed=SIGNED_NS,
+    names=NAMES_NS,
   ),
   'incompressible_fluids/pwc': Metadata(
     periodic=True,
     data_group='velocity',
-    source_group=None,
-    active_variables=ACTIVE_VARS_INCOMPRESSIBLE_FLUIDS,
-    target_variables=TARGET_VARS_INCOMPRESSIBLE_FLUIDS,
-    stats=STATS_INCOMPRESSIBLE_FLUIDS,
-    signed=True,
-    names=VAR_NAMES_INCOMPRESSIBLE_FLUIDS,
+    coeff_group=None,
+    domain_t=(0, 1),
+    domain_x=(0, 1),
+    domain_y=(0, 1),
+    domain_z=(0, 1),
+    active_variables=ACTIVE_VARS_NS,
+    target_variables=TARGET_VARS_NS,
+    signed=SIGNED_NS,
+    names=NAMES_NS,
   ),
   'incompressible_fluids/shear_layer': Metadata(
     periodic=True,
     data_group='velocity',
-    source_group=None,
-    active_variables=ACTIVE_VARS_INCOMPRESSIBLE_FLUIDS,
-    target_variables=TARGET_VARS_INCOMPRESSIBLE_FLUIDS,
-    stats=STATS_INCOMPRESSIBLE_FLUIDS,
-    signed=True,
-    names=VAR_NAMES_INCOMPRESSIBLE_FLUIDS,
+    coeff_group=None,
+    domain_t=(0, 1),
+    domain_x=(0, 1),
+    domain_y=(0, 1),
+    domain_z=(0, 1),
+    active_variables=ACTIVE_VARS_NS,
+    target_variables=TARGET_VARS_NS,
+    signed=SIGNED_NS,
+    names=NAMES_NS,
   ),
   'incompressible_fluids/sines': Metadata(
     periodic=True,
     data_group='velocity',
-    source_group=None,
-    active_variables=ACTIVE_VARS_INCOMPRESSIBLE_FLUIDS,
-    target_variables=TARGET_VARS_INCOMPRESSIBLE_FLUIDS,
-    stats=STATS_INCOMPRESSIBLE_FLUIDS,
-    signed=True,
-    names=VAR_NAMES_INCOMPRESSIBLE_FLUIDS,
+    coeff_group=None,
+    domain_t=(0, 1),
+    domain_x=(0, 1),
+    domain_y=(0, 1),
+    domain_z=(0, 1),
+    active_variables=ACTIVE_VARS_NS,
+    target_variables=TARGET_VARS_NS,
+    signed=SIGNED_NS,
+    names=NAMES_NS,
   ),
   'incompressible_fluids/vortex_sheet': Metadata(
     periodic=True,
     data_group='velocity',
-    source_group=None,
-    active_variables=ACTIVE_VARS_INCOMPRESSIBLE_FLUIDS,
-    target_variables=TARGET_VARS_INCOMPRESSIBLE_FLUIDS,
-    stats=STATS_INCOMPRESSIBLE_FLUIDS,
-    signed=True,
-    names=VAR_NAMES_INCOMPRESSIBLE_FLUIDS,
+    coeff_group=None,
+    domain_t=(0, 1),
+    domain_x=(0, 1),
+    domain_y=(0, 1),
+    domain_z=(0, 1),
+    active_variables=ACTIVE_VARS_NS,
+    target_variables=TARGET_VARS_NS,
+    signed=SIGNED_NS,
+    names=NAMES_NS,
   ),
   # compressible_flow: [density, velocity, velocity, pressure, energy]
   'compressible_flow/cloudshock': Metadata(
     periodic=True,
     data_group='data',
-    source_group=None,
-    active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
-    target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
-    stats=STATS_COMPRESSIBLE_FLOW,
-    signed=[False, True, True, False, False],
-    names=VAR_NAMES_COMPRESSIBLE_FLOW,
+    coeff_group=None,
+    domain_t=(0, 1),
+    domain_x=(0, 1),
+    domain_y=(0, 1),
+    domain_z=(0, 1),
+    active_variables=ACTIVE_VARS_CE,
+    target_variables=TARGET_VARS_CE,
+    signed=SIGNED_CE,
+    names=NAMES_CE,
   ),
   'compressible_flow/gauss': Metadata(
     periodic=True,
     data_group='data',
-    source_group=None,
-    active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
-    target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
-    stats=STATS_COMPRESSIBLE_FLOW,
-    signed=[False, True, True, False, False],
-    names=VAR_NAMES_COMPRESSIBLE_FLOW,
+    coeff_group=None,
+    domain_t=(0, 1),
+    domain_x=(0, 1),
+    domain_y=(0, 1),
+    domain_z=(0, 1),
+    active_variables=ACTIVE_VARS_CE,
+    target_variables=TARGET_VARS_CE,
+    signed=SIGNED_CE,
+    names=NAMES_CE,
   ),
   'compressible_flow/kh': Metadata(
     periodic=True,
     data_group='data',
-    source_group=None,
-    active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
-    target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
-    stats=STATS_COMPRESSIBLE_FLOW,
-    signed=[False, True, True, False, False],
-    names=VAR_NAMES_COMPRESSIBLE_FLOW,
+    coeff_group=None,
+    domain_t=(0, 1),
+    domain_x=(0, 1),
+    domain_y=(0, 1),
+    domain_z=(0, 1),
+    active_variables=ACTIVE_VARS_CE,
+    target_variables=TARGET_VARS_CE,
+    signed=SIGNED_CE,
+    names=NAMES_CE,
   ),
   'compressible_flow/richtmyer_meshkov': Metadata(
     periodic=True,
     data_group='solution',
-    source_group=None,
-    active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
-    target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
-    stats=STATS_COMPRESSIBLE_FLOW,
-    signed=[False, True, True, False, False],
-    names=VAR_NAMES_COMPRESSIBLE_FLOW,
+    coeff_group=None,
+    domain_t=(0, 2),
+    domain_x=(0, 1),
+    domain_y=(0, 1),
+    domain_z=(0, 1),
+    active_variables=ACTIVE_VARS_CE,
+    target_variables=TARGET_VARS_CE,
+    signed=SIGNED_CE,
+    names=NAMES_CE,
   ),
   'compressible_flow/riemann': Metadata(
     periodic=True,
     data_group='data',
-    source_group=None,
-    active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
-    target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
-    stats=STATS_COMPRESSIBLE_FLOW,
-    signed=[False, True, True, False, False],
-    names=VAR_NAMES_COMPRESSIBLE_FLOW,
+    coeff_group=None,
+    domain_t=(0, 1),
+    domain_x=(0, 1),
+    domain_y=(0, 1),
+    domain_z=(0, 1),
+    active_variables=ACTIVE_VARS_CE,
+    target_variables=TARGET_VARS_CE,
+    signed=SIGNED_CE,
+    names=NAMES_CE,
   ),
   'compressible_flow/riemann_curved': Metadata(
     periodic=True,
     data_group='data',
-    source_group=None,
-    active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
-    target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
-    stats=STATS_COMPRESSIBLE_FLOW,
-    signed=[False, True, True, False, False],
-    names=VAR_NAMES_COMPRESSIBLE_FLOW,
+    coeff_group=None,
+    domain_t=(0, 1),
+    domain_x=(0, 1),
+    domain_y=(0, 1),
+    domain_z=(0, 1),
+    active_variables=ACTIVE_VARS_CE,
+    target_variables=TARGET_VARS_CE,
+    signed=SIGNED_CE,
+    names=NAMES_CE,
   ),
   'compressible_flow/riemann_kh': Metadata(
     periodic=True,
     data_group='data',
-    source_group=None,
-    active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
-    target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
-    stats=STATS_COMPRESSIBLE_FLOW,
-    signed=[False, True, True, False, False],
-    names=VAR_NAMES_COMPRESSIBLE_FLOW,
+    coeff_group=None,
+    domain_t=(0, 1),
+    domain_x=(0, 1),
+    domain_y=(0, 1),
+    domain_z=(0, 1),
+    active_variables=ACTIVE_VARS_CE,
+    target_variables=TARGET_VARS_CE,
+    signed=SIGNED_CE,
+    names=NAMES_CE,
   ),
   'compressible_flow/gravity/blast': Metadata(
     periodic=True,
     data_group='solution',
-    source_group=None,
-    # TODO: Where is the gravitational field?
-    active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW,
-    target_variables=TARGET_VARS_COMPRESSIBLE_FLOW,
-    stats=STATS_COMPRESSIBLE_FLOW,
-    signed=[False, True, True, False, False],
-    names=VAR_NAMES_COMPRESSIBLE_FLOW,
+    coeff_group=None,
+    domain_t=(0, 1),
+    domain_x=(0, 1),
+    domain_y=(0, 1),
+    domain_z=(0, 1),
+    # CHECK: Where is the gravitational field?
+    active_variables=ACTIVE_VARS_CE,
+    target_variables=TARGET_VARS_CE,
+    signed=SIGNED_CE,
+    names=NAMES_CE,
   ),
   'compressible_flow/gravity/rayleigh_taylor': Metadata(
     periodic=True,
     data_group='solution',
-    source_group=None,
-    active_variables=ACTIVE_VARS_COMPRESSIBLE_FLOW_GRAVITY,
-    target_variables=TARGET_VARS_COMPRESSIBLE_FLOW_GRAVITY,
-    stats=STATS_COMPRESSIBLE_FLOW,  # TODO: Update with the stats of the last variable
-    signed=[False, True, True, False, False, False],
-    names=VAR_NAMES_COMPRESSIBLE_FLOW_GRAVITY,
+    coeff_group=None,
+    domain_t=(0, 5),
+    domain_x=(0, 1),
+    domain_y=(0, 1),
+    domain_z=(0, 1),
+    active_variables=ACTIVE_VARS_GCE,
+    target_variables=TARGET_VARS_GCE,
+    signed=SIGNED_GCE,
+    names=NAMES_GCE,
   ),
   # reaction_diffusion
   'reaction_diffusion/allen_cahn': Metadata(
     periodic=False,
     data_group='solution',
-    source_group=None,
-    active_variables=[0],
-    target_variables=[0],
-    stats=STATS_REACTION_DIFFUSION,
-    signed=True,
-    names=['$u$'],
+    coeff_group=None,
+    domain_t=(0, 0.0002),
+    domain_x=(0, 1),
+    domain_y=(0, 1),
+    domain_z=(0, 1),
+    active_variables=ACTIVE_VARS_RD,
+    target_variables=TARGET_VARS_RD,
+    signed=SIGNED_RD,
+    names=NAMES_RD,
   ),
   # wave_equation
   'wave_equation/seismic_20step': Metadata(
     periodic=False,
     data_group='solution',
-    source_group='c',
-    active_variables=[0],
-    target_variables=[0],
-    stats=STATS_WAVE_EQUATION,
-    signed=[True, False],
-    names=['$u$', '$c$'],
+    coeff_group='c',
+    domain_t=(0, 1),
+    domain_x=(0, 1),
+    domain_y=(0, 1),
+    domain_z=(0, 1),
+    active_variables=ACTIVE_VARS_WE,
+    target_variables=TARGET_VARS_WE,
+    signed=SIGNED_WE,
+    names=NAMES_WE,
   ),
   'wave_equation/gaussians_15step': Metadata(
     periodic=False,
     data_group='solution',
-    source_group='c',
-    active_variables=[0],
-    target_variables=[0],
-    stats=STATS_WAVE_EQUATION,
-    signed=[True, False],
-    names=['$u$', '$c$'],
+    coeff_group='c',
+    domain_t=(0, 1),
+    domain_x=(0, 1),
+    domain_y=(0, 1),
+    domain_z=(0, 1),
+    active_variables=ACTIVE_VARS_WE,
+    target_variables=TARGET_VARS_WE,
+    signed=SIGNED_WE,
+    names=NAMES_WE,
   ),
 }
+
+@dataclass
+class Batch:
+  u: Array
+  c: Array
+  t: Array
+  x: Array
+  y: Array
+  z: Array
+
+  @property
+  def shape(self) -> tuple:
+    return self.u.shape
+
+  def unravel(self) -> tuple:
+    return (self.u, self.c, self.t, self.x, self.y, self.z)
+
+  def __len__(self) -> int:
+    return self.shape[0]
 
 class Dataset:
 
@@ -259,39 +332,50 @@ class Dataset:
     n_test: int = 0,
     preload: bool = False,
     include_passive_variables: bool = False,
+    concatenate_coeffs: bool = False,
+    time_cutoff_idx: int = None,
     time_downsample_factor: int = 1,
+    space_downsample_grid: bool = False,
     space_downsample_factor: int = 1,
-    cutoff: int = None,
   ):
 
     # Set attributes
-    if key is None:
-      key = jax.random.PRNGKey(0)
+    self.key = key or jax.random.PRNGKey(0)
     self.metadata = DATASET_METADATA[datapath]
+    self.preload = preload
+    self.concatenate_coeffs = concatenate_coeffs
+    self.time_cutoff_idx = time_cutoff_idx
+    self.time_downsample_factor = time_downsample_factor
+    self.space_downsample_grid = space_downsample_grid
+    self.space_downsample_factor = space_downsample_factor
+
+    # Modify metadata
+    if not include_passive_variables:
+      self.metadata.names['u'] = [self.metadata.names['u'][v] for v in self.metadata.active_variables]
+      self.metadata.signed['u'] = [self.metadata.signed['u'][v] for v in self.metadata.active_variables]
+    if self.concatenate_coeffs and self.metadata.coeff_group:
+      self.metadata.names['u'] += self.metadata.names['c']
+      self.metadata.signed['u'] += self.metadata.signed['c']
+
+    # Set data attributes
     self.data_group = self.metadata.data_group
-    self.source_group = self.metadata.source_group
+    self.coeff_group = self.metadata.coeff_group
     self.reader = h5py.File(Path(datadir) / f'{datapath}.nc', 'r')
     self.idx_vars = (None if include_passive_variables
       else self.metadata.active_variables)
-    self.preload = preload
     self.data = None
-    self.source = None
+    self.coeff = None
     self.length = ((n_train + n_valid + n_test) if self.preload
       else self.reader[self.data_group].shape[0])
-    self.cutoff = cutoff if (cutoff is not None) else (self._fetch(0, raw=True)[0].shape[1])
-    self.time_downsample_factor = time_downsample_factor
-    self.space_downsample_factor = space_downsample_factor
     self.sample = self._fetch(0)
     self.shape = self.sample.shape
-    if isinstance(self.metadata.signed, bool):
-      self.metadata.signed = [self.metadata.signed] * self.shape[-1]
 
     # Split the dataset
     assert (n_train + n_valid + n_test) <= self.length
     self.nums = {'train': n_train, 'valid': n_valid, 'test': n_test}
     self.idx_modes = {
       # First n_train samples
-      'train': jax.random.permutation(key, n_train),
+      'train': jax.random.permutation(self.key, n_train),
       # First n_valid samples after the training samples
       'valid': np.arange(n_train, (n_train + n_valid)),
       # Last n_test samples
@@ -303,37 +387,39 @@ class Dataset:
       'trj': {'mean': None, 'std': None},
       'der': {'mean': None, 'std': None},
       'res': {'mean': None, 'std': None},
-      'time': {'max': self.shape[1]},
+      'c': {'mean': None, 'std': None},
     }
 
+    # Load the data
     if self.preload:
       _len_dataset = self.reader[self.data_group].shape[0]
       train_data = self.reader[self.data_group][np.arange(n_train)]
       valid_data = self.reader[self.data_group][np.arange(n_train, (n_train + n_valid))]
       test_data = self.reader[self.data_group][np.arange((_len_dataset - n_test), (_len_dataset))]
       self.data = np.concatenate([train_data, valid_data, test_data], axis=0)
-      if self.source_group is not None:
-        train_source = self.reader[self.source_group][np.arange(n_train)]
-        valid_source = self.reader[self.source_group][np.arange(n_train, (n_train + n_valid))]
-        test_source = self.reader[self.source_group][np.arange((_len_dataset - n_test), (_len_dataset))]
-        self.source = np.concatenate([train_source, valid_source, test_source], axis=0)
+      if self.coeff_group is not None:
+        train_coeff = self.reader[self.coeff_group][np.arange(n_train)]
+        valid_coeff = self.reader[self.coeff_group][np.arange(n_train, (n_train + n_valid))]
+        test_coeff = self.reader[self.coeff_group][np.arange((_len_dataset - n_test), (_len_dataset))]
+        self.coeff = np.concatenate([train_coeff, valid_coeff, test_coeff], axis=0)
 
-  def compute_stats(self,
-      axes: Sequence[int] = (0,),
-      residual_steps: int = 0,
-    ) -> None:
+  def compute_stats(self, residual_steps: int = 0) -> None:
 
     # Check inputs
     assert residual_steps >= 0
     assert residual_steps < self.shape[1]
-    assert 1 in axes  # NOTE: Otherwise we cannot extrapolate in time
 
     # Get all trajectories
-    trj = self.train(np.arange(self.nums['train']))
+    batch = self.train(np.arange(self.nums['train']))
+    u = batch.u
+    c = batch.c
 
     # Compute statistics of the solutions
-    self.stats['trj']['mean'] = np.mean(trj, axis=axes, keepdims=True)
-    self.stats['trj']['std'] = np.std(trj, axis=axes, keepdims=True)
+    self.stats['trj']['mean'] = np.mean(u, axis=(0, 1, 2), keepdims=True)
+    self.stats['trj']['std'] = np.std(u, axis=(0, 1, 2), keepdims=True)
+    if c is not None:
+      self.stats['c']['mean'] = np.mean(c, axis=(0, 1, 2), keepdims=True)
+      self.stats['c']['std'] = np.std(c, axis=(0, 1, 2), keepdims=True)
 
     # Compute statistics of the residuals and time derivatives
     # TRY: Compute statistics of residuals of normalized trajectories
@@ -341,18 +427,17 @@ class Dataset:
     residuals = []
     derivatives = []
     for s in range(1, residual_steps+1):
-      res = _get_res(s, trj)
+      res = _get_res(s, u)
       residuals.append(res)
       derivatives.append(res / s)
     residuals = np.concatenate(residuals, axis=1)
     derivatives = np.concatenate(derivatives, axis=1)
+    self.stats['res']['mean'] = np.mean(residuals, axis=(0, 1, 2), keepdims=True)
+    self.stats['res']['std'] = np.std(residuals, axis=(0, 1, 2), keepdims=True)
+    self.stats['der']['mean'] = np.mean(derivatives, axis=(0, 1, 2), keepdims=True)
+    self.stats['der']['std'] = np.std(derivatives, axis=(0, 1, 2), keepdims=True)
 
-    self.stats['res']['mean'] = np.mean(residuals, axis=axes, keepdims=True)
-    self.stats['res']['std'] = np.std(residuals, axis=axes, keepdims=True)
-    self.stats['der']['mean'] = np.mean(derivatives, axis=axes, keepdims=True)
-    self.stats['der']['std'] = np.std(derivatives, axis=axes, keepdims=True)
-
-  def _fetch(self, idx: Union[int, Sequence], raw: bool = False):
+  def _fetch(self, idx: Union[int, Sequence]):
     """Fetches a sample from the dataset, given its global index."""
 
     # Check inputs
@@ -361,38 +446,102 @@ class Dataset:
 
     # Get trajectories
     if self.data is not None:
-      traj = self.data[np.sort(idx)]
+      u = self.data[np.sort(idx)]
     else:
-      traj = self.reader[self.data_group][np.sort(idx)]
+      u = self.reader[self.data_group][np.sort(idx)]
 
     # Move axes
-    if len(traj.shape) == 5:
-      traj = np.moveaxis(traj, source=(2, 3, 4), destination=(4, 2, 3))
-    elif len(traj.shape) == 4:
-      traj = np.expand_dims(traj, axis=-1)
+    if len(u.shape) == 5:  # NOTE: Multi-variable datasets
+      u = np.moveaxis(u, source=(2, 3, 4), destination=(4, 2, 3))
+    elif len(u.shape) == 4:  # NOTE: Single-variable datasets
+      u = np.expand_dims(u, axis=-1)
 
     # Select variables
     if self.idx_vars is not None:
-      traj = traj[..., self.idx_vars]
+      u = u[..., self.idx_vars]
 
-    # Concatenate with source
-    if self.source_group is not None:
-      # Get the source
-      if self.source is not None:
-        source = self.source[np.sort(idx)]
+    # Read coefficients
+    if self.coeff_group is not None:
+      # Get the coefficients
+      if self.coeff is not None:
+        c = self.coeff[np.sort(idx)]
       else:
-        source = self.reader[self.source_group][np.sort(idx)]
-      source = np.expand_dims(source, axis=(1, 4))
-      source = np.tile(source, reps=(1, traj.shape[1], 1, 1, 1))
-      traj = np.concatenate([traj, source], axis=-1)
+        c = self.reader[self.coeff_group][np.sort(idx)]
+      c = np.expand_dims(c, axis=(1, 4))
+      c = np.tile(c, reps=(1, u.shape[1], 1, 1, 1))
+    else:
+      c = None
 
-    # Downsample and cut the trajectories
-    if not raw:
-      traj = traj[:, ::self.time_downsample_factor]
-      traj = traj[:, :self.cutoff]
-      traj = traj[:, :, ::self.space_downsample_factor, ::self.space_downsample_factor]
+    # Downsample the spatial grid
+    if self.space_downsample_grid:
+      u = u[:, :, ::self.space_downsample_factor, ::self.space_downsample_factor]
+      if c is not None:
+        c = c[:, :, ::self.space_downsample_factor, ::self.space_downsample_factor]
 
-    return traj
+    # Define spatial coordinates
+    xv = np.linspace(*self.metadata.domain_x, u.shape[2], endpoint=(not self.metadata.periodic))
+    yv = np.linspace(*self.metadata.domain_y, u.shape[3], endpoint=(not self.metadata.periodic))
+    x, y = np.meshgrid(xv, yv)
+    # Align the dimensions
+    x = x.reshape(1, 1, -1, 1)
+    y = y.reshape(1, 1, -1, 1)
+    z = np.zeros(shape=(1, 1, (u.shape[2] * u.shape[3]), 1))
+    # Repeat along sample and time axes
+    x = np.tile(x, reps=(u.shape[0], u.shape[1], 1, 1))
+    y = np.tile(y, reps=(u.shape[0], u.shape[1], 1, 1))
+    z = np.tile(z, reps=(u.shape[0], u.shape[1], 1, 1))
+    # Flatten the trajectory
+    u = u.reshape(u.shape[0], u.shape[1], (u.shape[2] * u.shape[3]), -1)
+    if c is not None:
+      c = c.reshape(u.shape[0], u.shape[1], (u.shape[2] * u.shape[3]), -1)
+
+    # Define temporal coordinates
+    t = np.linspace(*self.metadata.domain_t, u.shape[1], endpoint=True)
+    t = t.reshape(1, -1, 1, 1)
+    # Repeat along sample trajectory
+    t = np.tile(t, reps=(u.shape[0], 1, 1, 1))
+
+    # Cut the time axis
+    if self.time_cutoff_idx:
+      u = u[:, :self.time_cutoff_idx]
+      if c is not None: c = c[:, :self.time_cutoff_idx]
+      t = t[:, :self.time_cutoff_idx]
+      x = x[:, :self.time_cutoff_idx]
+      y = y[:, :self.time_cutoff_idx]
+      z = z[:, :self.time_cutoff_idx]
+
+    # Downsample in the time axis
+    if self.time_downsample_factor > 1:
+      u = u[:, ::self.time_downsample_factor]
+      if c is not None: c = c[:, ::self.time_downsample_factor]
+      t = t[:, ::self.time_downsample_factor]
+      x = x[:, ::self.time_downsample_factor]
+      y = y[:, ::self.time_downsample_factor]
+      z = z[:, ::self.time_downsample_factor]
+
+    # Downsample the space coordinates randomly
+    if not self.space_downsample_grid:
+      for _s in range(u.shape[0]):
+        for _t in range(u.shape[1]):
+          self.key, subkey = jax.random.split(self.key)
+          if c is not None:
+            u[_s, _t], c[_s, _t], x[_s, _t], y[_s, _t], z[_s, _t] = shuffle_arrays(
+              key=subkey, arrays=[u[_s, _t], c[_s, _t], x[_s, _t], y[_s, _t], z[_s, _t]])
+          else:
+            u[_s, _t], x[_s, _t], y[_s, _t], z[_s, _t] = shuffle_arrays(
+              key=subkey, arrays=[u[_s, _t], x[_s, _t], y[_s, _t], z[_s, _t]])
+      size = int(u.shape[2] / (self.space_downsample_factor ** 2))
+      u, x, y, z = u[:, :, :size], x[:, :, :size], y[:, :, :size], z[:, :, :size]
+      if c is not None:
+        c = c[:, :, :size]
+
+    if self.concatenate_coeffs and (c is not None):
+      u = np.concatenate([u, c], axis=-1)
+      c = None
+
+    batch = Batch(u=u, c=c, t=t, x=x, y=y, z=z)
+
+    return batch
 
   def _fetch_mode(self, idx: Union[int, Sequence], mode: str):
     # Check inputs
