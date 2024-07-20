@@ -19,6 +19,8 @@ class Stepper(ABC):
       shift=stats['trj']['mean'],
       scale=stats['trj']['std'],
     )
+
+    # TMP TODO: Normalize c_inp and x_inp and x_out
     t_inp_nrm = t_inp / stats['time']['max']
     tau_nrm = tau / stats['time']['max']
 

@@ -1,4 +1,34 @@
+# Project Updates
+
+- Working on unstructured meshes by random sub-sampling of the regular grids
+
+- New version: accepts coefficients (c), input and output coordinates
+    - Possible to fix the coordinates to avoid building the graphs on each call
+
+- rmesh from pmesh:
+    1. Sub-sampling: mesh refinements are inherited
+    2. Regular grid: Can be combined with other architectures
+
+- r2p and p2r connections: just like before
+    - The sub-region diameters vary based on local concentration of the mesh
+    - Minimum diameters: based on triangulation to support the whole domain
+
+- multi-mesh r2r
+    1. Edges based on Delaunay triangulation of the *extended mesh*
+    2. Multiple mesh resolutions by random sub-sampling
+
 # NEXT STEPS
+
+- Verify the the architecture formulation
+
+- Extend for unstructured grids
+    - Take input at any point and give output at any point
+    - Build the graphs and edges on the fly based on the input (MeshGraph convolution layer)
+
+- Extend for time-independent problems
+
+- wave_equation: do not learn identity map for propagation speed
+    - Allows you use residual/derivative stepping
 
 # Future work
 
@@ -30,6 +60,8 @@
         and even the self-induced rollout noises are damped (check rollout errors
         with high tau_max). Investigate if this is particular to our architecture.
 
+- Does it really outperform FNO on 1D problems?
+
 ## Architectural Experiments
 
 - experiment with num_processor_repetitions !!
@@ -60,19 +92,10 @@
     - Inference time (improve your benchmarking)
 
 ## Known parameters
-- wave_equation: do not learn identity map for propagation speed
-- Allows you use residual/derivative stepping
-
-## Unstructured Meshes
-- Extend for unstructured grids
-    - Take input at any point and give output at any point
-    - Build the graphs and edges on the fly based on the input (MeshGraph convolution layer)
-
-## Time-independent problems
-- Extend for time-independent problems
 
 ## General Boundary Conditions
-- Extend for other boundary conditions (e.g., open, Robin)
+- Extend for general boundary conditions (e.g., open, Robin)
+- Impose Dirichlet boundary conditions differently
 
 ## Multi-level RIGNO:
 - Make the encoder and decoder modular

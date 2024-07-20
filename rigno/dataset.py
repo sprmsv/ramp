@@ -308,15 +308,13 @@ class Batch:
   c: Array
   t: Array
   x: Array
-  y: Array
-  z: Array
 
   @property
   def shape(self) -> tuple:
     return self.u.shape
 
   def unravel(self) -> tuple:
-    return (self.u, self.c, self.t, self.x, self.y, self.z)
+    return (self.u, self.c, self.t, self.x)
 
   def __len__(self) -> int:
     return self.shape[0]
@@ -369,6 +367,11 @@ class Dataset:
       else self.reader[self.data_group].shape[0])
     self.sample = self._fetch(0)
     self.shape = self.sample.shape
+
+    # Check sample dimensions
+    for arr in self.sample.unravel():
+      if arr is not None:
+        assert arr.ndim == 4
 
     # Split the dataset
     assert (n_train + n_valid + n_test) <= self.length
@@ -479,17 +482,16 @@ class Dataset:
         c = c[:, :, ::self.space_downsample_factor, ::self.space_downsample_factor]
 
     # Define spatial coordinates
-    xv = np.linspace(*self.metadata.domain_x, u.shape[2], endpoint=(not self.metadata.periodic))
-    yv = np.linspace(*self.metadata.domain_y, u.shape[3], endpoint=(not self.metadata.periodic))
-    x, y = np.meshgrid(xv, yv)
+    _xv = np.linspace(*self.metadata.domain_x, u.shape[2], endpoint=(not self.metadata.periodic))
+    _yv = np.linspace(*self.metadata.domain_y, u.shape[3], endpoint=(not self.metadata.periodic))
+    _x, _y = np.meshgrid(_xv, _yv)
     # Align the dimensions
-    x = x.reshape(1, 1, -1, 1)
-    y = y.reshape(1, 1, -1, 1)
-    z = np.zeros(shape=(1, 1, (u.shape[2] * u.shape[3]), 1))
+    _x = _x.reshape(1, 1, -1, 1)
+    _y = _y.reshape(1, 1, -1, 1)
+    # Concatenate the coordinates
+    x = np.concatenate([_x, _y], axis=3)
     # Repeat along sample and time axes
     x = np.tile(x, reps=(u.shape[0], u.shape[1], 1, 1))
-    y = np.tile(y, reps=(u.shape[0], u.shape[1], 1, 1))
-    z = np.tile(z, reps=(u.shape[0], u.shape[1], 1, 1))
     # Flatten the trajectory
     u = u.reshape(u.shape[0], u.shape[1], (u.shape[2] * u.shape[3]), -1)
     if c is not None:
@@ -507,8 +509,6 @@ class Dataset:
       if c is not None: c = c[:, :self.time_cutoff_idx]
       t = t[:, :self.time_cutoff_idx]
       x = x[:, :self.time_cutoff_idx]
-      y = y[:, :self.time_cutoff_idx]
-      z = z[:, :self.time_cutoff_idx]
 
     # Downsample in the time axis
     if self.time_downsample_factor > 1:
@@ -516,8 +516,6 @@ class Dataset:
       if c is not None: c = c[:, ::self.time_downsample_factor]
       t = t[:, ::self.time_downsample_factor]
       x = x[:, ::self.time_downsample_factor]
-      y = y[:, ::self.time_downsample_factor]
-      z = z[:, ::self.time_downsample_factor]
 
     # Downsample the space coordinates randomly
     if not self.space_downsample_grid:
@@ -525,21 +523,21 @@ class Dataset:
         for _t in range(u.shape[1]):
           self.key, subkey = jax.random.split(self.key)
           if c is not None:
-            u[_s, _t], c[_s, _t], x[_s, _t], y[_s, _t], z[_s, _t] = shuffle_arrays(
-              key=subkey, arrays=[u[_s, _t], c[_s, _t], x[_s, _t], y[_s, _t], z[_s, _t]])
+            u[_s, _t], c[_s, _t], x[_s, _t] = shuffle_arrays(
+              key=subkey, arrays=[u[_s, _t], c[_s, _t], x[_s, _t]])
           else:
-            u[_s, _t], x[_s, _t], y[_s, _t], z[_s, _t] = shuffle_arrays(
-              key=subkey, arrays=[u[_s, _t], x[_s, _t], y[_s, _t], z[_s, _t]])
+            u[_s, _t], x[_s, _t] = shuffle_arrays(
+              key=subkey, arrays=[u[_s, _t], x[_s, _t]])
       size = int(u.shape[2] / (self.space_downsample_factor ** 2))
-      u, x, y, z = u[:, :, :size], x[:, :, :size], y[:, :, :size], z[:, :, :size]
-      if c is not None:
-        c = c[:, :, :size]
+      u = u[:, :, :size]
+      c = c[:, :, :size] if (c is not None) else None
+      x = x[:, :, :size]
 
     if self.concatenate_coeffs and (c is not None):
       u = np.concatenate([u, c], axis=-1)
       c = None
 
-    batch = Batch(u=u, c=c, t=t, x=x, y=y, z=z)
+    batch = Batch(u=u, c=c, t=t, x=x)
 
     return batch
 
