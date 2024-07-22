@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Tuple, Union, Mapping
 
 import flax.typing
@@ -15,8 +16,14 @@ from rigno.models.operator import AbstractOperator
 from rigno.utils import Array, shuffle_arrays
 
 
-# TMP TODO: USE THIS FOR BUILDING THE GRAPHS
+@dataclass
 class RegionInteractionGraphs:
+  p2r: TypedGraph
+  r2r: TypedGraph
+  r2p: TypedGraph
+
+# TMP TODO: USE THIS FOR BUILDING THE GRAPHS
+class RegionInteractionGraphBuilder:
 
   def __init__(self,
     periodic: bool,
@@ -240,7 +247,7 @@ class RegionInteractionGraphs:
       x_rec=x_rmesh,
       idx_sen=[i for (i, j) in edges],
       idx_rec=[j for (i, j) in edges],
-      max_edge_length=(2. * jnp.sqrt(x_inp.shape[1])),
+      max_edge_length=(2. * jnp.sqrt(x_rmesh.shape[1])),
       shifts=jnp.array(self._domain_shifts).squeeze(1),
       domain_sen=[i for (i, j) in domains],
       domain_rec=[j for (i, j) in domains],
@@ -286,7 +293,7 @@ class RegionInteractionGraphs:
 
     return graph
 
-  def build(self, x_inp: Array, x_out: Array, key):
+  def build(self, x_inp: Array, x_out: Array, key: Union[flax.typing.PRNGKey, None]) -> RegionInteractionGraphs:
 
     # Randomly sub-sample pmesh to get rmesh
     if key is None:
@@ -309,9 +316,13 @@ class RegionInteractionGraphs:
     r_min = self._compute_minimum_support_radii(x_rmesh)
 
     # Build the graphs
-    self.p2r: TypedGraph = self._build_p2r_graph(x_inp, x_rmesh, r_min)
-    self.r2r: TypedGraph = self._build_r2r_graph(x_rmesh)
-    self.r2p: TypedGraph = self._build_r2p_graph(x_out, x_rmesh, r_min)
+    graphs = RegionInteractionGraphs(
+      p2r=self._build_p2r_graph(x_inp, x_rmesh, r_min),
+      r2r=self._build_r2r_graph(x_rmesh),
+      r2p=self._build_r2p_graph(x_out, x_rmesh, r_min),
+    )
+
+    return graphs
 
 class Encoder(nn.Module):
   node_latent_size: Mapping[str, int]
@@ -345,7 +356,7 @@ class Encoder(nn.Module):
     graph: TypedGraph,
     pnode_features: Array,
     tau: float,
-    key: flax.typing.PRNGKey = None,
+    key: Union[flax.typing.PRNGKey, None] = None,
   ) -> tuple[Array, Array]:
     """Runs the p2r GNN, extracting latent physical and regional nodes."""
 
@@ -452,7 +463,7 @@ class Processor(nn.Module):
     graph: TypedGraph,
     rnode_features: Array,
     tau: float,
-    key: flax.typing.PRNGKey = None,
+    key: Union[flax.typing.PRNGKey, None] = None,
   ) -> Array:
     """Runs the r2r GNN, extracting updated latent regional nodes."""
 
@@ -514,7 +525,7 @@ class Processor(nn.Module):
     return output_rnodes
 
 class Decoder(nn.Module):
-  variable_mesh: bool = False
+  variable_mesh: bool
   num_outputs: int
   node_latent_size: Mapping[str, int]
   edge_latent_size: Mapping[str, int]
@@ -552,7 +563,7 @@ class Decoder(nn.Module):
     rnode_features: Array,
     pnode_features: Array,
     tau: float,
-    key: flax.typing.PRNGKey = None,
+    key: Union[flax.typing.PRNGKey, None] = None,
   ) -> Array:
     """Runs the r2p GNN, extracting the output physical nodes."""
 
@@ -659,12 +670,6 @@ class RIGNO(AbstractOperator):
     # NOTE: Check usages of this attribute
     self.variable_mesh = False
 
-    if self.x is not None:
-      self._check_coordinates(x=self.x)
-      self.graphs = self._init_graphs(key=None, x_inp=self.x, x_out=self.x)
-    else:
-      self.graphs = None
-
     self.encoder = Encoder(
       edge_latent_size=dict(p2r=self.edge_latent_size),
       node_latent_size=dict(rnodes=self.node_latent_size, pnodes=self.node_latent_size),
@@ -748,29 +753,17 @@ class RIGNO(AbstractOperator):
 
   def call(self,
     u_inp: Array,
-    c_inp: Array = None,
-    x_inp: Array = None,
-    x_out: Array = None,
-    t_inp: Array = None,  # TMP: Support None
-    tau: Union[float, int] = None,  # TMP: Support None
+    c_inp: Union[Array, None],
+    x_inp: Array,
+    x_out: Array,
+    t_inp: Union[Array, None],  # TMP: Support None
+    tau: Union[float, int, None],  # TMP: Support None
+    graphs: RegionInteractionGraphs,
     key: flax.typing.PRNGKey = None,
   ) -> Array:
     """
     Inputs must be of shape (batch_size, 1, num_physical_nodes, num_inputs)
     """
-
-    # Check input and output coordinates
-    if self.x is not None:
-      assert x_inp is None
-      assert x_out is None
-      x_inp = self.x
-      x_out = self.x
-      graphs = self.graphs
-    else:
-      self._check_coordinates(x_inp)
-      self._check_coordinates(x_out)
-      subkey, key = jax.random.split(key) if (key is not None) else (None, None)
-      graphs = self._init_graphs(key=subkey, x_inp=x_inp, x_out=x_out)
 
     # Check input functions
     self._check_function(u_inp, x=x_inp)
@@ -809,13 +802,10 @@ class RIGNO(AbstractOperator):
     # Concatente with forced features
     pnode_features_forced = []
     if self.concatenate_tau:
-      pnode_features_forced.append(
-        jnp.tile(tau, reps=(num_pnodes_inp, 1, 1)))
+      pnode_features_forced.append(jnp.tile(tau, reps=(num_pnodes_inp, 1, 1)))
     if self.concatenate_t:
-      pnode_features_forced.append(
-        jnp.tile(t_inp, reps=(num_pnodes_inp, 1, 1)))
-    pnode_features = jnp.concatenate(
-      [pnode_features, *pnode_features_forced], axis=-1)
+      pnode_features_forced.append(jnp.tile(t_inp, reps=(num_pnodes_inp, 1, 1)))
+    pnode_features = jnp.concatenate([pnode_features, *pnode_features_forced], axis=-1)
 
     # Run the GNNs
     subkey, key = jax.random.split(key) if (key is not None) else (None, None)
@@ -825,6 +815,7 @@ class RIGNO(AbstractOperator):
     # Reshape the output to [batch_size, 1, num_pnodes_out, num_outputs]
     # [num_pnodes_out, batch_size, num_outputs] -> u
     output = self._reorder_features(output_pnodes, num_pnodes_out)
+    self._check_function(output, x=x_out)
 
     return output
 
