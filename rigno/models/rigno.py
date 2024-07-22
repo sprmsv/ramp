@@ -20,6 +20,9 @@ class AbstractOperator(nn.Module):
 
   def __call__(self,
     u_inp: Array,
+    c_inp: Array = None,
+    x_inp: Array = None,
+    x_out: Array = None,
     t_inp: Array = None,
     tau: Union[float, int] = None,
     key: flax.typing.PRNGKey = None,
@@ -36,32 +39,28 @@ class AbstractOperator(nn.Module):
 
 class RIGNO(AbstractOperator):
   """TODO: Add docstrings"""
-  # NOTE: Only fixed dx is supported for now
 
   num_outputs: int
   periodic: bool = True
-  concatenate_t: bool = True
-  concatenate_tau: bool = True
-  conditional_normalization: bool = False
-  conditional_norm_latent_size: int = 16
+  variable_mesh: bool = False  # TODO: Remove
+  x_pmesh: Array = None
+  rmesh_levels: int = 1
+  subsample_factor: float = 2
+  overlap_factor_p2r: int = 2.0
+  overlap_factor_r2p: int = 2.0
+  mlp_hidden_layers: int = 1
   node_latent_size: int = 128
   edge_latent_size: int = 128
-  num_mlp_hidden_layers: int = 2
   mlp_hidden_size: int = 128
-  num_message_passing_steps: int = 18
-  num_message_passing_steps_grid: int = 2
-  node_coordinate_freqs: int = 1
-  p_dropout_edges_grid2mesh: int = 0.
-  p_dropout_edges_multimesh: int = 0.
-  p_dropout_edges_mesh2grid: int = 0.
-
-  # TMP
-  fixed_mesh: bool = False
-  x_pmesh: Array = None
-  rmesh_subsample_factor: float = 2
-  rmesh_levels: int = 1
-  overlap_factor_p2r: int = 1.0
-  overlap_factor_r2p: int = 1.0
+  processor_steps: int = 18
+  concatenate_t: bool = True
+  concatenate_tau: bool = True
+  conditional_normalization: bool = True
+  conditional_norm_latent_size: int = 16
+  node_coordinate_freqs: int = 4
+  p_dropout_edges_p2r: int = 0.5
+  p_dropout_edges_r2r: int = 0.5
+  p_dropout_edges_r2p: int = 0.5
 
   def _check_coordinates(self, x: Array) -> None:
     assert x is not None
@@ -69,6 +68,12 @@ class RIGNO(AbstractOperator):
     assert x.shape[1] <= 3
     assert x.min() >= -1
     assert x.max() <= +1
+
+  def _check_function(self, u: Array, x: Array) -> None:
+    assert u is not None
+    assert u.ndim == 4
+    assert u.shape[1] == 1
+    assert u.shape[2] == x.shape[0]
 
   def _get_supported_points(self,
     centers: np.ndarray,
@@ -78,7 +83,7 @@ class RIGNO(AbstractOperator):
   ) -> np.ndarray:
     """ord_distance can be 1, 2, or np.inf"""
 
-    assert all(radii[1] < 1.0)
+    assert np.all(radii < 1.0)
 
     # Get relative coordinates
     rel = points[:, None] - centers
@@ -149,7 +154,7 @@ class RIGNO(AbstractOperator):
     assert np.all(np.abs(z_ij) <= 2.)
     if self.periodic:
       # NOTE: For p2r and r2p, mirror the large relative coordinates
-      # TODO: Unify the mirroring with the below method in r2r
+      # MODIFY: Unify the mirroring with the below method in r2r
       if shifts is None:
         z_ij = np.where(z_ij < -1.0, z_ij + 2, z_ij)
         z_ij = np.where(z_ij >= 1.0, z_ij - 2, z_ij)
@@ -179,13 +184,12 @@ class RIGNO(AbstractOperator):
 
     return edge_set, sender_node_set, receiver_node_set
 
-  def _init_graphs(self, key, x_pmesh: Array):
-    # TMP TODO: re-use the function in __call__
+  def _init_graphs(self, key, x_pmesh_inp: Array, x_pmesh_out: Array) -> dict[str, TypedGraph]:
 
     # Randomly sub-sample pmesh to get rmesh
     if key is None:
       key = jax.random.PRNGKey(0)
-    x_rmesh = self._subsample_pointset(key=key, x=x_pmesh, factor=self.rmesh_subsample_factor)
+    x_rmesh = _subsample_pointset(key=key, x=x_pmesh_inp, factor=self.subsample_factor)
 
     # Domain shifts for periodic BC
     _domain_shifts = [
@@ -230,22 +234,25 @@ class RIGNO(AbstractOperator):
 
       return radii
 
+    # Compute minimum support radius of each rmesh node
+    minimum_radius = _compute_minimum_support_radii(x_rmesh)
+
     def _init_p2r_graph() -> TypedGraph:
       """Constructrs the encoder graph (pmesh to rmesh)"""
 
       # Set the sub-region radii
-      radius = self.overlap_factor_p2r * _compute_minimum_support_radii(x_rmesh)
+      radius = self.overlap_factor_p2r * minimum_radius
 
       # Get indices of supported points
       idx_nodes = self._get_supported_points(
-        center=x_rmesh,
-        points=x_pmesh,
+        centers=x_rmesh,
+        points=x_pmesh_inp,
         radii=radius,
       )
 
       # Get the initial features
       edge_set, pmesh_node_set, rmesh_node_set = self._init_structural_features(
-        x_sen=x_pmesh,
+        x_sen=x_pmesh_inp,
         x_rec=x_rmesh,
         idx_sen=idx_nodes[:, 0],
         idx_rec=idx_nodes[:, 1],
@@ -256,8 +263,8 @@ class RIGNO(AbstractOperator):
       # Construct the graph
       graph = TypedGraph(
         context=Context(n_graph=jnp.array([1]), features=()),
-        nodes={'pmesh_nodes': pmesh_node_set, 'rmesh_nodes': rmesh_node_set},
-        edges={EdgeSetKey('p2r', ('pmesh_nodes', 'rmesh_nodes')): edge_set},
+        nodes={'pnodes': pmesh_node_set, 'rnodes': rmesh_node_set},
+        edges={EdgeSetKey('p2r', ('pnodes', 'rnodes')): edge_set},
       )
 
       return graph
@@ -270,7 +277,7 @@ class RIGNO(AbstractOperator):
       domains = []
       for level in range(self.rmesh_levels):
         # Sub-sample the rmesh
-        _rmesh_size = int(x_rmesh.shape[0] / (self.rmesh_subsample_factor ** level))
+        _rmesh_size = int(x_rmesh.shape[0] / (self.subsample_factor ** level))
         _x_rmesh = x_rmesh[:_rmesh_size]
         if self.periodic:
           # Repeat the rmesh in periodic directions
@@ -297,8 +304,8 @@ class RIGNO(AbstractOperator):
         idx_sen=[i for (i, j) in edges],
         idx_rec=[j for (i, j) in edges],
         node_freqs=self.node_coordinate_freqs,
-        max_edge_length=(2. * np.sqrt(x_pmesh.shape[1])),
-        shifts=_domain_shifts,
+        max_edge_length=(2. * np.sqrt(x_pmesh_inp.shape[1])),
+        shifts=jnp.array(_domain_shifts).squeeze(1),
         domain_sen=[i for (i, j) in domains],
         domain_rec=[j for (i, j) in domains],
       )
@@ -306,8 +313,8 @@ class RIGNO(AbstractOperator):
       # Construct the graph
       graph = TypedGraph(
         context=Context(n_graph=jnp.array([1]), features=()),
-        nodes={'rmesh_nodes': rmesh_node_set},
-        edges={EdgeSetKey('mesh', ('rmesh_nodes', 'rmesh_nodes')): edge_set},
+        nodes={'rnodes': rmesh_node_set},
+        edges={EdgeSetKey('r2r', ('rnodes', 'rnodes')): edge_set},
       )
 
       return graph
@@ -316,19 +323,19 @@ class RIGNO(AbstractOperator):
       """Constructrs the decoder graph (rmesh to pmesh)"""
 
       # Set the sub-region radii
-      radius = self.overlap_factor_r2p * _compute_minimum_support_radii(x_rmesh)
+      radius = self.overlap_factor_r2p * minimum_radius
 
       # Get indices of supported points
       idx_nodes = self._get_supported_points(
-        center=x_rmesh,
-        points=x_pmesh,
+        centers=x_rmesh,
+        points=x_pmesh_out,
         radii=radius,
       )
 
       # Get the initial features
       edge_set, rmesh_node_set, pmesh_node_set = self._init_structural_features(
         x_sen=x_rmesh,
-        x_rec=x_pmesh,
+        x_rec=x_pmesh_out,
         idx_sen=idx_nodes[:, 1],
         idx_rec=idx_nodes[:, 0],
         node_freqs=self.node_coordinate_freqs,
@@ -338,8 +345,8 @@ class RIGNO(AbstractOperator):
       # Construct the graph
       graph = TypedGraph(
         context=Context(n_graph=jnp.array([1]), features=()),
-        nodes={'pmesh_nodes': pmesh_node_set, 'rmesh_nodes': rmesh_node_set},
-        edges={EdgeSetKey('r2p', ('rmesh_nodes', 'pmesh_nodes')): edge_set},
+        nodes={'pnodes': pmesh_node_set, 'rnodes': rmesh_node_set},
+        edges={EdgeSetKey('r2p', ('rnodes', 'pnodes')): edge_set},
       )
 
       return graph
@@ -356,12 +363,12 @@ class RIGNO(AbstractOperator):
 
     # Define the encoder
     self._p2r_gnn = DeepTypedGraphNet(
-      embed_nodes=True,  # Embed raw features of the grid and mesh nodes.
-      embed_edges=True,  # Embed raw features of the grid2mesh edges.
-      edge_latent_size=dict(grid2mesh=self.edge_latent_size),
-      node_latent_size=dict(mesh_nodes=self.node_latent_size, grid_nodes=self.node_latent_size),
+      embed_nodes=True,  # Embed raw features of the physical and the regional meshes
+      embed_edges=True,  # Embed raw features of the p2r edges.
+      edge_latent_size=dict(p2r=self.edge_latent_size),
+      node_latent_size=dict(rnodes=self.node_latent_size, pnodes=self.node_latent_size),
       mlp_hidden_size=self.mlp_hidden_size,
-      mlp_num_hidden_layers=self.num_mlp_hidden_layers,
+      mlp_num_hidden_layers=self.mlp_hidden_layers,
       num_message_passing_steps=1,
       use_layer_norm=True,
       conditional_normalization=self.conditional_normalization,
@@ -371,18 +378,18 @@ class RIGNO(AbstractOperator):
       f32_aggregation=True,
       aggregate_edges_for_nodes_fn='segment_mean',
       aggregate_normalization=None,
-      name='grid2mesh_gnn',
+      name='p2r_gnn',
     )
 
     # Define the processor
     self._r2r_gnn = DeepTypedGraphNet(
       embed_nodes=False,  # Node features already embdded by previous layers.
       embed_edges=True,  # Embed raw features of the multi-mesh edges.
-      edge_latent_size=dict(mesh=self.edge_latent_size),
-      node_latent_size=dict(mesh_nodes=self.node_latent_size),
+      edge_latent_size=dict(r2r=self.edge_latent_size),
+      node_latent_size=dict(rnodes=self.node_latent_size),
       mlp_hidden_size=self.mlp_hidden_size,
-      mlp_num_hidden_layers=self.num_mlp_hidden_layers,
-      num_message_passing_steps=self.num_message_passing_steps,
+      mlp_num_hidden_layers=self.mlp_hidden_layers,
+      num_message_passing_steps=self.processor_steps,
       use_layer_norm=True,
       conditional_normalization=self.conditional_normalization,
       conditional_norm_latent_size=self.conditional_norm_latent_size,
@@ -391,17 +398,18 @@ class RIGNO(AbstractOperator):
       f32_aggregation=False,
       # NOTE: segment_mean because number of edges is not balanced
       aggregate_edges_for_nodes_fn='segment_mean',
-      name='mesh_gnn',
+      name='r2r_gnn',
     )
 
     # Define step 1 of the decoder
     self._r2p_gnn = DeepTypedGraphNet(
-      embed_nodes=False,  # Node features already embdded by previous layers.
-      embed_edges=True,  # Embed raw features of the mesh2grid edges.
-      edge_latent_size=dict(mesh2grid=self.edge_latent_size),
-      node_latent_size=dict(mesh_nodes=self.node_latent_size, grid_nodes=self.node_latent_size),
+      # TMP TODO: Unify embed_nodes in both options !!! First make sure that it works fine
+      embed_nodes=self.variable_mesh,  # Output pnode features are not embedded.
+      embed_edges=True,  # Embed raw features of the r2p edges.
+      edge_latent_size=dict(r2p=self.edge_latent_size),
+      node_latent_size=dict(rnodes=self.node_latent_size, pnodes=self.node_latent_size),
       mlp_hidden_size=self.mlp_hidden_size,
-      mlp_num_hidden_layers=self.num_mlp_hidden_layers,
+      mlp_num_hidden_layers=self.mlp_hidden_layers,
       num_message_passing_steps=1,
       use_layer_norm=True,
       conditional_normalization=self.conditional_normalization,
@@ -411,370 +419,360 @@ class RIGNO(AbstractOperator):
       f32_aggregation=False,
       # NOTE: segment_mean because number of edges is not balanced
       aggregate_edges_for_nodes_fn='segment_mean',
-      name='mesh2grid_gnn',
+      name='r2p_gnn',
     )
 
   def setup(self):
 
-    if self.fixed_mesh:
-      self._check_coordinates(self.x_pmesh)
-      self.graphs = self._init_graphs(key=None, x_pmesh=self.x_pmesh)
+    if self.x_pmesh is not None:
+      self._check_coordinates(x=self.x_pmesh)
+      self.graphs = self._init_graphs(key=None, x_pmesh_inp=self.x_pmesh, x_pmesh_out=self.x_pmesh)
     else:
       self.graphs = None
 
     self._init_gnns()
 
-  def features2grid(feats, num_nodes) -> Array:
+  @staticmethod
+  def _reorder_features(feats: Array, num_nodes: int) -> Array:
     batch_size = feats.shape[1]
     num_feats = feats.shape[-1]
-    output = jnp.moveaxis(
-      feats.reshape(
-        num_nodes[0], num_nodes[1], batch_size, 1, num_feats
-      ),
-      source=(0, 1, 2, 3),
-      destination=(2, 3, 0, 1),
-    )
+    feats = feats.reshape(num_nodes, batch_size, 1, num_feats)
+    output = jnp.moveaxis(feats, source=(0, 1, 2), destination=(2, 0, 1))
     return output
 
-  def _run_grid2mesh_gnn(self,
-    grid_node_features: jnp.ndarray,
-    tau: float,
-    key: flax.typing.PRNGKey = None,
-  ) -> tuple[jnp.ndarray, jnp.ndarray]:
-    """Runs the grid2mesh_gnn, extracting latent mesh and grid nodes."""
-
-    bsz = grid_node_features.shape[1]
-    grid2mesh_graph = self._p2r_graph
-
-    # Concatenate node structural features with input features
-    grid_nodes = grid2mesh_graph.nodes['pmesh_nodes']
-    mesh_nodes = grid2mesh_graph.nodes['rmesh_nodes']
-    new_grid_nodes = grid_nodes._replace(
-      features=jnp.concatenate([
-        grid_node_features,
-        _add_batch_second_axis(
-          grid_nodes.features.astype(grid_node_features.dtype), bsz)
-      ], axis=-1)
-    )
-    # To make sure capacity of the embedded is identical for the grid nodes and
-    # the mesh nodes, we also append some dummy zero input features for the
-    # mesh nodes.
-    dummy_mesh_node_features = jnp.zeros(
-        (self._num_mesh_nodes_tot,) + grid_node_features.shape[1:],
-        dtype=grid_node_features.dtype)
-    new_mesh_nodes = mesh_nodes._replace(
-      features=jnp.concatenate([
-        dummy_mesh_node_features,
-        _add_batch_second_axis(
-          mesh_nodes.features.astype(dummy_mesh_node_features.dtype), bsz)
-      ], axis=-1)
-    )
-
-    # Get edges
-    grid2mesh_edges_key = grid2mesh_graph.edge_key_by_name('p2r')
-    edges = grid2mesh_graph.edges[grid2mesh_edges_key]
-    # Drop out edges randomly with the given probability
-    if key is not None:
-      n_edges_after = int((1 - self.p_dropout_edges_grid2mesh) * edges.features.shape[0])
-      [new_edge_features, new_edge_senders, new_edge_receivers] = shuffle_arrays(
-        key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers])
-      new_edge_features = new_edge_features[:n_edges_after]
-      new_edge_senders = new_edge_senders[:n_edges_after]
-      new_edge_receivers = new_edge_receivers[:n_edges_after]
-    else:
-      n_edges_after = edges.features.shape[0]
-      new_edge_features = edges.features
-      new_edge_senders = edges.indices.senders
-      new_edge_receivers = edges.indices.receivers
-    # Change edge feature dtype
-    new_edge_features = new_edge_features.astype(dummy_mesh_node_features.dtype)
-    # Broadcast edge structural features to the required batch size
-    new_edge_features = _add_batch_second_axis(new_edge_features, bsz)
-    # Build new edge set
-    new_edges = EdgeSet(
-      n_edge=jnp.array([n_edges_after]),
-      indices=EdgesIndices(
-        senders=new_edge_senders,
-        receivers=new_edge_receivers,
-      ),
-      features=new_edge_features,
-    )
-
-    input_graph = grid2mesh_graph._replace(
-      edges={grid2mesh_edges_key: new_edges},
-      nodes={
-        'pmesh_nodes': new_grid_nodes,
-        'rmesh_nodes': new_mesh_nodes
-      })
-
-    # Run the GNN.
-    grid2mesh_out = self._p2r_gnn(input_graph, condition=tau)
-    latent_mesh_nodes = grid2mesh_out.nodes['rmesh_nodes'].features
-    latent_grid_nodes = grid2mesh_out.nodes['pmesh_nodes'].features
-
-    return latent_mesh_nodes, latent_grid_nodes
-
-  def _run_mesh_gnn(self,
-    latent_mesh_nodes: Array,
+  def _run_gnns(self,
+    graphs: dict[str, TypedGraph],
+    pnode_features: Array,
     tau: float,
     key: flax.typing.PRNGKey = None,
   ) -> Array:
-    """Runs the mesh_gnn, extracting updated latent mesh nodes."""
 
-    bsz = latent_mesh_nodes.shape[1]
-    mesh_graph = self._r2r_graph
+    def _run_p2r_gnn(
+      p2r_graph: TypedGraph,
+      pnode_features: Array,
+      tau: float,
+      key: flax.typing.PRNGKey = None,
+    ) -> tuple[Array, Array]:
+      """Runs the p2r GNN, extracting latent physical and regional nodes."""
 
-    # Replace the node features
-    # NOTE: We don't need to add the structural node features, because these are
-    # already part of  the latent state, via the original Grid2Mesh gnn.
-    mesh_nodes = mesh_graph.nodes['rmesh_nodes']
-    new_mesh_nodes = mesh_nodes._replace(features=latent_mesh_nodes)
+      # Get batch size
+      batch_size = pnode_features.shape[1]
 
-    # Get edges
-    mesh_edges_key = mesh_graph.edge_key_by_name('mesh')
-    # NOTE: We are assuming here that the mesh gnn uses a single set of edge keys
-    # named 'mesh' for the edges and that it uses a single set of nodes named 'rmesh_nodes'
-    msg = ('The setup currently requires to only have one kind of edge in the mesh GNN.')
-    assert len(mesh_graph.edges) == 1, msg
-    edges = mesh_graph.edges[mesh_edges_key]
-    # Drop out edges randomly with the given probability
-    # NOTE: We need the structural edge features, because it is the first
-    # time we are seeing this particular set of edges.
-    if key is not None:
-      n_edges_after = int((1 - self.p_dropout_edges_multimesh) * edges.features.shape[0])
-      [new_edge_features, new_edge_senders, new_edge_receivers] = shuffle_arrays(
-        key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers])
-      new_edge_features = new_edge_features[:n_edges_after]
-      new_edge_senders = new_edge_senders[:n_edges_after]
-      new_edge_receivers = new_edge_receivers[:n_edges_after]
-    else:
-      n_edges_after = edges.features.shape[0]
-      new_edge_features = edges.features
-      new_edge_senders = edges.indices.senders
-      new_edge_receivers = edges.indices.receivers
-    # Change edge feature dtype
-    new_edge_features = new_edge_features.astype(latent_mesh_nodes.dtype)
-    # Broadcast edge structural features to the required batch size
-    new_edge_features = _add_batch_second_axis(new_edge_features, bsz)
-    # Build new edge set
-    new_edges = EdgeSet(
-      n_edge=jnp.array([n_edges_after]),
-      indices=EdgesIndices(
-        senders=new_edge_senders,
-        receivers=new_edge_receivers,
-      ),
-      features=new_edge_features,
+      # Concatenate node structural features with input features
+      pnodes = p2r_graph.nodes['pnodes']
+      rnodes = p2r_graph.nodes['rnodes']
+      new_pnodes = pnodes._replace(
+        features=jnp.concatenate([
+          pnode_features,
+          _add_batch_second_axis(
+            pnodes.features.astype(pnode_features.dtype), batch_size)
+        ], axis=-1)
+      )
+      # To make sure capacity of the embedded is identical for the physical nodes and
+      # the regional nodes, we also append some dummy zero input features for the
+      # regional nodes.
+      dummy_rnode_features = jnp.zeros(
+          (rnodes.n_node.item(),) + pnode_features.shape[1:],
+          dtype=pnode_features.dtype)
+      new_rnodes = rnodes._replace(
+        features=jnp.concatenate([
+          dummy_rnode_features,
+          _add_batch_second_axis(
+            rnodes.features.astype(dummy_rnode_features.dtype), batch_size)
+        ], axis=-1)
+      )
+
+      # Get edges
+      p2r_edges_key = p2r_graph.edge_key_by_name('p2r')
+      edges = p2r_graph.edges[p2r_edges_key]
+      # Drop out edges randomly with the given probability
+      if key is not None:
+        n_edges_after = int((1 - self.p_dropout_edges_p2r) * edges.features.shape[0])
+        [new_edge_features, new_edge_senders, new_edge_receivers] = shuffle_arrays(
+          key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers])
+        new_edge_features = new_edge_features[:n_edges_after]
+        new_edge_senders = new_edge_senders[:n_edges_after]
+        new_edge_receivers = new_edge_receivers[:n_edges_after]
+      else:
+        n_edges_after = edges.features.shape[0]
+        new_edge_features = edges.features
+        new_edge_senders = edges.indices.senders
+        new_edge_receivers = edges.indices.receivers
+      # Change edge feature dtype
+      new_edge_features = new_edge_features.astype(dummy_rnode_features.dtype)
+      # Broadcast edge structural features to the required batch size
+      new_edge_features = _add_batch_second_axis(new_edge_features, batch_size)
+      # Build new edge set
+      new_edges = EdgeSet(
+        n_edge=jnp.array([n_edges_after]),
+        indices=EdgesIndices(
+          senders=new_edge_senders,
+          receivers=new_edge_receivers,
+        ),
+        features=new_edge_features,
+      )
+
+      input_graph = p2r_graph._replace(
+        edges={p2r_edges_key: new_edges},
+        nodes={
+          'pnodes': new_pnodes,
+          'rnodes': new_rnodes
+        })
+
+      # Run the GNN.
+      p2r_out = self._p2r_gnn(input_graph, condition=tau)
+      latent_rnodes = p2r_out.nodes['rnodes'].features
+      latent_pnodes = p2r_out.nodes['pnodes'].features
+
+      return latent_rnodes, latent_pnodes
+
+    def _run_r2r_gnn(
+      r2r_graph: TypedGraph,
+      latent_rnodes: Array,
+      tau: float,
+      key: flax.typing.PRNGKey = None,
+    ) -> Array:
+      """Runs the r2r GNN, extracting updated latent regional nodes."""
+
+      # Get batch size
+      batch_size = latent_rnodes.shape[1]
+
+      # Replace the node features
+      # NOTE: We don't need to add the structural node features, because these are
+      # already part of  the latent state, via the original p2r gnn.
+      rnodes = r2r_graph.nodes['rnodes']
+      new_rnodes = rnodes._replace(features=latent_rnodes)
+
+      # Get edges
+      r2r_edges_key = r2r_graph.edge_key_by_name('r2r')
+      # NOTE: We are assuming here that the r2r gnn uses a single set of edge keys
+      # named 'r2r' for the edges and that it uses a single set of nodes named 'rnodes'
+      msg = ('The setup currently requires to only have one kind of edge in the mesh GNN.')
+      assert len(r2r_graph.edges) == 1, msg
+      edges = r2r_graph.edges[r2r_edges_key]
+      # Drop out edges randomly with the given probability
+      # NOTE: We need the structural edge features, because it is the first
+      # time we are seeing this particular set of edges.
+      if key is not None:
+        n_edges_after = int((1 - self.p_dropout_edges_r2r) * edges.features.shape[0])
+        [new_edge_features, new_edge_senders, new_edge_receivers] = shuffle_arrays(
+          key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers])
+        new_edge_features = new_edge_features[:n_edges_after]
+        new_edge_senders = new_edge_senders[:n_edges_after]
+        new_edge_receivers = new_edge_receivers[:n_edges_after]
+      else:
+        n_edges_after = edges.features.shape[0]
+        new_edge_features = edges.features
+        new_edge_senders = edges.indices.senders
+        new_edge_receivers = edges.indices.receivers
+      # Change edge feature dtype
+      new_edge_features = new_edge_features.astype(latent_rnodes.dtype)
+      # Broadcast edge structural features to the required batch size
+      new_edge_features = _add_batch_second_axis(new_edge_features, batch_size)
+      # Build new edge set
+      new_edges = EdgeSet(
+        n_edge=jnp.array([n_edges_after]),
+        indices=EdgesIndices(
+          senders=new_edge_senders,
+          receivers=new_edge_receivers,
+        ),
+        features=new_edge_features,
+      )
+
+      # Build the graph
+      input_graph = r2r_graph._replace(
+        edges={r2r_edges_key: new_edges},
+        nodes={'rnodes': new_rnodes},
+      )
+
+      # Run the GNN
+      output_graph = self._r2r_gnn(input_graph, condition=tau)
+      output_mesh_nodes = output_graph.nodes['rnodes'].features
+
+      return output_mesh_nodes
+
+    def _run_r2p_gnn(
+      r2p_graph: TypedGraph,
+      updated_latent_rnodes: Array,
+      latent_pnodes: Array,
+      tau: float,
+      key: flax.typing.PRNGKey = None,
+    ) -> Array:
+      """Runs the r2p GNN, extracting the output physical nodes."""
+
+      # Get batch size
+      batch_size = updated_latent_rnodes.shape[1]
+
+      # NOTE: We don't need to add the structural node features, because these are
+      # already part of the latent state, via the original p2r gnn.
+      rnodes = r2p_graph.nodes['rnodes']
+      pnodes = r2p_graph.nodes['pnodes']
+      new_rnodes = rnodes._replace(features=updated_latent_rnodes)
+      if self.variable_mesh:
+        # NOTE: We can't use latent pnodes of the input mesh for the output mesh
+        # TMP # TRY: Make sure that this does not harm the performance with fixed mesh
+        # If it works, change the architecture, flowcharts, etc.
+        new_pnodes = pnodes._replace(features=_add_batch_second_axis(pnodes.features, batch_size))
+      else:
+        new_pnodes = pnodes._replace(features=latent_pnodes)
+
+      # Get edges
+      r2p_edges_key = r2p_graph.edge_key_by_name('r2p')
+      edges = r2p_graph.edges[r2p_edges_key]
+      # Drop out edges randomly with the given probability
+      if key is not None:
+        n_edges_after = int((1 - self.p_dropout_edges_r2p) * edges.features.shape[0])
+        [new_edge_features, new_edge_senders, new_edge_receivers] = shuffle_arrays(
+          key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers])
+        new_edge_features = new_edge_features[:n_edges_after]
+        new_edge_senders = new_edge_senders[:n_edges_after]
+        new_edge_receivers = new_edge_receivers[:n_edges_after]
+      else:
+        n_edges_after = edges.features.shape[0]
+        new_edge_features = edges.features
+        new_edge_senders = edges.indices.senders
+        new_edge_receivers = edges.indices.receivers
+      # Change edge feature dtype
+      new_edge_features = new_edge_features.astype(latent_pnodes.dtype)
+      # Broadcast edge structural features to the required batch size
+      new_edge_features = _add_batch_second_axis(new_edge_features, batch_size)
+      # Build new edge set
+      new_edges = EdgeSet(
+        n_edge=jnp.array([n_edges_after]),
+        indices=EdgesIndices(
+          senders=new_edge_senders,
+          receivers=new_edge_receivers,
+        ),
+        features=new_edge_features,
+      )
+
+      # Build the new graph
+      input_graph = r2p_graph._replace(
+        edges={r2p_edges_key: new_edges},
+        nodes={
+          'rnodes': new_rnodes,
+          'pnodes': new_pnodes
+        })
+
+      # Run the GNN
+      output_graph = self._r2p_gnn(input_graph, condition=tau)
+      output_pnodes = output_graph.nodes['pnodes'].features
+
+      return output_pnodes
+
+    # Transfer data for the physical mesh to the regional mesh
+    # -> [num_nodes, batch_size, latent_size]
+    subkey, key = jax.random.split(key) if (key is not None) else (None, None)
+    (latent_rnodes, latent_pnodes) = _run_p2r_gnn(graphs['p2r'], pnode_features, tau, key=subkey)
+    self.sow(
+      col='intermediates', name='pnodes_encoded',
+      value=self._reorder_features(latent_pnodes, graphs['p2r'].nodes['pnodes'].n_node.item())
+    )
+    self.sow(
+      col='intermediates', name='rnodes_encoded',
+      value=self._reorder_features(latent_rnodes, graphs['p2r'].nodes['rnodes'].n_node.item())
     )
 
-    # Build the graph
-    input_graph = mesh_graph._replace(
-      edges={mesh_edges_key: new_edges},
-      nodes={'rmesh_nodes': new_mesh_nodes},
+    # Run message-passing in the regional mesh
+    # -> [num_rnodes, batch_size, latent_size]
+    subkey, key = jax.random.split(key) if (key is not None) else (None, None)
+    updated_latent_rnodes = _run_r2r_gnn(graphs['r2r'], latent_rnodes, tau, key=subkey)
+    self.sow(
+      col='intermediates', name='rnodes_processed',
+      value=self._reorder_features(updated_latent_rnodes, graphs['r2r'].nodes['rnodes'].n_node.item())
     )
 
-    # Run the GNN
-    output_graph = self._r2r_gnn(input_graph, condition=tau)
-    output_mesh_nodes = output_graph.nodes['rmesh_nodes'].features
-
-    return output_mesh_nodes
-
-  def _run_mesh2grid_gnn(self,
-    updated_latent_mesh_nodes: Array,
-    latent_grid_nodes: Array,
-    tau: float,
-    key: flax.typing.PRNGKey = None,
-  ) -> Array:
-    """Runs the mesh2grid_gnn, extracting the output grid nodes."""
-
-    bsz = updated_latent_mesh_nodes.shape[1]
-    mesh2grid_graph = self._r2p_graph
-
-    # NOTE: We don't need to add the structural node features, because these are
-    # already part of the latent state, via the original Grid2Mesh gnn.
-    mesh_nodes = mesh2grid_graph.nodes['rmesh_nodes']
-    grid_nodes = mesh2grid_graph.nodes['pmesh_nodes']
-    new_mesh_nodes = mesh_nodes._replace(features=updated_latent_mesh_nodes)
-    new_grid_nodes = grid_nodes._replace(features=latent_grid_nodes)
-
-    # Get edges
-    mesh2grid_edges_key = mesh2grid_graph.edge_key_by_name('r2p')
-    edges = mesh2grid_graph.edges[mesh2grid_edges_key]
-    # Drop out edges randomly with the given probability
-    if key is not None:
-      n_edges_after = int((1 - self.p_dropout_edges_mesh2grid) * edges.features.shape[0])
-      [new_edge_features, new_edge_senders, new_edge_receivers] = shuffle_arrays(
-        key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers])
-      new_edge_features = new_edge_features[:n_edges_after]
-      new_edge_senders = new_edge_senders[:n_edges_after]
-      new_edge_receivers = new_edge_receivers[:n_edges_after]
-    else:
-      n_edges_after = edges.features.shape[0]
-      new_edge_features = edges.features
-      new_edge_senders = edges.indices.senders
-      new_edge_receivers = edges.indices.receivers
-    # Change edge feature dtype
-    new_edge_features = new_edge_features.astype(latent_grid_nodes.dtype)
-    # Broadcast edge structural features to the required batch size
-    new_edge_features = _add_batch_second_axis(new_edge_features, bsz)
-    # Build new edge set
-    new_edges = EdgeSet(
-      n_edge=jnp.array([n_edges_after]),
-      indices=EdgesIndices(
-        senders=new_edge_senders,
-        receivers=new_edge_receivers,
-      ),
-      features=new_edge_features,
+    # Transfer data from the regional mesh to the physical mesh
+    # -> [num_pnodes_out, batch_size, latent_size]
+    subkey, key = jax.random.split(key) if (key is not None) else (None, None)
+    output_pnodes = _run_r2p_gnn(graphs['r2p'], updated_latent_rnodes, latent_pnodes, tau, key=subkey)
+    self.sow(
+      col='intermediates', name='pnodes_decoded',
+      value=self._reorder_features(output_pnodes, graphs['r2p'].nodes['pnodes'].n_node.item())
     )
 
-    # Build the new graph
-    input_graph = mesh2grid_graph._replace(
-      edges={mesh2grid_edges_key: new_edges},
-      nodes={
-        'rmesh_nodes': new_mesh_nodes,
-        'pmesh_nodes': new_grid_nodes
-      })
-
-    # Run the GNN
-    output_graph = self._r2p_gnn(input_graph, condition=tau)
-    output_grid_nodes = output_graph.nodes['pmesh_nodes'].features
-
-    return output_grid_nodes
-
-  def _run_grid2grid_gnn(self,
-    latent_grid_nodes: Array,
-    initial_latent_grid_nodes: Array,
-    tau: float,
-  ) -> Array:
-    """Runs the grid2grid_gnn, extracting updated latent grid nodes."""
-
-    bsz = latent_grid_nodes.shape[1]
-    grid2grid_graph = self._grid2grid_graph
-
-    # Replace the node features
-    # NOTE: We don't need to add the structural node features, because these are
-    # already part of the latent state, via the original Grid2Mesh gnn.
-    concatenated_latent_grid_nodes = jnp.concatenate(
-      [latent_grid_nodes, initial_latent_grid_nodes], axis=-1)
-    nodes = grid2grid_graph.nodes['pmesh_nodes']
-    nodes = nodes._replace(features=concatenated_latent_grid_nodes)
-
-    # Add the structural edge features of this graph.
-    # NOTE: We need the structural edge features, because it is the first
-    # time we are seeing this particular set of edges.
-    grid_edges_key = grid2grid_graph.edge_key_by_name('grid2grid')
-    edges = grid2grid_graph.edges[grid_edges_key]
-    new_edges = edges._replace(
-      features=_add_batch_second_axis(
-        edges.features.astype(latent_grid_nodes.dtype), bsz)
-    )
-
-    # Build the graph
-    input_graph = grid2grid_graph._replace(
-      edges={grid_edges_key: new_edges}, nodes={'pmesh_nodes': nodes}
-    )
-
-    # Run the GNN
-    output_graph = self._grid2grid_gnn(input_graph, condition=tau)
-    output_grid_nodes = output_graph.nodes['pmesh_nodes'].features
-
-    return output_grid_nodes
+    return output_pnodes
 
   def __call__(self,
     u_inp: Array,
     c_inp: Array = None,
     x_inp: Array = None,
     x_out: Array = None,
-    t_inp: Array = None,
-    tau: Union[float, int] = None,
+    t_inp: Array = None,  # TMP: Support None
+    tau: Union[float, int] = None,  # TMP: Support None
     key: flax.typing.PRNGKey = None,
   ) -> Array:
     """
-    Inputs must be of shape (batch_size, 1, num_grid_nodes_0, num_grid_nodes_1, num_inputs)
+    Inputs must be of shape (batch_size, 1, num_physical_nodes, num_inputs)
     """
 
-    if self.fixed_mesh:
+    # Check input and output coordinates
+    if self.x_pmesh is not None:
       assert x_inp is None
       assert x_out is None
+      assert self.variable_mesh
+      x_inp = self.x_pmesh
+      x_out = self.x_pmesh
+      graphs = self.graphs
     else:
       self._check_coordinates(x_inp)
       self._check_coordinates(x_out)
+      subkey, key = jax.random.split(key) if (key is not None) else (None, None)
+      graphs = self._init_graphs(key=subkey, x_pmesh_inp=x_inp, x_pmesh_out=x_out)
 
-    assert u_inp.ndim == 3 + len(self.num_grid_nodes)
+    # Check input functions
+    self._check_function(u_inp, x=x_inp)
+    if c_inp is not None:
+      self._check_function(c_inp, x=x_inp)
+    assert u_inp.shape[3] == self.num_outputs
+
+    # Read dimensions
     batch_size = u_inp.shape[0]
-    assert u_inp.shape[1] == 1
-    assert u_inp.shape[2] == self.num_grid_nodes[0]
-    assert u_inp.shape[3] == self.num_grid_nodes[1]
-    assert u_inp.shape[-1] == self.num_outputs
+    num_pnodes_inp = x_inp.shape[0]
+    num_pnodes_out = x_out.shape[0]
 
-    if self.concatenate_tau:
-      assert tau is not None
-      tau = jnp.array(tau, dtype=jnp.float32)
-      if tau.size == 1:
-        tau = jnp.tile(tau.reshape(1, 1), reps=(batch_size, 1))
+    # Prepare the time channel
     if self.concatenate_t:
       assert t_inp is not None
       t_inp = jnp.array(t_inp, dtype=jnp.float32)
       if t_inp.size == 1:
         t_inp = jnp.tile(t_inp.reshape(1, 1), reps=(batch_size, 1))
-
-    # Prepare the grid node features
-    # u -> [num_grid_nodes, batch_size, num_inputs]
-    grid_node_features = jnp.moveaxis(
-      u_inp, source=(0, 1, 2, 3),
-      destination=(2, 3, 0, 1)
-    ).reshape(self._num_grid_nodes_tot, batch_size, -1)
-    # Concatente with forced features
-    grid_node_features_forced = []
+    # Prepare the time difference channel
     if self.concatenate_tau:
-      grid_node_features_forced.append(
-        jnp.tile(tau, reps=(self._num_grid_nodes_tot, 1, 1)))
+      assert tau is not None
+      tau = jnp.array(tau, dtype=jnp.float32)
+      if tau.size == 1:
+        tau = jnp.tile(tau.reshape(1, 1), reps=(batch_size, 1))
+
+    # Concatenate the known coefficients to the channels of the input function
+    if c_inp is not None:
+      u_inp = jnp.concatenate([u_inp, c_inp], axis=-1)
+
+    # Prepare the physical node features
+    # u -> [num_pnodes_inp, batch_size, num_inputs]
+    pnode_features = jnp.moveaxis(
+      u_inp, source=(0, 1, 2, 3),
+      destination=(1, 3, 0, 2)
+    ).squeeze(axis=3)
+
+    # Concatente with forced features
+    pnode_features_forced = []
+    if self.concatenate_tau:
+      pnode_features_forced.append(
+        jnp.tile(tau, reps=(num_pnodes_inp, 1, 1)))
     if self.concatenate_t:
-      grid_node_features_forced.append(
-        jnp.tile(t_inp, reps=(self._num_grid_nodes_tot, 1, 1)))
-    grid_node_features = jnp.concatenate(
-      [grid_node_features, *grid_node_features_forced], axis=-1)
+      pnode_features_forced.append(
+        jnp.tile(t_inp, reps=(num_pnodes_inp, 1, 1)))
+    pnode_features = jnp.concatenate(
+      [pnode_features, *pnode_features_forced], axis=-1)
 
-    # Transfer data for the grid to the mesh
-    # -> [num_mesh_nodes, batch_size, latent_size], [num_grid_nodes, batch_size, latent_size]
+    # Run the GNNs
     subkey, key = jax.random.split(key) if (key is not None) else (None, None)
-    (latent_mesh_nodes, latent_grid_nodes) = self._run_grid2mesh_gnn(grid_node_features, tau, key=subkey)
-    self.sow(
-      col='intermediates', name='grid_encoded',
-      value=self.features2grid(latent_grid_nodes, self.num_grid_nodes)
-    )
-    self.sow(
-      col='intermediates', name='mesh_encoded',
-      value=self.features2grid(latent_mesh_nodes, self.num_mesh_nodes)
-    )
+    output_pnodes = self._run_gnns(graphs=graphs, pnode_features=pnode_features, tau=tau, key=subkey)
 
-    # Run message-passing in the multimesh.
-    # -> [num_mesh_nodes, batch_size, latent_size]
-    subkey, key = jax.random.split(key) if (key is not None) else (None, None)
-    updated_latent_mesh_nodes = self._run_mesh_gnn(latent_mesh_nodes, tau, key=subkey)
-    self.sow(
-      col='intermediates', name='mesh_processed',
-      value=self.features2grid(updated_latent_mesh_nodes, self.num_mesh_nodes)
-    )
-
-    # Transfer data from the mesh to the grid.
-    # -> [num_grid_nodes, batch_size, latent_size]
-    subkey, key = jax.random.split(key) if (key is not None) else (None, None)
-    updated_latent_grid_nodes = self._run_mesh2grid_gnn(updated_latent_mesh_nodes, latent_grid_nodes, tau, key=subkey)
-    self.sow(
-      col='intermediates', name='grid_decoded',
-      value=self.features2grid(updated_latent_grid_nodes, self.num_grid_nodes)
-    )
-
-    # Run message passing in the grid.
-    # -> [num_grid_nodes, batch_size, num_outputs]
-    output_grid_nodes = self._run_grid2grid_gnn(updated_latent_grid_nodes, latent_grid_nodes, tau)
-    self.sow(
-      col='intermediates', name='grid_output',
-      value=self.features2grid(output_grid_nodes, self.num_grid_nodes)
-    )
-
-    # Reshape the output to [batch_size, 1, num_grid_nodes, num_outputs]
-    output = self.features2grid(output_grid_nodes, self.num_grid_nodes)
+    # Reshape the output to [batch_size, 1, num_pnodes_out, num_outputs]
+    # [num_pnodes_out, batch_size, num_outputs] -> u
+    output = self._reorder_features(output_pnodes, num_pnodes_out)
 
     return output
 
@@ -802,7 +800,6 @@ def _compute_triangulation_medians(tri: Delaunay) -> Array:
     medians[:, i] = .67 * np.sqrt((2 * np.sum(np.power(np.delete(edges, i, axis=1), 2), axis=1) - np.power(edges[:, i], 2)) / 4)
 
   return medians
-
 
 def _add_batch_second_axis(data, bsz):
   """
