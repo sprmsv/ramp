@@ -112,7 +112,7 @@ class DeepTypedGraphNet(nn.Module):
   use_layer_norm: bool = True
   conditional_normalization: bool = False
   conditional_norm_latent_size: int = 16
-  activation: str = 'relu'
+  activation: str = 'swish'
   f32_aggregation: bool = False
   aggregate_edges_for_nodes_fn: str = 'segment_mean'
   aggregate_normalization: Optional[float] = None

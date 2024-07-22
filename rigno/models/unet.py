@@ -5,7 +5,7 @@ import jax
 from flax import linen as nn
 from jax import numpy as jnp
 
-from rigno.models.rigno import AbstractOperator
+from rigno.models.operator import AbstractOperator
 from rigno.models.utils import ConditionedNorm
 from rigno.utils import Array
 
@@ -155,7 +155,7 @@ class UNet(AbstractOperator):
       conditional_norm_latent_size=self.conditional_norm_latent_size,
     )
 
-  def __call__(self,
+  def call(self,
     u_inp: Array,
     t_inp: Array = None,
     tau: Union[float, int] = None,
