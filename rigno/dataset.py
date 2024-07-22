@@ -316,6 +316,14 @@ class Batch:
   def unravel(self) -> tuple:
     return (self.u, self.c, self.t, self.x)
 
+  @property
+  def _x(self) -> Array:
+    if all([np.all(self.x[i, j] == self.x[0, 0])
+            for i in range(self.x.shape[0]) for j in range(self.x.shape[1])]):
+      return self.x[0, 0]
+    else:
+      return None
+
   def __len__(self) -> int:
     return self.shape[0]
 
@@ -518,6 +526,8 @@ class Dataset:
       x = x[:, ::self.time_downsample_factor]
 
     # Downsample the space coordinates randomly
+    # NOTE: The discretization is different for each sample
+    # NOTE: The discretization is different for each snapshot
     if not self.space_downsample_grid:
       for _s in range(u.shape[0]):
         for _t in range(u.shape[1]):

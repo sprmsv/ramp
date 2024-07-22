@@ -19,6 +19,20 @@
 
 # NEXT STEPS
 
+- Make the model modular
+    - Down-scale and up-scale layers
+    - Building the graphs
+
+- Compilation issue:
+    - Delaunay triangulation is value-dependent in model.setup
+        - SOLUTION: separate building the graph from the model !! Give the graphs as input !!
+
+- Building the graphs on-the-fly: Problem with compilation!
+    - Delaunay triangulation is value-dependent
+        - SOLUTION: separate building the graph from the model !! Give the graphs as input !!
+    - Maybe we don't need variable mesh in training at all
+    - Or we can change the mesh only a few times during the training (compilation each time)
+
 - Verify the the architecture formulation
 
 - Extend for unstructured grids
@@ -139,6 +153,7 @@
 
 
 # Code and Performance
+
 
 - Get rid of the NVIDIA driver compatiblity message: parallel compilation possibly faster
 

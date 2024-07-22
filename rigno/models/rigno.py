@@ -40,10 +40,9 @@ class AbstractOperator(nn.Module):
 class RIGNO(AbstractOperator):
   """TODO: Add docstrings"""
 
+  x: Array
   num_outputs: int
-  periodic: bool = True
-  variable_mesh: bool = False  # TODO: Remove
-  x_pmesh: Array = None
+  periodic: bool
   rmesh_levels: int = 1
   subsample_factor: float = 2
   overlap_factor_p2r: int = 2.0
@@ -76,39 +75,39 @@ class RIGNO(AbstractOperator):
     assert u.shape[2] == x.shape[0]
 
   def _get_supported_points(self,
-    centers: np.ndarray,
-    points: np.ndarray,
-    radii: np.ndarray,
+    centers: Array,
+    points: Array,
+    radii: Array,
     ord_distance: int = 2,
-  ) -> np.ndarray:
+  ) -> Array:
     """ord_distance can be 1, 2, or np.inf"""
 
-    assert np.all(radii < 1.0)
+    assert jnp.all(radii < 1.0)
 
     # Get relative coordinates
     rel = points[:, None] - centers
     # Mirror relative positions because of periodic boudnary conditions
     if self.periodic:
-      rel = np.where(rel >= 1., (rel - 2.), rel)
-      rel = np.where(rel < -1., (rel + 2.), rel)
+      rel = jnp.where(rel >= 1., (rel - 2.), rel)
+      rel = jnp.where(rel < -1., (rel + 2.), rel)
 
     # Compute distance
     # NOTE: Order of the norm determines the shape of the sub-regions
-    distance = np.linalg.norm(rel, ord=ord_distance, axis=-1)
+    distance = jnp.linalg.norm(rel, ord=ord_distance, axis=-1)
 
     # Get indices
     # -> [idx_point, idx_center]
-    idx_nodes = np.stack(np.where(distance <= radii), axis=-1)
+    idx_nodes = jnp.stack(jnp.where(distance <= radii), axis=-1)
 
     return idx_nodes
 
   def _init_structural_features(self,
-    x_sen: np.ndarray, x_rec: np.ndarray,
+    x_sen: Array, x_rec: Array,
     idx_sen: list[int], idx_rec: list[int],
     node_freqs: int, max_edge_length: float,
     domain_sen: list[int] = None,
     domain_rec: list[int] = None,
-    shifts: list[np.ndarray] = None,
+    shifts: list[Array] = None,
   ) -> Tuple[EdgeSet, NodeSet, NodeSet]:
 
     # Get number of nodes and the edges
@@ -184,12 +183,12 @@ class RIGNO(AbstractOperator):
 
     return edge_set, sender_node_set, receiver_node_set
 
-  def _init_graphs(self, key, x_pmesh_inp: Array, x_pmesh_out: Array) -> dict[str, TypedGraph]:
+  def _init_graphs(self, key, x_inp: Array, x_out: Array) -> dict[str, TypedGraph]:
 
     # Randomly sub-sample pmesh to get rmesh
     if key is None:
       key = jax.random.PRNGKey(0)
-    x_rmesh = _subsample_pointset(key=key, x=x_pmesh_inp, factor=self.subsample_factor)
+    x_rmesh = _subsample_pointset(key=key, x=x_inp, factor=self.subsample_factor)
 
     # Domain shifts for periodic BC
     _domain_shifts = [
@@ -207,14 +206,14 @@ class RIGNO(AbstractOperator):
     # NOTE: Always include boundary nodes for non-periodic BC
     # TODO: Update based on boundary node settings  # TMP
     if not self.periodic:
-      _boundary_linspace = np.linspace(-1, 1, 64, endpoint=True).reshape(-1, 1)
-      x_boundary = np.concatenate([
-        np.concatenate([-np.ones_like(_boundary_linspace), _boundary_linspace], axis=1),
-        np.concatenate([_boundary_linspace, +np.ones_like(_boundary_linspace)], axis=1),
-        np.concatenate([+np.ones_like(_boundary_linspace), _boundary_linspace], axis=1),
-        np.concatenate([_boundary_linspace, -np.ones_like(_boundary_linspace)], axis=1),
+      _boundary_linspace = jnp.linspace(-1, 1, 64, endpoint=True).reshape(-1, 1)
+      x_boundary = jnp.concatenate([
+        jnp.concatenate([-jnp.ones_like(_boundary_linspace), _boundary_linspace], axis=1),
+        jnp.concatenate([_boundary_linspace, +jnp.ones_like(_boundary_linspace)], axis=1),
+        jnp.concatenate([+jnp.ones_like(_boundary_linspace), _boundary_linspace], axis=1),
+        jnp.concatenate([_boundary_linspace, -jnp.ones_like(_boundary_linspace)], axis=1),
       ])
-      x_rmesh = np.concatenate([x_rmesh, x_boundary])
+      x_rmesh = jnp.concatenate([x_rmesh, x_boundary])
 
     def _compute_minimum_support_radii(x: Array):
       if self.periodic:
@@ -246,13 +245,13 @@ class RIGNO(AbstractOperator):
       # Get indices of supported points
       idx_nodes = self._get_supported_points(
         centers=x_rmesh,
-        points=x_pmesh_inp,
+        points=x_inp,
         radii=radius,
       )
 
       # Get the initial features
       edge_set, pmesh_node_set, rmesh_node_set = self._init_structural_features(
-        x_sen=x_pmesh_inp,
+        x_sen=x_inp,
         x_rec=x_rmesh,
         idx_sen=idx_nodes[:, 0],
         idx_rec=idx_nodes[:, 1],
@@ -281,7 +280,7 @@ class RIGNO(AbstractOperator):
         _x_rmesh = x_rmesh[:_rmesh_size]
         if self.periodic:
           # Repeat the rmesh in periodic directions
-          _x_rmesh_extended = np.concatenate(
+          _x_rmesh_extended = jnp.concatenate(
             [_x_rmesh + _domain_shifts[idx] for idx in range(len(_domain_shifts))], axis=0)
           tri = Delaunay(points=_x_rmesh_extended)
         else:
@@ -304,7 +303,7 @@ class RIGNO(AbstractOperator):
         idx_sen=[i for (i, j) in edges],
         idx_rec=[j for (i, j) in edges],
         node_freqs=self.node_coordinate_freqs,
-        max_edge_length=(2. * np.sqrt(x_pmesh_inp.shape[1])),
+        max_edge_length=(2. * jnp.sqrt(x_inp.shape[1])),
         shifts=jnp.array(_domain_shifts).squeeze(1),
         domain_sen=[i for (i, j) in domains],
         domain_rec=[j for (i, j) in domains],
@@ -328,14 +327,14 @@ class RIGNO(AbstractOperator):
       # Get indices of supported points
       idx_nodes = self._get_supported_points(
         centers=x_rmesh,
-        points=x_pmesh_out,
+        points=x_out,
         radii=radius,
       )
 
       # Get the initial features
       edge_set, rmesh_node_set, pmesh_node_set = self._init_structural_features(
         x_sen=x_rmesh,
-        x_rec=x_pmesh_out,
+        x_rec=x_out,
         idx_sen=idx_nodes[:, 1],
         idx_rec=idx_nodes[:, 0],
         node_freqs=self.node_coordinate_freqs,
@@ -403,8 +402,9 @@ class RIGNO(AbstractOperator):
 
     # Define step 1 of the decoder
     self._r2p_gnn = DeepTypedGraphNet(
-      # TMP TODO: Unify embed_nodes in both options !!! First make sure that it works fine
-      embed_nodes=self.variable_mesh,  # Output pnode features are not embedded.
+      # NOTE: with variable mesh, the output pnode features must be embedded first
+      # NOTE: without variable mesh, there is no need for embeddings
+      embed_nodes=self.variable_mesh,
       embed_edges=True,  # Embed raw features of the r2p edges.
       edge_latent_size=dict(r2p=self.edge_latent_size),
       node_latent_size=dict(rnodes=self.node_latent_size, pnodes=self.node_latent_size),
@@ -423,10 +423,14 @@ class RIGNO(AbstractOperator):
     )
 
   def setup(self):
+    # NOTE: There are a few architectural considerations for variable mesh
+    # NOTE: variable_mesh=True means that the input and the output mesh can be different
+    # NOTE: Check usages of this attribute
+    self.variable_mesh = False
 
-    if self.x_pmesh is not None:
-      self._check_coordinates(x=self.x_pmesh)
-      self.graphs = self._init_graphs(key=None, x_pmesh_inp=self.x_pmesh, x_pmesh_out=self.x_pmesh)
+    if self.x is not None:
+      self._check_coordinates(x=self.x)
+      self.graphs = self._init_graphs(key=None, x_inp=self.x, x_out=self.x)
     else:
       self.graphs = None
 
@@ -610,7 +614,7 @@ class RIGNO(AbstractOperator):
       new_rnodes = rnodes._replace(features=updated_latent_rnodes)
       if self.variable_mesh:
         # NOTE: We can't use latent pnodes of the input mesh for the output mesh
-        # TMP # TRY: Make sure that this does not harm the performance with fixed mesh
+        # TRY: Make sure that this does not harm the performance with fixed mesh
         # If it works, change the architecture, flowcharts, etc.
         new_pnodes = pnodes._replace(features=_add_batch_second_axis(pnodes.features, batch_size))
       else:
@@ -707,18 +711,17 @@ class RIGNO(AbstractOperator):
     """
 
     # Check input and output coordinates
-    if self.x_pmesh is not None:
+    if self.x is not None:
       assert x_inp is None
       assert x_out is None
-      assert self.variable_mesh
-      x_inp = self.x_pmesh
-      x_out = self.x_pmesh
+      x_inp = self.x
+      x_out = self.x
       graphs = self.graphs
     else:
       self._check_coordinates(x_inp)
       self._check_coordinates(x_out)
       subkey, key = jax.random.split(key) if (key is not None) else (None, None)
-      graphs = self._init_graphs(key=subkey, x_pmesh_inp=x_inp, x_pmesh_out=x_out)
+      graphs = self._init_graphs(key=subkey, x_inp=x_inp, x_out=x_out)
 
     # Check input functions
     self._check_function(u_inp, x=x_inp)
@@ -777,6 +780,7 @@ class RIGNO(AbstractOperator):
     return output
 
 def _subsample_pointset(key, x: Array, factor: float) -> Array:
+  x = jnp.array(x)
   x_shuffled, = shuffle_arrays(key, [x])
   return x_shuffled[:int(x.shape[0] / factor)]
 
