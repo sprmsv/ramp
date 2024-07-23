@@ -1,5 +1,4 @@
-from dataclasses import dataclass
-from typing import Tuple, Union, Mapping
+from typing import Tuple, Union, NamedTuple
 
 import flax.typing
 import jax.numpy as jnp
@@ -16,14 +15,14 @@ from rigno.models.operator import AbstractOperator
 from rigno.utils import Array, shuffle_arrays
 
 
-@dataclass
-class RegionInteractionGraphs:
+class RegionInteractionGraphs(NamedTuple):
   p2r: TypedGraph
   r2r: TypedGraph
   r2p: TypedGraph
 
-# TMP TODO: USE THIS FOR BUILDING THE GRAPHS
 class RegionInteractionGraphBuilder:
+
+  # TODO: Optimize by avoiding for loops
 
   def __init__(self,
     periodic: bool,
@@ -325,8 +324,8 @@ class RegionInteractionGraphBuilder:
     return graphs
 
 class Encoder(nn.Module):
-  node_latent_size: Mapping[str, int]
-  edge_latent_size: Mapping[str, int]
+  node_latent_size: int
+  edge_latent_size: int
   mlp_hidden_size: int
   mlp_hidden_layers: int = 1
   use_layer_norm: bool = True
@@ -337,8 +336,8 @@ class Encoder(nn.Module):
     self.gnn = DeepTypedGraphNet(
       embed_nodes=True,  # Embed raw features of all nodes
       embed_edges=True,  # Embed raw features of the edges
-      edge_latent_size=self.edge_latent_size,
-      node_latent_size=self.node_latent_size,
+      edge_latent_size=dict(p2r=self.edge_latent_size),
+      node_latent_size=dict(rnodes=self.node_latent_size, pnodes=self.node_latent_size),
       mlp_hidden_size=self.mlp_hidden_size,
       mlp_num_hidden_layers=self.mlp_hidden_layers,
       num_message_passing_steps=1,
@@ -376,7 +375,7 @@ class Encoder(nn.Module):
     # the regional nodes, we also append some dummy zero input features for the
     # regional nodes.
     dummy_rnode_features = jnp.zeros(
-        (rnodes.n_node.item(),) + pnode_features.shape[1:],
+        (rnodes.features.shape[0],) + pnode_features.shape[1:],
         dtype=pnode_features.dtype)
     new_rnodes = rnodes._replace(
       features=jnp.concatenate([
@@ -432,8 +431,8 @@ class Encoder(nn.Module):
 
 class Processor(nn.Module):
   steps: int
-  node_latent_size: Mapping[str, int]
-  edge_latent_size: Mapping[str, int]
+  node_latent_size: int
+  edge_latent_size: int
   mlp_hidden_size: int
   mlp_hidden_layers: int = 1
   use_layer_norm: bool = True
@@ -527,8 +526,8 @@ class Processor(nn.Module):
 class Decoder(nn.Module):
   variable_mesh: bool
   num_outputs: int
-  node_latent_size: Mapping[str, int]
-  edge_latent_size: Mapping[str, int]
+  node_latent_size: int
+  edge_latent_size: int
   mlp_hidden_size: int
   mlp_hidden_layers: int = 1
   use_layer_norm: bool = True
@@ -630,13 +629,7 @@ class Decoder(nn.Module):
 class RIGNO(AbstractOperator):
   """TODO: Add docstrings"""
 
-  x: Array
   num_outputs: int
-  periodic: bool
-  rmesh_levels: int = 1
-  subsample_factor: float = 2
-  overlap_factor_p2r: int = 2.0
-  overlap_factor_r2p: int = 2.0
   mlp_hidden_layers: int = 1
   node_latent_size: int = 128
   edge_latent_size: int = 128
@@ -646,7 +639,6 @@ class RIGNO(AbstractOperator):
   concatenate_tau: bool = True
   conditional_normalization: bool = True
   conditional_norm_latent_size: int = 16
-  node_coordinate_freqs: int = 4
   p_dropout_edges_p2r: int = 0.5
   p_dropout_edges_r2r: int = 0.5
   p_dropout_edges_r2p: int = 0.5
@@ -671,21 +663,21 @@ class RIGNO(AbstractOperator):
     self.variable_mesh = False
 
     self.encoder = Encoder(
-      edge_latent_size=dict(p2r=self.edge_latent_size),
-      node_latent_size=dict(rnodes=self.node_latent_size, pnodes=self.node_latent_size),
+      edge_latent_size=self.edge_latent_size,
+      node_latent_size=self.node_latent_size,
       mlp_hidden_size=self.mlp_hidden_size,
-      mlp_num_hidden_layers=self.mlp_hidden_layers,
+      mlp_hidden_layers=self.mlp_hidden_layers,
       conditional_normalization=self.conditional_normalization,
       conditional_norm_latent_size=self.conditional_norm_latent_size,
       name='encoder',
     )
 
     self.processor = Processor(
-      edge_latent_size=dict(r2r=self.edge_latent_size),
-      node_latent_size=dict(rnodes=self.node_latent_size),
+      steps=self.processor_steps,
+      edge_latent_size=self.edge_latent_size,
+      node_latent_size=self.node_latent_size,
       mlp_hidden_size=self.mlp_hidden_size,
-      mlp_num_hidden_layers=self.mlp_hidden_layers,
-      num_message_passing_steps=self.processor_steps,
+      mlp_hidden_layers=self.mlp_hidden_layers,
       conditional_normalization=self.conditional_normalization,
       conditional_norm_latent_size=self.conditional_norm_latent_size,
       name='processor',
@@ -693,11 +685,11 @@ class RIGNO(AbstractOperator):
 
     self.decoder = Decoder(
       variable_mesh=self.variable_mesh,
-      node_output_size=dict(pnodes=self.num_outputs),
-      edge_latent_size=dict(r2p=self.edge_latent_size),
-      node_latent_size=dict(rnodes=self.node_latent_size, pnodes=self.node_latent_size),
+      num_outputs=self.num_outputs,
+      edge_latent_size=self.edge_latent_size,
+      node_latent_size=self.node_latent_size,
       mlp_hidden_size=self.mlp_hidden_size,
-      mlp_num_hidden_layers=self.mlp_hidden_layers,
+      mlp_hidden_layers=self.mlp_hidden_layers,
       conditional_normalization=self.conditional_normalization,
       conditional_norm_latent_size=self.conditional_norm_latent_size,
       name='decoder',
@@ -724,11 +716,11 @@ class RIGNO(AbstractOperator):
     (latent_rnodes, latent_pnodes) = self.encoder(graphs.p2r, pnode_features, tau, key=subkey)
     self.sow(
       col='intermediates', name='pnodes_encoded',
-      value=self._reorder_features(latent_pnodes, graphs.p2r.nodes['pnodes'].n_node.item())
+      value=self._reorder_features(latent_pnodes, graphs.p2r.nodes['pnodes'].features.shape[0])
     )
     self.sow(
       col='intermediates', name='rnodes_encoded',
-      value=self._reorder_features(latent_rnodes, graphs.p2r.nodes['rnodes'].n_node.item())
+      value=self._reorder_features(latent_rnodes, graphs.p2r.nodes['rnodes'].features.shape[0])
     )
 
     # Run message-passing in the regional mesh
@@ -737,7 +729,7 @@ class RIGNO(AbstractOperator):
     updated_latent_rnodes = self.processor(graphs.r2r, latent_rnodes, tau, key=subkey)
     self.sow(
       col='intermediates', name='rnodes_processed',
-      value=self._reorder_features(updated_latent_rnodes, graphs.r2r.nodes['rnodes'].n_node.item())
+      value=self._reorder_features(updated_latent_rnodes, graphs.r2r.nodes['rnodes'].features.shape[0])
     )
 
     # Transfer data from the regional mesh to the physical mesh
@@ -746,7 +738,7 @@ class RIGNO(AbstractOperator):
     output_pnodes = self.decoder(graphs.r2p, updated_latent_rnodes, latent_pnodes, tau, key=subkey)
     self.sow(
       col='intermediates', name='pnodes_decoded',
-      value=self._reorder_features(output_pnodes, graphs.r2p.nodes['pnodes'].n_node.item())
+      value=self._reorder_features(output_pnodes, graphs.r2p.nodes['pnodes'].features.shape[0])
     )
 
     return output_pnodes
@@ -756,14 +748,12 @@ class RIGNO(AbstractOperator):
     c_inp: Union[Array, None],
     x_inp: Array,
     x_out: Array,
-    t_inp: Union[Array, None],  # TMP: Support None
-    tau: Union[float, int, None],  # TMP: Support None
+    t_inp: Union[Array, None],
+    tau: Union[float, int, None],
     graphs: RegionInteractionGraphs,
     key: flax.typing.PRNGKey = None,
   ) -> Array:
-    """
-    Inputs must be of shape (batch_size, 1, num_physical_nodes, num_inputs)
-    """
+    """Inputs must be of shape [batch_size, 1, num_physical_nodes, num_inputs]"""
 
     # Check input functions
     self._check_function(u_inp, x=x_inp)

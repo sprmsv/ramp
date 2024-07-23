@@ -1,43 +1,10 @@
 # Project Updates
 
-- Working on unstructured meshes by random sub-sampling of the regular grids
-
-- New version: accepts coefficients (c), input and output coordinates
-    - Possible to fix the coordinates to avoid building the graphs on each call
-
-- rmesh from pmesh:
-    1. Sub-sampling: mesh refinements are inherited
-    2. Regular grid: Can be combined with other architectures
-
-- r2p and p2r connections: just like before
-    - The sub-region diameters vary based on local concentration of the mesh
-    - Minimum diameters: based on triangulation to support the whole domain
-
-- multi-mesh r2r
-    1. Edges based on Delaunay triangulation of the *extended mesh*
-    2. Multiple mesh resolutions by random sub-sampling
-
 # NEXT STEPS
 
-- Make the model modular
-    - Down-scale and up-scale layers
-    - Building the graphs
+- Update train/test scripts
 
-- Compilation issue:
-    - Delaunay triangulation is value-dependent in model.setup
-        - SOLUTION: separate building the graph from the model !! Give the graphs as input !!
-
-- Building the graphs on-the-fly: Problem with compilation!
-    - Delaunay triangulation is value-dependent
-        - SOLUTION: separate building the graph from the model !! Give the graphs as input !!
-    - Maybe we don't need variable mesh in training at all
-    - Or we can change the mesh only a few times during the training (compilation each time)
-
-- Verify the the architecture formulation
-
-- Extend for unstructured grids
-    - Take input at any point and give output at any point
-    - Build the graphs and edges on the fly based on the input (MeshGraph convolution layer)
+- Experiment with the new version (unstructured mesh)
 
 - Extend for time-independent problems
 

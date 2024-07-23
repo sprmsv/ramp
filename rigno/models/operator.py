@@ -19,7 +19,7 @@ class AbstractOperator(nn.Module):
     tau: Union[float, int],
     **kwargs,
   ) -> Array:
-    raise self.call(u_inp, c_inp, x_inp, x_out, t_inp, tau, **kwargs)
+    return self.call(u_inp, c_inp, x_inp, x_out, t_inp, tau, **kwargs)
 
   def call(self,
     u_inp: Array,
