@@ -14,13 +14,24 @@ class Stepper(ABC):
     self._apply_operator = operator.apply
 
   def normalize_inputs(self, stats, inputs: Inputs) -> Inputs:
+
+    u_nrm = normalize(inputs.u_inp, shift=stats['u']['mean'], scale=stats['u']['std'])
+    if inputs.c_inp is None:
+      c_nrm = None
+    else:
+      c_nrm = normalize(inputs.c_inp, shift=stats['c']['mean'], scale=stats['c']['std'])
+    x_inp_nrm = 2 * ((inputs.x_inp - stats['x']['min']) / (stats['x']['max'] - stats['x']['min'])) - 1
+    x_out_nrm = 2 * ((inputs.x_out - stats['x']['min']) / (stats['x']['max'] - stats['x']['min'])) - 1
+    t_nrm = (inputs.t_inp - stats['t']['min']) / (stats['t']['max'] - stats['t']['min'])
+    tau_nrm = (inputs.tau) / (stats['t']['max'] - stats['t']['min'])
+
     inputs_nrm = Inputs(
-      u_inp = normalize(inputs.u_inp, shift=stats['u']['mean'], scale=stats['u']['std']),
-      c_inp = normalize(inputs.c_inp, shift=stats['c']['mean'], scale=stats['c']['std']),
-      x_inp = 2 * ((inputs.x_inp - stats['x']['min']) / (stats['x']['max'] - stats['x']['min'])) - 1,
-      x_out = 2 * ((inputs.x_out - stats['x']['min']) / (stats['x']['max'] - stats['x']['min'])) - 1,
-      t_inp = (inputs.t_inp - stats['t']['min']) / (stats['t']['max'] - stats['t']['min']),
-      tau = (inputs.tau) / (stats['t']['max'] - stats['t']['min']),
+      u_inp=u_nrm,
+      c_inp=c_nrm,
+      x_inp=x_inp_nrm,
+      x_out=x_out_nrm,
+      t_inp=t_nrm,
+      tau=tau_nrm,
     )
 
     return inputs_nrm
@@ -365,8 +376,8 @@ class AutoregressiveStepper:
 
     u_inp = inputs.u_inp
     batch_size = u_inp.shape[0]
-    num_grid_nodes = u_inp.shape[2:4]
-    num_outputs = u_inp.shape[-1]
+    num_pnodes = u_inp.shape[2]
+    num_vars = u_inp.shape[3]
     t_inp = inputs.t_inp.astype(float)
     random = (key is not None)
     if not random:
@@ -425,7 +436,7 @@ class AutoregressiveStepper:
     )
     rollout_full = rollout_full.swapaxes(0, 1)
     rollout_full = rollout_full.reshape(
-      batch_size, (num_jumps*self.num_steps_direct), *num_grid_nodes, num_outputs)
+      batch_size, (num_jumps*self.num_steps_direct), num_pnodes, num_vars)
     rollout = jnp.concatenate([u_inp, rollout_full], axis=1)
 
     # Get the last set of direct predictions partially (if necessary)
@@ -443,7 +454,7 @@ class AutoregressiveStepper:
       )
       rollout_part = rollout_part.swapaxes(0, 1)
       rollout_part = rollout_part.reshape(
-        batch_size, num_steps_rem, *num_grid_nodes, num_outputs)
+        batch_size, num_steps_rem, num_pnodes, num_vars)
       rollout = jnp.concatenate([rollout, rollout_part], axis=1)
 
     # Exclude the last timestep because it is returned separately

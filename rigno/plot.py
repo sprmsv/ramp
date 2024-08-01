@@ -31,6 +31,8 @@ CMAP_WRB = matplotlib.colors.LinearSegmentedColormap.from_list(
   N=200,
 )
 
+SCATTER_SETTINGS = dict(marker='s', s=4, alpha=.9)
+
 # TODO: Update
 def animate(trajs, idx_traj=0, symmetric=True, cmaps=CMAP_BBR, vertical=True):
 
@@ -90,7 +92,7 @@ def animate(trajs, idx_traj=0, symmetric=True, cmaps=CMAP_BBR, vertical=True):
 
   return ani, (fig, axs)
 
-def plot_trajectory(traj, idx_time, idx_traj=0, symmetric=True, ylabels=None):
+def plot_grid_trajectory(traj, idx_time, idx_traj=0, symmetric=True, ylabels=None):
 
   _HEIGHT_PER_ROW = 1.5
   _HEIGHT_MARGIN = .2
@@ -142,7 +144,7 @@ def plot_trajectory(traj, idx_time, idx_traj=0, symmetric=True, ylabels=None):
 
   return fig, axs
 
-def plot_estimations(u_gtr, u_prd, idx_out=-1, idx_inp=0, idx_traj=0, symmetric=True, names=None):
+def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None):
 
   _HEIGHT_PER_ROW = 2.5
   _HEIGHT_MARGIN = .2
@@ -161,33 +163,54 @@ def plot_estimations(u_gtr, u_prd, idx_out=-1, idx_inp=0, idx_traj=0, symmetric=
   u_err = (u_gtr - u_prd)
 
   for ivar in range(n_vars):
-    vmax_gtr = np.max(np.abs(u_gtr[idx_traj, [idx_inp, idx_out], ..., ivar]))
+    vmax_inp = np.max(u_inp[:, ivar])
+    vmax_gtr = np.max(u_gtr[:, ivar])
+    vmax_prd = np.max(u_prd[:, ivar])
+    vmax = max(vmax_inp, vmax_gtr, vmax_prd)
+    vmin_inp = np.min(u_inp[:, ivar])
+    vmin_gtr = np.min(u_gtr[:, ivar])
+    vmin_prd = np.min(u_prd[:, ivar])
+    vmin = min(vmin_inp, vmin_gtr, vmin_prd)
+    vmax_abs = max(np.abs(vmax), np.abs(vmin))
 
-    # TODO: TMP DO NOT USE vmin/vmax=None !! They share the colorbar !!
-    h = axs[ivar, 0].imshow(
-      u_gtr[idx_traj, idx_inp, ..., ivar],
+    vmin_gtr = np.min(np.abs(u_gtr[:, ivar]))
+
+    h = axs[ivar, 0].scatter(
+      x=x_inp[:, 0],
+      y=x_inp[:, 1],
+      c=u_inp[:, ivar],
       cmap=(CMAP_BWR if symmetric[ivar] else CMAP_WRB),
-      vmax=(vmax_gtr if symmetric[ivar] else None),
-      vmin=(-vmax_gtr if symmetric[ivar] else None),
+      vmax=(vmax_abs if symmetric[ivar] else vmax),
+      vmin=(-vmax_abs if symmetric[ivar] else vmin),
+      **SCATTER_SETTINGS,
     )
-    h = axs[ivar, 1].imshow(
-      u_gtr[idx_traj, idx_out, ..., ivar],
+    h = axs[ivar, 1].scatter(
+      x=x_out[:, 0],
+      y=x_out[:, 1],
+      c=u_gtr[:, ivar],
       cmap=(CMAP_BWR if symmetric[ivar] else CMAP_WRB),
-      vmax=(vmax_gtr if symmetric[ivar] else None),
-      vmin=(-vmax_gtr if symmetric[ivar] else None),
+      vmax=(vmax_abs if symmetric[ivar] else vmax),
+      vmin=(-vmax_abs if symmetric[ivar] else vmin),
+      **SCATTER_SETTINGS,
     )
-    h = axs[ivar, 2].imshow(
-      u_prd[idx_traj, idx_out, ..., ivar],
+    h = axs[ivar, 2].scatter(
+      x=x_out[:, 0],
+      y=x_out[:, 1],
+      c=u_prd[:, ivar],
       cmap=(CMAP_BWR if symmetric[ivar] else CMAP_WRB),
-      vmax=(vmax_gtr if symmetric[ivar] else None),
-      vmin=(-vmax_gtr if symmetric[ivar] else None),
+      vmax=(vmax_abs if symmetric[ivar] else vmax),
+      vmin=(-vmax_abs if symmetric[ivar] else vmin),
+      **SCATTER_SETTINGS,
     )
     plt.colorbar(h, ax=axs[ivar, 0:3], fraction=.1)
-    h = axs[ivar, 3].imshow(
-      np.abs(u_err[idx_traj, idx_out, ..., ivar]),
+    h = axs[ivar, 3].scatter(
+      x=x_out[:, 0],
+      y=x_out[:, 1],
+      c=np.abs(u_err[:, ivar]),
       cmap=CMAP_WRB,
       vmin=0,
-      vmax=np.max(np.abs(u_err[idx_traj, idx_out, ..., ivar])),
+      vmax=np.max(np.abs(u_err[:, ivar])),
+      **SCATTER_SETTINGS,
     )
     plt.colorbar(h, ax=axs[ivar, 3], fraction=.1)
 
@@ -204,71 +227,12 @@ def plot_estimations(u_gtr, u_prd, idx_out=-1, idx_inp=0, idx_traj=0, symmetric=
   for ax in axs.flatten():
     ax.set_xticks([])
     ax.set_yticks([])
+    ax.set(xlim=[0, 1])
+    ax.set(ylim=[0, 1])
 
   return fig, axs
 
-# TODO: Update
-def animate_estimations(u_gtr, u_prd, u_err, idx_traj=0):
-  _HEIGHT_PER_ROW = 1.5
-  _HEIGHT_MARGIN = .2
-  _WIDTH_PER_COL = 1.5
-  _WIDTH_MARGIN = .2
-
-  n_vars = u_gtr.shape[-1]
-  n_time = u_gtr.shape[1]
-  fig, axs = plt.subplots(
-    nrows=n_vars, ncols=3,
-    figsize=(_WIDTH_PER_COL*n_vars+_WIDTH_MARGIN, _HEIGHT_PER_ROW*3+_HEIGHT_MARGIN),
-    sharex=True, sharey=True,
-  )
-
-  handlers_gtr = []
-  handlers_err = []
-  handlers_prd = []
-  for ivar in range(n_vars):
-    h = axs[ivar, 0].imshow(
-      u_gtr[idx_traj, 0, ..., ivar],
-      cmap=CMAP_BWR,
-      vmin=-np.max(u_gtr[idx_traj, :, ..., ivar]),
-      vmax=np.max(u_gtr[idx_traj, :, ..., ivar]),
-    )
-    handlers_gtr.append(h)
-    h = axs[ivar, 1].imshow(
-      u_prd[idx_traj, 0, ..., ivar],
-      cmap=CMAP_BWR,
-      vmin=-np.max(u_gtr[idx_traj, :, ..., ivar]),
-      vmax=np.max(u_gtr[idx_traj, :, ..., ivar]),
-    )
-    handlers_prd.append(h)
-    plt.colorbar(h, ax=axs[ivar, :2], fraction=.1)
-    h = axs[ivar, 2].imshow(
-      np.abs(u_err[idx_traj, 0, ..., ivar]),
-      cmap=CMAP_WRB,
-      vmin=0,
-      vmax=np.max(np.abs(u_err[idx_traj, :, ..., ivar])),
-    )
-    handlers_err.append(h)
-    plt.colorbar(h, ax=axs[ivar, 2], fraction=.2)
-
-  axs[0, 0].set(title='Ground-truth');
-  axs[0, 1].set(title='Estimate');
-  axs[0, 2].set(title='Absolute error');
-
-  for ivar in range(n_vars):
-    axs[ivar, 0].set(ylabel=f'Variable {ivar:02d}');
-
-  def update(frame):
-    fig.suptitle(f'timestep = {frame}')
-    for ivar in range(n_vars):
-      handlers_gtr[ivar].set_data(u_gtr[idx_traj, frame, ..., ivar])
-      handlers_prd[ivar].set_data(u_prd[idx_traj, frame, ..., ivar])
-      handlers_err[ivar].set_data(u_err[idx_traj, frame, ..., ivar])
-
-  ani = animation.FuncAnimation(fig=fig, func=update, frames=n_time, interval=150)
-
-  return ani, (fig, axs)
-
-def plot_ensemble(u_gtr, u_ens, idx_out=-1, idx_traj=0, symmetric=True, names=None):
+def plot_ensemble(u_gtr, u_ens, x, symmetric=True, names=None):
 
   _HEIGHT_PER_ROW = 2.5
   _HEIGHT_MARGIN = .2
@@ -289,27 +253,36 @@ def plot_ensemble(u_gtr, u_ens, idx_out=-1, idx_traj=0, symmetric=True, names=No
   u_err = (u_gtr - u_ens_mean)
 
   for ivar in range(n_vars):
-    vmax = np.max(np.abs(u_gtr[idx_traj, idx_out, ..., ivar]))
+    vmax = np.max(np.abs(u_gtr[:, ivar]))
 
-    h = axs[ivar, 0].imshow(
-      u_ens_mean[idx_traj, idx_out, ..., ivar],
+    h = axs[ivar, 0].scatter(
+      x=x[:, 0],
+      y=x[:, 1],
+      c=u_ens_mean[:, ivar],
       cmap=(CMAP_BWR if symmetric[ivar] else CMAP_WRB),
       vmax=(vmax if symmetric[ivar] else None),
       vmin=(-vmax if symmetric[ivar] else None),
+      **SCATTER_SETTINGS,
     )
     plt.colorbar(h, ax=axs[ivar, 0], fraction=.1)
-    h = axs[ivar, 1].imshow(
-      u_ens_std[idx_traj, idx_out, ..., ivar],
+    h = axs[ivar, 1].scatter(
+      x=x[:, 0],
+      y=x[:, 1],
+      c=u_ens_std[:, ivar],
       cmap=CMAP_WRB,
       vmin=0,
       vmax=None,
+      **SCATTER_SETTINGS,
     )
     plt.colorbar(h, ax=axs[ivar, 1], fraction=.1)
-    h = axs[ivar, 2].imshow(
-      np.abs(u_err[idx_traj, idx_out, ..., ivar]),
+    h = axs[ivar, 2].scatter(
+      x=x[:, 0],
+      y=x[:, 1],
+      c=np.abs(u_err[:, ivar]),
       cmap=CMAP_WRB,
       vmin=0,
       vmax=None,
+      **SCATTER_SETTINGS,
     )
     plt.colorbar(h, ax=axs[ivar, 2], fraction=.1)
 
@@ -352,6 +325,7 @@ def plot_error_vs_time(df: pd.DataFrame, idx_fn: int, variable_title: str = 'var
 
   return g
 
+# TODO: Update
 def plot_intermediates(features, idx_traj: int = 0, idx_time: int = 0, share_cmap: bool = False):
   _HEIGHT_PER_ROW = 2
   _HEIGHT_MARGIN = .2

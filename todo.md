@@ -2,14 +2,20 @@
 
 # NEXT STEPS
 
-- Update train/test scripts
+- Update train script
+- Update test script
 
 - Experiment with the new version (unstructured mesh)
+    - Step 1: reproduce results for full grids
+    - Step 2: experiment with partial grids
+    - Step 3: experiment with unstructured datasets
 
 - Extend for time-independent problems
 
 - wave_equation: do not learn identity map for propagation speed
-    - Allows you use residual/derivative stepping
+    - Allows using residual/derivative stepping
+
+- (??) Extend autoregressive and unrollings to variable x and c
 
 # Future work
 
@@ -71,8 +77,6 @@
     - Number of parameters
     - FLOPs / MADD
     - Inference time (improve your benchmarking)
-
-## Known parameters
 
 ## General Boundary Conditions
 - Extend for general boundary conditions (e.g., open, Robin)

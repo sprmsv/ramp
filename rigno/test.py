@@ -20,7 +20,7 @@ from rigno.experiments import DIR_EXPERIMENTS
 from rigno.metrics import rel_lp_error_norm
 from rigno.models.rigno import AbstractOperator, RIGNO
 from rigno.models.unet import UNet
-from rigno.plot import plot_estimations, plot_ensemble, plot_error_vs_time
+from rigno.plot import plot_estimates, plot_ensemble, plot_error_vs_time
 from rigno.stepping import Stepper, TimeDerivativeStepper, ResidualStepper, OutputStepper
 from rigno.stepping import AutoregressiveStepper
 from rigno.utils import Array, disable_logging, profile
