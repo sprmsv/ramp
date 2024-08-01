@@ -3,7 +3,7 @@
 import h5py
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Union, Sequence
+from typing import Union, Sequence, NamedTuple
 
 import flax.typing
 import jax
@@ -20,9 +20,7 @@ class Metadata:
   data_group: str
   coeff_group: str
   domain_t: tuple[int, int]
-  domain_x: tuple[int, int]
-  domain_y: tuple[int, int]
-  domain_z: tuple[int, int]
+  domain_x: tuple[Sequence[int], Sequence[int]]
   active_variables: Sequence[int]
   target_variables: Sequence[int]
   signed: dict[str, Union[bool, Sequence[bool]]]
@@ -67,9 +65,7 @@ DATASET_METADATA = {
     data_group='velocity',
     coeff_group=None,
     domain_t=(0, 1),
-    domain_x=(0, 1),
-    domain_y=(0, 1),
-    domain_z=(0, 1),
+    domain_x=([0, 0], [1, 1]),
     active_variables=ACTIVE_VARS_NS,
     target_variables=TARGET_VARS_NS,
     signed=SIGNED_NS,
@@ -80,9 +76,7 @@ DATASET_METADATA = {
     data_group='velocity',
     coeff_group=None,
     domain_t=(0, 1),
-    domain_x=(0, 1),
-    domain_y=(0, 1),
-    domain_z=(0, 1),
+    domain_x=([0, 0], [1, 1]),
     active_variables=ACTIVE_VARS_NS,
     target_variables=TARGET_VARS_NS,
     signed=SIGNED_NS,
@@ -93,9 +87,7 @@ DATASET_METADATA = {
     data_group='velocity',
     coeff_group=None,
     domain_t=(0, 1),
-    domain_x=(0, 1),
-    domain_y=(0, 1),
-    domain_z=(0, 1),
+    domain_x=([0, 0], [1, 1]),
     active_variables=ACTIVE_VARS_NS,
     target_variables=TARGET_VARS_NS,
     signed=SIGNED_NS,
@@ -106,9 +98,7 @@ DATASET_METADATA = {
     data_group='velocity',
     coeff_group=None,
     domain_t=(0, 1),
-    domain_x=(0, 1),
-    domain_y=(0, 1),
-    domain_z=(0, 1),
+    domain_x=([0, 0], [1, 1]),
     active_variables=ACTIVE_VARS_NS,
     target_variables=TARGET_VARS_NS,
     signed=SIGNED_NS,
@@ -119,9 +109,7 @@ DATASET_METADATA = {
     data_group='velocity',
     coeff_group=None,
     domain_t=(0, 1),
-    domain_x=(0, 1),
-    domain_y=(0, 1),
-    domain_z=(0, 1),
+    domain_x=([0, 0], [1, 1]),
     active_variables=ACTIVE_VARS_NS,
     target_variables=TARGET_VARS_NS,
     signed=SIGNED_NS,
@@ -132,9 +120,7 @@ DATASET_METADATA = {
     data_group='velocity',
     coeff_group=None,
     domain_t=(0, 1),
-    domain_x=(0, 1),
-    domain_y=(0, 1),
-    domain_z=(0, 1),
+    domain_x=([0, 0], [1, 1]),
     active_variables=ACTIVE_VARS_NS,
     target_variables=TARGET_VARS_NS,
     signed=SIGNED_NS,
@@ -146,9 +132,7 @@ DATASET_METADATA = {
     data_group='data',
     coeff_group=None,
     domain_t=(0, 1),
-    domain_x=(0, 1),
-    domain_y=(0, 1),
-    domain_z=(0, 1),
+    domain_x=([0, 0], [1, 1]),
     active_variables=ACTIVE_VARS_CE,
     target_variables=TARGET_VARS_CE,
     signed=SIGNED_CE,
@@ -159,9 +143,7 @@ DATASET_METADATA = {
     data_group='data',
     coeff_group=None,
     domain_t=(0, 1),
-    domain_x=(0, 1),
-    domain_y=(0, 1),
-    domain_z=(0, 1),
+    domain_x=([0, 0], [1, 1]),
     active_variables=ACTIVE_VARS_CE,
     target_variables=TARGET_VARS_CE,
     signed=SIGNED_CE,
@@ -172,9 +154,7 @@ DATASET_METADATA = {
     data_group='data',
     coeff_group=None,
     domain_t=(0, 1),
-    domain_x=(0, 1),
-    domain_y=(0, 1),
-    domain_z=(0, 1),
+    domain_x=([0, 0], [1, 1]),
     active_variables=ACTIVE_VARS_CE,
     target_variables=TARGET_VARS_CE,
     signed=SIGNED_CE,
@@ -185,9 +165,7 @@ DATASET_METADATA = {
     data_group='solution',
     coeff_group=None,
     domain_t=(0, 2),
-    domain_x=(0, 1),
-    domain_y=(0, 1),
-    domain_z=(0, 1),
+    domain_x=([0, 0], [1, 1]),
     active_variables=ACTIVE_VARS_CE,
     target_variables=TARGET_VARS_CE,
     signed=SIGNED_CE,
@@ -198,9 +176,7 @@ DATASET_METADATA = {
     data_group='data',
     coeff_group=None,
     domain_t=(0, 1),
-    domain_x=(0, 1),
-    domain_y=(0, 1),
-    domain_z=(0, 1),
+    domain_x=([0, 0], [1, 1]),
     active_variables=ACTIVE_VARS_CE,
     target_variables=TARGET_VARS_CE,
     signed=SIGNED_CE,
@@ -211,9 +187,7 @@ DATASET_METADATA = {
     data_group='data',
     coeff_group=None,
     domain_t=(0, 1),
-    domain_x=(0, 1),
-    domain_y=(0, 1),
-    domain_z=(0, 1),
+    domain_x=([0, 0], [1, 1]),
     active_variables=ACTIVE_VARS_CE,
     target_variables=TARGET_VARS_CE,
     signed=SIGNED_CE,
@@ -224,9 +198,7 @@ DATASET_METADATA = {
     data_group='data',
     coeff_group=None,
     domain_t=(0, 1),
-    domain_x=(0, 1),
-    domain_y=(0, 1),
-    domain_z=(0, 1),
+    domain_x=([0, 0], [1, 1]),
     active_variables=ACTIVE_VARS_CE,
     target_variables=TARGET_VARS_CE,
     signed=SIGNED_CE,
@@ -237,9 +209,7 @@ DATASET_METADATA = {
     data_group='solution',
     coeff_group=None,
     domain_t=(0, 1),
-    domain_x=(0, 1),
-    domain_y=(0, 1),
-    domain_z=(0, 1),
+    domain_x=([0, 0], [1, 1]),
     # CHECK: Where is the gravitational field?
     active_variables=ACTIVE_VARS_CE,
     target_variables=TARGET_VARS_CE,
@@ -251,9 +221,7 @@ DATASET_METADATA = {
     data_group='solution',
     coeff_group=None,
     domain_t=(0, 5),
-    domain_x=(0, 1),
-    domain_y=(0, 1),
-    domain_z=(0, 1),
+    domain_x=([0, 0], [1, 1]),
     active_variables=ACTIVE_VARS_GCE,
     target_variables=TARGET_VARS_GCE,
     signed=SIGNED_GCE,
@@ -265,9 +233,7 @@ DATASET_METADATA = {
     data_group='solution',
     coeff_group=None,
     domain_t=(0, 0.0002),
-    domain_x=(0, 1),
-    domain_y=(0, 1),
-    domain_z=(0, 1),
+    domain_x=([0, 0], [1, 1]),
     active_variables=ACTIVE_VARS_RD,
     target_variables=TARGET_VARS_RD,
     signed=SIGNED_RD,
@@ -279,9 +245,7 @@ DATASET_METADATA = {
     data_group='solution',
     coeff_group='c',
     domain_t=(0, 1),
-    domain_x=(0, 1),
-    domain_y=(0, 1),
-    domain_z=(0, 1),
+    domain_x=([0, 0], [1, 1]),
     active_variables=ACTIVE_VARS_WE,
     target_variables=TARGET_VARS_WE,
     signed=SIGNED_WE,
@@ -292,9 +256,7 @@ DATASET_METADATA = {
     data_group='solution',
     coeff_group='c',
     domain_t=(0, 1),
-    domain_x=(0, 1),
-    domain_y=(0, 1),
-    domain_z=(0, 1),
+    domain_x=([0, 0], [1, 1]),
     active_variables=ACTIVE_VARS_WE,
     target_variables=TARGET_VARS_WE,
     signed=SIGNED_WE,
@@ -302,8 +264,7 @@ DATASET_METADATA = {
   ),
 }
 
-@dataclass
-class Batch:
+class Batch(NamedTuple):
   u: Array
   c: Array
   t: Array
@@ -332,17 +293,17 @@ class Dataset:
   def __init__(self,
     datadir: str,
     datapath: str,
-    key: flax.typing.PRNGKey = None,
-    n_train: int = 0,
-    n_valid: int = 0,
-    n_test: int = 0,
-    preload: bool = False,
     include_passive_variables: bool = False,
     concatenate_coeffs: bool = False,
     time_cutoff_idx: int = None,
     time_downsample_factor: int = 1,
     space_downsample_grid: bool = False,
     space_downsample_factor: int = 1,
+    n_train: int = 0,
+    n_valid: int = 0,
+    n_test: int = 0,
+    preload: bool = False,
+    key: flax.typing.PRNGKey = None,
   ):
 
     # Set attributes
@@ -395,10 +356,18 @@ class Dataset:
 
     # Instantiate the dataset stats
     self.stats = {
-      'trj': {'mean': None, 'std': None},
-      'der': {'mean': None, 'std': None},
-      'res': {'mean': None, 'std': None},
+      'u': {'mean': None, 'std': None},
       'c': {'mean': None, 'std': None},
+      'x': {
+        'min': np.array(self.metadata.domain_x[0]).reshape(1, 1, 1, -1),
+        'max': np.array(self.metadata.domain_x[1]).reshape(1, 1, 1, -1),
+      },
+      't': {
+        'min': np.array(self.metadata.domain_t[0]).reshape(1, 1, 1, 1),
+        'max': np.array(self.metadata.domain_t[1]).reshape(1, 1, 1, 1),
+      },
+      'res': {'mean': None, 'std': None},
+      'der': {'mean': None, 'std': None},
     }
 
     # Load the data
@@ -424,23 +393,24 @@ class Dataset:
     batch = self.train(np.arange(self.nums['train']))
     u = batch.u
     c = batch.c
+    t = batch.t
 
-    # Compute statistics of the solutions
-    self.stats['trj']['mean'] = np.mean(u, axis=(0, 1, 2), keepdims=True)
-    self.stats['trj']['std'] = np.std(u, axis=(0, 1, 2), keepdims=True)
+    # Compute statistics of solutions and coefficients
+    self.stats['u']['mean'] = np.mean(u, axis=(0, 1, 2), keepdims=True)
+    self.stats['u']['std'] = np.std(u, axis=(0, 1, 2), keepdims=True)
     if c is not None:
       self.stats['c']['mean'] = np.mean(c, axis=(0, 1, 2), keepdims=True)
       self.stats['c']['std'] = np.std(c, axis=(0, 1, 2), keepdims=True)
 
     # Compute statistics of the residuals and time derivatives
-    # TRY: Compute statistics of residuals of normalized trajectories
     _get_res = lambda s, trj: (trj[:, (s):] - trj[:, :-(s)])
     residuals = []
     derivatives = []
     for s in range(1, residual_steps+1):
       res = _get_res(s, u)
+      tau = _get_res(s, t)
       residuals.append(res)
-      derivatives.append(res / s)
+      derivatives.append(res / tau)
     residuals = np.concatenate(residuals, axis=1)
     derivatives = np.concatenate(derivatives, axis=1)
     self.stats['res']['mean'] = np.mean(residuals, axis=(0, 1, 2), keepdims=True)
@@ -448,7 +418,7 @@ class Dataset:
     self.stats['der']['mean'] = np.mean(derivatives, axis=(0, 1, 2), keepdims=True)
     self.stats['der']['std'] = np.std(derivatives, axis=(0, 1, 2), keepdims=True)
 
-  def _fetch(self, idx: Union[int, Sequence]):
+  def _fetch(self, idx: Union[int, Sequence]) -> Batch:
     """Fetches a sample from the dataset, given its global index."""
 
     # Check inputs
@@ -490,8 +460,8 @@ class Dataset:
         c = c[:, :, ::self.space_downsample_factor, ::self.space_downsample_factor]
 
     # Define spatial coordinates
-    _xv = np.linspace(*self.metadata.domain_x, u.shape[2], endpoint=(not self.metadata.periodic))
-    _yv = np.linspace(*self.metadata.domain_y, u.shape[3], endpoint=(not self.metadata.periodic))
+    _xv = np.linspace(self.metadata.domain_x[0][0], self.metadata.domain_x[1][0], u.shape[2], endpoint=(not self.metadata.periodic))
+    _yv = np.linspace(self.metadata.domain_x[0][1], self.metadata.domain_x[1][1], u.shape[3], endpoint=(not self.metadata.periodic))
     _x, _y = np.meshgrid(_xv, _yv)
     # Align the dimensions
     _x = _x.reshape(1, 1, -1, 1)

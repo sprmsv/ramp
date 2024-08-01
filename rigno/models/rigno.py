@@ -11,7 +11,7 @@ from rigno.graph.typed_graph import (
     TypedGraph, EdgeSet, EdgeSetKey,
     EdgesIndices, NodeSet, Context)
 from rigno.models.graphnet import DeepTypedGraphNet
-from rigno.models.operator import AbstractOperator
+from rigno.models.operator import AbstractOperator, Inputs
 from rigno.utils import Array, shuffle_arrays
 
 
@@ -292,7 +292,11 @@ class RegionInteractionGraphBuilder:
 
     return graph
 
-  def build(self, x_inp: Array, x_out: Array, key: Union[flax.typing.PRNGKey, None]) -> RegionInteractionGraphs:
+  def build(self, x_inp: Array, x_out: Array, domain: Array, key: Union[flax.typing.PRNGKey, None]) -> RegionInteractionGraphs:
+
+    # Normalize coordinates in [-1, +1)
+    x_inp = 2 * (x_inp - domain[0]) / (domain[1] - domain[0]) - 1
+    x_out = 2 * (x_out - domain[0]) / (domain[1] - domain[0]) - 1
 
     # Randomly sub-sample pmesh to get rmesh
     if key is None:
@@ -630,11 +634,11 @@ class RIGNO(AbstractOperator):
   """TODO: Add docstrings"""
 
   num_outputs: int
-  mlp_hidden_layers: int = 1
+  processor_steps: int = 18
   node_latent_size: int = 128
   edge_latent_size: int = 128
+  mlp_hidden_layers: int = 1
   mlp_hidden_size: int = 128
-  processor_steps: int = 18
   concatenate_t: bool = True
   concatenate_tau: bool = True
   conditional_normalization: bool = True
@@ -744,44 +748,41 @@ class RIGNO(AbstractOperator):
     return output_pnodes
 
   def call(self,
-    u_inp: Array,
-    c_inp: Union[Array, None],
-    x_inp: Array,
-    x_out: Array,
-    t_inp: Union[Array, None],
-    tau: Union[float, int, None],
+    inputs: Inputs,
     graphs: RegionInteractionGraphs,
     key: flax.typing.PRNGKey = None,
   ) -> Array:
     """Inputs must be of shape [batch_size, 1, num_physical_nodes, num_inputs]"""
 
     # Check input functions
-    self._check_function(u_inp, x=x_inp)
-    if c_inp is not None:
-      self._check_function(c_inp, x=x_inp)
-    assert u_inp.shape[3] == self.num_outputs
+    self._check_function(inputs.u_inp, x=inputs.x_inp)
+    if inputs.c_inp is not None:
+      self._check_function(inputs.c_inp, x=inputs.x_inp)
+    assert inputs.u_inp.shape[3] == self.num_outputs
 
     # Read dimensions
-    batch_size = u_inp.shape[0]
-    num_pnodes_inp = x_inp.shape[0]
-    num_pnodes_out = x_out.shape[0]
+    batch_size = inputs.u_inp.shape[0]
+    num_pnodes_inp = inputs.x_inp.shape[0]
+    num_pnodes_out = inputs.x_out.shape[0]
 
     # Prepare the time channel
     if self.concatenate_t:
-      assert t_inp is not None
-      t_inp = jnp.array(t_inp, dtype=jnp.float32)
+      assert inputs.t_inp is not None
+      t_inp = jnp.array(inputs.t_inp, dtype=jnp.float32)
       if t_inp.size == 1:
         t_inp = jnp.tile(t_inp.reshape(1, 1), reps=(batch_size, 1))
     # Prepare the time difference channel
     if self.concatenate_tau:
-      assert tau is not None
-      tau = jnp.array(tau, dtype=jnp.float32)
+      assert inputs.tau is not None
+      tau = jnp.array(inputs.tau, dtype=jnp.float32)
       if tau.size == 1:
         tau = jnp.tile(tau.reshape(1, 1), reps=(batch_size, 1))
 
     # Concatenate the known coefficients to the channels of the input function
-    if c_inp is not None:
-      u_inp = jnp.concatenate([u_inp, c_inp], axis=-1)
+    if inputs.c_inp is None:
+      u_inp = inputs.u_inp
+    else:
+      u_inp = jnp.concatenate([inputs.u_inp, inputs.c_inp], axis=-1)
 
     # Prepare the physical node features
     # u -> [num_pnodes_inp, batch_size, num_inputs]
@@ -805,7 +806,7 @@ class RIGNO(AbstractOperator):
     # Reshape the output to [batch_size, 1, num_pnodes_out, num_outputs]
     # [num_pnodes_out, batch_size, num_outputs] -> u
     output = self._reorder_features(output_pnodes, num_pnodes_out)
-    self._check_function(output, x=x_out)
+    self._check_function(output, x=inputs.x_out)
 
     return output
 

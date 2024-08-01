@@ -21,7 +21,7 @@ from rigno.metrics import rel_lp_error_norm
 from rigno.models.rigno import AbstractOperator, RIGNO
 from rigno.models.unet import UNet
 from rigno.plot import plot_estimations, plot_ensemble, plot_error_vs_time
-from rigno.stepping import Stepper, TimeDerivativeUpdater, ResidualUpdater, OutputUpdater
+from rigno.stepping import Stepper, TimeDerivativeStepper, ResidualStepper, OutputStepper
 from rigno.stepping import AutoregressiveStepper
 from rigno.utils import Array, disable_logging, profile
 
@@ -704,11 +704,11 @@ def main(argv):
 
   # Set the stepper type
   if configs['flags']['stepper'] == 'out':
-    stepping = OutputUpdater
+    stepping = OutputStepper
   elif configs['flags']['stepper'] == 'res':
-    stepping = ResidualUpdater
+    stepping = ResidualStepper
   elif configs['flags']['stepper'] == 'der':
-    stepping = TimeDerivativeUpdater
+    stepping = TimeDerivativeStepper
   else:
     raise ValueError
 

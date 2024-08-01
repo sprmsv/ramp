@@ -4,7 +4,7 @@ import flax.typing
 import jax
 import jax.numpy as jnp
 
-from rigno.models.rigno import AbstractOperator
+from rigno.models.operator import AbstractOperator, Inputs
 from rigno.utils import Array, normalize, unnormalize
 
 
@@ -13,27 +13,24 @@ class Stepper(ABC):
   def __init__(self, operator: AbstractOperator):
     self._apply_operator = operator.apply
 
-  def normalize_inputs(self, stats, u_inp, t_inp, tau):
-    u_inp_nrm = normalize(
-      u_inp,
-      shift=stats['trj']['mean'],
-      scale=stats['trj']['std'],
+  def normalize_inputs(self, stats, inputs: Inputs) -> Inputs:
+    inputs_nrm = Inputs(
+      u_inp = normalize(inputs.u_inp, shift=stats['u']['mean'], scale=stats['u']['std']),
+      c_inp = normalize(inputs.c_inp, shift=stats['c']['mean'], scale=stats['c']['std']),
+      x_inp = 2 * ((inputs.x_inp - stats['x']['min']) / (stats['x']['max'] - stats['x']['min'])) - 1,
+      x_out = 2 * ((inputs.x_out - stats['x']['min']) / (stats['x']['max'] - stats['x']['min'])) - 1,
+      t_inp = (inputs.t_inp - stats['t']['min']) / (stats['t']['max'] - stats['t']['min']),
+      tau = (inputs.tau) / (stats['t']['max'] - stats['t']['min']),
     )
 
-    # TMP TODO: Normalize c_inp and x_inp and x_out
-    t_inp_nrm = t_inp / stats['time']['max']
-    tau_nrm = tau / stats['time']['max']
-
-    return u_inp_nrm, t_inp_nrm, tau_nrm
+    return inputs_nrm
 
   @abstractmethod
   def apply(self,
     variables,
     stats,
-    u_inp: Array,
-    t_inp: Array,
-    tau: Array,
-    key: flax.typing.PRNGKey = None,
+    inputs: Inputs,
+    **kwargs,
   ):
     """
     Normalizes raw inputs and applies the operator on it.
@@ -46,35 +43,43 @@ class Stepper(ABC):
   def unroll(self,
     variables,
     stats,
-    u_inp: Array,
-    t_inp: Array,
-    tau: Array,
     num_steps: int,
-    key: flax.typing.PRNGKey = None,
+    inputs: Inputs,
+    **kwargs,
   ):
     """Apply the stepper multiple times to reach t_inp+tau by dividing tau."""
+    # NOTE: Assuming constant x  # TODO: Support variable x
+    # NOTE: Assuming constant c  # TODO: Support variable c
 
     def scan_fn_fractional(carry, forcing):
       u_inp, t_inp = carry
       tau = forcing
+      _inputs = Inputs(
+        u_inp=u_inp,
+        c_inp=inputs.c_inp,
+        x_inp=inputs.x_inp,
+        x_out=inputs.x_out,
+        t_inp=t_inp,
+        tau=tau
+      )
       u_out = self.apply(
         variables,
         stats,
-        u_inp=u_inp,
-        t_inp=t_inp,
-        tau=tau,
-        key=key,
+        inputs=_inputs,
+        **kwargs,
       )
       u_next = u_out
       t_next = t_inp + tau
       carry = (u_next, t_next)
       return carry, u_out
 
-    tau_tiled = jnp.repeat(tau, repeats=num_steps)
+    # Split tau in num_steps fractional parts
+    tau_tiled = jnp.repeat(inputs.tau, repeats=num_steps)
     tau_fract = tau_tiled / num_steps
     forcing = tau_fract
+
     (u_out, _), _ = jax.lax.scan(f=scan_fn_fractional,
-      init=(u_inp, t_inp), xs=forcing, length=num_steps)
+      init=(inputs.u_inp, inputs.t_inp), xs=forcing, length=num_steps)
 
     return u_out
 
@@ -82,11 +87,8 @@ class Stepper(ABC):
   def get_loss_inputs(self,
     variables,
     stats,
-    u_inp: Array,
-    t_inp: Array,
-    u_tgt: Array,
-    tau: Array,
-    key: flax.typing.PRNGKey = None,
+    inputs: Inputs,
+    **kwargs,
   ):
     """
     Calculates prediction and target variables, ready to be given as input to the loss function.
@@ -99,35 +101,29 @@ class Stepper(ABC):
   def get_intermediates(self,
     variables,
     stats,
-    u_inp: Array,
-    t_inp: Array,
-    tau: Array,
-    key: flax.typing.PRNGKey = None,
+    inputs: Inputs,
+    **kwargs,
   ):
     # Normalize inputs
-    u_inp_nrm, t_inp_nrm, tau_nrm = self.normalize_inputs(stats, u_inp, t_inp, tau)
+    inputs_nrm = self.normalize_inputs(stats, inputs)
 
     # Get predicted normalized derivatives
     _, state = self._apply_operator(
       variables,
-      u_inp=u_inp_nrm,
-      t_inp=t_inp_nrm,
-      tau=tau_nrm,
-      key=key,
+      inputs=inputs_nrm,
       capture_intermediates=True,
+      **kwargs,
     )
 
     return state['intermediates']
 
-class TimeDerivativeUpdater(Stepper):
+class TimeDerivativeStepper(Stepper):
 
   def apply(self,
     variables,
     stats,
-    u_inp: Array,
-    t_inp: Array,
-    tau: Array,
-    key: flax.typing.PRNGKey = None,
+    inputs: Inputs,
+    **kwargs,
   ):
     """
     Normalizes raw inputs and applies the operator on it.
@@ -137,15 +133,13 @@ class TimeDerivativeUpdater(Stepper):
     """
 
     # Normalize inputs
-    u_inp_nrm, t_inp_nrm, tau_nrm = self.normalize_inputs(stats, u_inp, t_inp, tau)
+    inputs_nrm = self.normalize_inputs(stats, inputs)
 
     # Get predicted normalized derivatives
     d_prd_nrm = self._apply_operator(
       variables,
-      u_inp=u_inp_nrm,
-      t_inp=t_inp_nrm,
-      tau=tau_nrm,
-      key=key,
+      inputs=inputs_nrm,
+      **kwargs,
     )
 
     # Unnormalize predicted derivatives
@@ -156,18 +150,16 @@ class TimeDerivativeUpdater(Stepper):
     )
 
     # Get predicted output
-    u_prd = u_inp + (d_prd * tau)
+    u_prd = inputs.u_inp + (d_prd * inputs.tau)
 
     return u_prd
 
   def get_loss_inputs(self,
     variables,
     stats,
-    u_inp: Array,
-    t_inp: Array,
     u_tgt: Array,
-    tau: Array,
-    key: flax.typing.PRNGKey = None,
+    inputs: Inputs,
+    **kwargs,
   ):
     """
     Calculates prediction and target variables, ready to be given as input to the loss function.
@@ -177,19 +169,17 @@ class TimeDerivativeUpdater(Stepper):
     """
 
     # Normalize inputs
-    u_inp_nrm, t_inp_nrm, tau_nrm = self.normalize_inputs(stats, u_inp, t_inp, tau)
+    inputs_nrm = self.normalize_inputs(stats, inputs)
 
     # Get predicted normalized derivatives
     d_prd_nrm = self._apply_operator(
       variables,
-      u_inp=u_inp_nrm,
-      t_inp=t_inp_nrm,
-      tau=tau_nrm,
-      key=key,
+      inputs=inputs_nrm,
+      **kwargs,
     )
 
     # Get target normalized derivatives
-    d_tgt = (u_tgt - u_inp) / tau
+    d_tgt = (u_tgt - inputs.u_inp) / inputs.tau
     d_tgt_nrm = normalize(
       d_tgt,
       shift=stats['der']['mean'],
@@ -198,15 +188,13 @@ class TimeDerivativeUpdater(Stepper):
 
     return (d_tgt_nrm, d_prd_nrm)
 
-class ResidualUpdater(Stepper):
+class ResidualStepper(Stepper):
 
   def apply(self,
     variables,
     stats,
-    u_inp: Array,
-    t_inp: Array,
-    tau: Array,
-    key: flax.typing.PRNGKey = None,
+    inputs: Inputs,
+    **kwargs,
   ):
     """
     Normalizes raw inputs and applies the operator on it.
@@ -216,15 +204,13 @@ class ResidualUpdater(Stepper):
     """
 
     # Normalize inputs
-    u_inp_nrm, t_inp_nrm, tau_nrm = self.normalize_inputs(stats, u_inp, t_inp, tau)
+    inputs_nrm = self.normalize_inputs(stats, inputs)
 
     # Get predicted normalized derivative
     r_prd_nrm = self._apply_operator(
       variables,
-      u_inp=u_inp_nrm,
-      t_inp=t_inp_nrm,
-      tau=tau_nrm,
-      key=key,
+      inputs=inputs_nrm,
+      **kwargs,
     )
 
     # Unnormalize predicted residuals
@@ -235,18 +221,16 @@ class ResidualUpdater(Stepper):
     )
 
     # Get predicted output
-    u_prd = u_inp + r_prd
+    u_prd = inputs.u_inp + r_prd
 
     return u_prd
 
   def get_loss_inputs(self,
     variables,
     stats,
-    u_inp: Array,
-    t_inp: Array,
     u_tgt: Array,
-    tau: Array,
-    key: flax.typing.PRNGKey = None,
+    inputs: Inputs,
+    **kwargs,
   ):
     """
     Calculates prediction and target variables, ready to be given as input to the loss function.
@@ -256,19 +240,17 @@ class ResidualUpdater(Stepper):
     """
 
     # Normalize inputs
-    u_inp_nrm, t_inp_nrm, tau_nrm = self.normalize_inputs(stats, u_inp, t_inp, tau)
+    inputs_nrm = self.normalize_inputs(stats, inputs)
 
     # Get predicted normalized residuals
     r_prd_nrm = self._apply_operator(
       variables,
-      u_inp=u_inp_nrm,
-      t_inp=t_inp_nrm,
-      tau=tau_nrm,
-      key=key,
+      inputs=inputs_nrm,
+      **kwargs,
     )
 
     # Get target normalized residuals
-    r_tgt = u_tgt - u_inp
+    r_tgt = u_tgt - inputs.u_inp
     r_tgt_nrm = normalize(
       r_tgt,
       shift=stats['res']['mean'],
@@ -277,15 +259,13 @@ class ResidualUpdater(Stepper):
 
     return (r_tgt_nrm, r_prd_nrm)
 
-class OutputUpdater(Stepper):
+class OutputStepper(Stepper):
 
   def apply(self,
     variables,
     stats,
-    u_inp: Array,
-    t_inp: Array,
-    tau: Array,
-    key: flax.typing.PRNGKey = None,
+    inputs: Inputs,
+    **kwargs,
   ):
     """
     Normalizes raw inputs and applies the operator on it.
@@ -295,22 +275,20 @@ class OutputUpdater(Stepper):
     """
 
     # Normalize inputs
-    u_inp_nrm, t_inp_nrm, tau_nrm = self.normalize_inputs(stats, u_inp, t_inp, tau)
+    inputs_nrm = self.normalize_inputs(stats, inputs)
 
     # Get predicted normalized output
     u_prd_nrm = self._apply_operator(
       variables,
-      u_inp=u_inp_nrm,
-      t_inp=t_inp_nrm,
-      tau=tau_nrm,
-      key=key,
+      inputs=inputs_nrm,
+      **kwargs,
     )
 
     # Unnormalize predicted output
     u_prd = unnormalize(
       u_prd_nrm,
-      mean=stats['trj']['mean'],
-      std=stats['trj']['std'],
+      mean=stats['u']['mean'],
+      std=stats['u']['std'],
     )
 
     return u_prd
@@ -318,11 +296,9 @@ class OutputUpdater(Stepper):
   def get_loss_inputs(self,
     variables,
     stats,
-    u_inp: Array,
-    t_inp: Array,
     u_tgt: Array,
-    tau: Array,
-    key: flax.typing.PRNGKey = None,
+    inputs: Inputs,
+    **kwargs,
   ):
     """
     Calculates prediction and target variables, ready to be given as input to the loss function.
@@ -332,22 +308,20 @@ class OutputUpdater(Stepper):
     """
 
     # Normalize inputs
-    u_inp_nrm, t_inp_nrm, tau_nrm = self.normalize_inputs(stats, u_inp, t_inp, tau)
+    inputs_nrm = self.normalize_inputs(stats, inputs)
 
     # Get predicted normalized output
     u_prd_nrm = self._apply_operator(
       variables,
-      u_inp=u_inp_nrm,
-      t_inp=t_inp_nrm,
-      tau=tau_nrm,
-      key=key,
+      inputs=inputs_nrm,
+      **kwargs,
     )
 
     # Get target normalized output
     u_tgt_nrm = normalize(
       u_tgt,
-      shift=stats['trj']['mean'],
-      scale=stats['trj']['std'],
+      shift=stats['u']['mean'],
+      scale=stats['u']['std'],
     )
 
     return (u_tgt_nrm, u_prd_nrm)
@@ -381,16 +355,19 @@ class AutoregressiveStepper:
   def unroll(self,
     variables: flax.typing.VariableDict,
     stats: flax.typing.VariableDict,
-    u_inp: Array,
-    t_inp: Array,
     num_steps: int,
+    inputs: Inputs,
     key: flax.typing.PRNGKey = None,
+    **kwargs,
   ) -> Array:
+    # NOTE: Assuming constant x  # TODO: Support variable x
+    # NOTE: Assuming constant c  # TODO: Support variable c
 
+    u_inp = inputs.u_inp
     batch_size = u_inp.shape[0]
     num_grid_nodes = u_inp.shape[2:4]
     num_outputs = u_inp.shape[-1]
-    t_inp = t_inp.astype(float)
+    t_inp = inputs.t_inp.astype(float)
     random = (key is not None)
     if not random:
       key, _ = jax.random.split(jax.random.PRNGKey(0))  # NOTE: It won't be used
@@ -399,13 +376,20 @@ class AutoregressiveStepper:
       u_inp, t_inp = carry
       tau = forcing[0]
       key = forcing[-2:].astype('uint32')
+      _inputs = Inputs(
+        u_inp=u_inp,
+        c_inp=inputs.c_inp,
+        x_inp=inputs.x_inp,
+        x_out=inputs.x_out,
+        t_inp=t_inp,
+        tau=tau,
+      )
       u_out = self._apply_operator(
         variables,
         stats,
-        u_inp=u_inp,
-        t_inp=t_inp,
-        tau=tau,
+        inputs=_inputs,
         key=(key if random else None),
+        **kwargs,
       )
       carry = (u_inp, t_inp)  # NOTE: The input is the same for all tau
       return carry, u_out
@@ -470,14 +454,15 @@ class AutoregressiveStepper:
   def jump(self,
     variables: flax.typing.VariableDict,
     stats: flax.typing.VariableDict,
-    u_inp: Array,
-    t_inp: Array,
     num_jumps: int,
+    inputs: Inputs,
     key: flax.typing.PRNGKey = None,
+    **kwargs,
   ) -> Array:
     """Takes num_jumps large steps, each of length num_steps_direct."""
 
-    t_inp = t_inp.astype(float)
+    u_inp = inputs.u_inp
+    t_inp = inputs.t_inp.astype(float)
     random = (key is not None)
     if not random:
       key, _ = jax.random.split(jax.random.PRNGKey(0))  # Won't be used
@@ -486,13 +471,20 @@ class AutoregressiveStepper:
       u_inp, t_inp = carry
       subkey = forcing if random else None
       tau = self.tau_base * self.num_steps_direct
+      _inputs = Inputs(
+        u_inp=u_inp,
+        c_inp=inputs.c_inp,
+        x_inp=inputs.x_inp,
+        x_out=inputs.x_out,
+        t_inp=t_inp,
+        tau=tau,
+      )
       u_out = self._apply_operator(
         variables,
         stats,
-        u_inp=u_inp,
-        t_inp=t_inp,
-        tau=tau,
+        inputs=_inputs,
         key=subkey,
+        **kwargs,
       )
       u_inp_next = u_out
       t_inp_next = t_inp + tau

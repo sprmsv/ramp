@@ -1,34 +1,29 @@
-from typing import Union
+from typing import Union, NamedTuple
 
-import flax.typing
 from flax import linen as nn
 
 from rigno.utils import Array
 
+
+class Inputs(NamedTuple):
+  u_inp: Array
+  c_inp: Union[Array, None]
+  x_inp: Array
+  x_out: Array
+  t_inp: Union[Array, None]
+  tau: Union[float, int, None]
 
 class AbstractOperator(nn.Module):
   def setup(self):
     raise NotImplementedError
 
   def __call__(self,
-    u_inp: Array,
-    c_inp: Array,
-    x_inp: Array,
-    x_out: Array,
-    t_inp: Array,
-    tau: Union[float, int],
+    inputs: Inputs,
     **kwargs,
   ) -> Array:
-    return self.call(u_inp, c_inp, x_inp, x_out, t_inp, tau, **kwargs)
+    return self.call(inputs, **kwargs)
 
-  def call(self,
-    u_inp: Array,
-    c_inp: Array,
-    x_inp: Array,
-    x_out: Array,
-    t_inp: Array,
-    tau: Union[float, int],
-  ) -> Array:
+  def call(self, inputs: Inputs) -> Array:
     raise NotImplementedError
 
   @property

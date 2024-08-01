@@ -19,17 +19,17 @@ from flax.training.common_utils import shard, shard_prng_key
 from flax.jax_utils import replicate, unreplicate
 from jax.tree_util import PyTreeDef
 
-from rigno.dataset import Dataset
+from rigno.dataset import Dataset, Batch
 from rigno.experiments import DIR_EXPERIMENTS
 from rigno.metrics import BatchMetrics, Metrics, EvalMetrics
 from rigno.metrics import rel_lp_loss
 from rigno.metrics import mse_error, rel_lp_error_per_var, rel_lp_error_norm
-from rigno.models.rigno import RIGNO, AbstractOperator
-from rigno.models.unet import UNet
+from rigno.models.rigno import AbstractOperator, RIGNO
+from rigno.models.rigno import RegionInteractionGraphBuilder, RegionInteractionGraphs
 from rigno.stepping import AutoregressiveStepper
-from rigno.stepping import TimeDerivativeUpdater
-from rigno.stepping import ResidualUpdater
-from rigno.stepping import OutputUpdater
+from rigno.stepping import TimeDerivativeStepper
+from rigno.stepping import ResidualStepper
+from rigno.stepping import OutputStepper
 from rigno.test import get_direct_estimations
 from rigno.utils import disable_logging, Array, shuffle_arrays, split_arrays, normalize
 
@@ -40,6 +40,7 @@ IDX_FN = 14
 
 FLAGS = flags.FLAGS
 
+# TODO: UPDATE
 def define_flags():
   # FLAGS::general
   flags.DEFINE_string(name='exp', default='000', required=False,
@@ -68,9 +69,6 @@ def define_flags():
   )
 
   # FLAGS::training
-  flags.DEFINE_string(name='model', default=None, required=True,
-    help='Name of the model: ["RIGNO", "UNET"]'
-  )
   flags.DEFINE_integer(name='batch_size', default=2, required=False,
     help='Size of a batch of training samples'
   )
@@ -109,16 +107,13 @@ def define_flags():
   )
 
   # FLAGS::model::RIGNO
-  flags.DEFINE_integer(name='num_mesh_nodes', default=64, required=False,
-    help='Number of mesh nodes in each dimension'
-  )
-  flags.DEFINE_float(name='overlap_factor_grid2mesh', default=4.0, required=False,
+  flags.DEFINE_float(name='overlap_factor_p2r', default=4.0, required=False,
     help='Overlap factor for grid2mesh edges (encoder)'
   )
-  flags.DEFINE_float(name='overlap_factor_mesh2grid', default=4.0, required=False,
+  flags.DEFINE_float(name='overlap_factor_r2p', default=4.0, required=False,
     help='Overlap factor for mesh2grid edges (decoder)'
   )
-  flags.DEFINE_integer(name='num_multimesh_levels', default=4, required=False,
+  flags.DEFINE_integer(name='rmesh_levels', default=4, required=False,
     help='Number of multimesh connection levels (processor)'
   )
   flags.DEFINE_integer(name='node_coordinate_freqs', default=2, required=False,
@@ -130,36 +125,28 @@ def define_flags():
   flags.DEFINE_integer(name='edge_latent_size', default=128, required=False,
     help='Size of latent edge features'
   )
-  flags.DEFINE_integer(name='num_mlp_hidden_layers', default=1, required=False,
+  flags.DEFINE_integer(name='mlp_hidden_layers', default=1, required=False,
     help='Number of hidden layers of all MLPs'
   )
   flags.DEFINE_integer(name='mlp_hidden_size', default=128, required=False,
     help='Size of latent edge features'
   )
-  flags.DEFINE_integer(name='num_message_passing_steps', default=18, required=False,
+  flags.DEFINE_integer(name='processor_steps', default=18, required=False,
     help='Number of message-passing steps in the processor'
   )
-  flags.DEFINE_integer(name='num_message_passing_steps_grid', default=0, required=False,
-    help='Number of message-passing steps in the decoder'
-  )
-  flags.DEFINE_float(name='p_dropout_edges_grid2mesh', default=0.5, required=False,
+  flags.DEFINE_float(name='p_dropout_edges_p2r', default=0.5, required=False,
     help='Probability of dropping out edges of grid2mesh'
   )
-  flags.DEFINE_float(name='p_dropout_edges_multimesh', default=0.5, required=False,
+  flags.DEFINE_float(name='p_dropout_edges_r2r', default=0.5, required=False,
     help='Probability of dropping out edges of the multi-mesh'
   )
-  flags.DEFINE_float(name='p_dropout_edges_mesh2grid', default=0.5, required=False,
+  flags.DEFINE_float(name='p_dropout_edges_r2p', default=0.5, required=False,
     help='Probability of dropping out edges of mesh2grid'
-  )
-
-  # FLAGS::model::UNET
-  flags.DEFINE_integer(name='unet_features', default=1, required=False,
-    help='Number of features (channels)'
   )
 
 def train(
   key: flax.typing.PRNGKey,
-  model: nn.Module,
+  model: AbstractOperator,
   state: TrainState,
   dataset: Dataset,
   tau_max: int,
@@ -173,8 +160,8 @@ def train(
   # Set constants
   num_samples_trn = dataset.nums['train']
   num_times = dataset.shape[1]
-  num_grid_points = dataset.shape[2:4]
-  num_vars = dataset.shape[-1]
+  num_pnodes = dataset.shape[2]
+  num_vars = dataset.shape[3]
   assert num_samples_trn % FLAGS.batch_size == 0
   num_batches = num_samples_trn // FLAGS.batch_size
   assert FLAGS.batch_size % NUM_DEVICES == 0
@@ -201,17 +188,37 @@ def train(
 
   # Define the autoregressive predictor
   if FLAGS.stepper == 'der':
-    stepper = TimeDerivativeUpdater(operator=model)
+    stepper = TimeDerivativeStepper(operator=model)
   elif FLAGS.stepper == 'res':
-    stepper = ResidualUpdater(operator=model)
+    stepper = ResidualStepper(operator=model)
   elif FLAGS.stepper == 'out':
-    stepper = OutputUpdater(operator=model)
+    stepper = OutputStepper(operator=model)
   else:
     raise ValueError
   one_step_predictor = AutoregressiveStepper(
     stepper=stepper,
     tau_max=1,
     tau_base=1.,
+  )
+
+  # Define the graph builder
+  builder = RegionInteractionGraphBuilder(
+    periodic=dataset.metadata.periodic,
+    rmesh_levels=FLAGS.rmesh_levels,
+    subsample_factor=2,  # TMP TODO: Parameterize
+    overlap_factor_p2r=FLAGS.overlap_factor_p2r,
+    overlap_factor_r2p=FLAGS.overlap_factor_r2p,
+    node_coordinate_freqs=FLAGS.node_coordinate_freqs,
+  )
+
+  # Construct the graphs
+  # NOTE: Assuming fix mesh for all batches
+  # TMP CHECK: Key = None ??
+  graphs = builder.build(
+    x_inp=dataset.sample._x,
+    x_out=dataset.sample._x,
+    domain=np.array(dataset.metadata.domain_x),
+    key=None,
   )
 
   # Set the normalization statistics
@@ -223,18 +230,18 @@ def train(
     for key, val in dataset.stats.items()
   }
 
-  # Replicate state and stats
+  # Replicate state, stats, and graphs
   # NOTE: Internally uses jax.device_put_replicate
   state = replicate(state)
   stats = replicate(stats)
+  graphs = replicate(graphs)
 
   @functools.partial(jax.pmap, axis_name='device')
   def _train_one_batch(
     key: flax.typing.PRNGKey,
     state: TrainState,
     stats: dict,
-    trajs: Array,
-    times: Array,
+    batch: Batch,
   ) -> Tuple[TrainState, Array, Array]:
     """Loads a batch, normalizes it, updates the state based on it, and returns it."""
 
@@ -335,24 +342,26 @@ def train(
     # -> [num_lead_times, batch_size_per_device, ...]
     u_inp_batch = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=trajs,
+          operand=batch.u,
           start_index=(lt), slice_size=1, axis=1)
     )(lead_times)
+    # TMP TODO: Add c_batch
     t_inp_batch = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=times,
+          operand=batch.t,
           start_index=(lt), slice_size=1, axis=1)
     )(lead_times)
     u_tgt_batch = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=jnp.concatenate([trajs, jnp.zeros_like(trajs)], axis=1),
+          operand=jnp.concatenate([batch.u, jnp.zeros_like(batch.u)], axis=1),
           start_index=(lt+1), slice_size=tau_max, axis=1)
     )(lead_times)
 
     # Repeat inputs along the time axis to match with u_tgt
     # -> [num_lead_times, batch_size_per_device, tau_max, ...]
-    u_inp_batch = jnp.tile(u_inp_batch, reps=(1, 1, tau_max, 1, 1, 1))
-    t_inp_batch = jnp.tile(t_inp_batch, reps=(1, 1, tau_max, 1, 1, 1))
+    u_inp_batch = jnp.tile(u_inp_batch, reps=(1, 1, tau_max, 1, 1))
+    # TMP TODO: Add c_batch
+    t_inp_batch = jnp.tile(t_inp_batch, reps=(1, 1, tau_max, 1, 1))
     tau_batch = jnp.tile(
       (jnp.arange(1, tau_max+1)).reshape(1, 1, tau_max, 1),
       reps=(num_lead_times, batch_size_per_device, 1, 1)
@@ -360,10 +369,11 @@ def train(
 
     # Put all pairs along the batch axis
     # -> [batch_size_per_device * num_lead_times * tau_max, ...]
-    u_inp_batch = u_inp_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1, *num_grid_points, num_vars)
+    u_inp_batch = u_inp_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1, num_pnodes, num_vars)
+    # TMP TODO: Add c_batch
     t_inp_batch = t_inp_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1)
     tau_batch = tau_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1)
-    u_tgt_batch = u_tgt_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1, *num_grid_points, num_vars)
+    u_tgt_batch = u_tgt_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1, num_pnodes, num_vars)
 
     # Remove the invalid pairs
     # -> [batch_size_per_device * num_valid_pairs, ...]
@@ -375,6 +385,7 @@ def train(
       for _n in range(_d + 1)
     ]).astype(int)
     u_inp_batch = jnp.delete(u_inp_batch, idx_invalid_pairs, axis=0)
+    # TMP TODO: Add c_batch
     t_inp_batch = jnp.delete(t_inp_batch, idx_invalid_pairs, axis=0)
     tau_batch = jnp.delete(tau_batch, idx_invalid_pairs, axis=0)
     u_tgt_batch = jnp.delete(u_tgt_batch, idx_invalid_pairs, axis=0)
@@ -383,6 +394,7 @@ def train(
     # -> [num_valid_pairs, batch_size_per_device, ...]
     num_valid_pairs = u_tgt_batch.shape[0] // batch_size_per_device
     key, subkey = jax.random.split(key)
+    # TMP TODO: Add c_batch
     u_inp_batch, t_inp_batch, tau_batch, u_tgt_batch = shuffle_arrays(
       subkey, [u_inp_batch, t_inp_batch, tau_batch, u_tgt_batch])
     u_inp_batch, t_inp_batch, tau_batch, u_tgt_batch = split_arrays(
@@ -428,7 +440,7 @@ def train(
   def train_one_epoch(
     key: flax.typing.PRNGKey,
     state: TrainState,
-    batches: Iterable[Tuple[Array, Array]],
+    batches: Iterable[Batch],
   ) -> Tuple[TrainState, Array, Array]:
     """Updates the state based on accumulated losses and gradients."""
 
@@ -436,20 +448,20 @@ def train(
     loss_epoch = 0.
     grad_epoch = 0.
     for batch in batches:
-      # Unwrap the batch
-      # -> [batch_size, num_times, ...]
-      trajs = batch
-      times = jnp.tile(jnp.arange(trajs.shape[1]), reps=(trajs.shape[0], 1))
 
       # Split the batch between devices
       # -> [NUM_DEVICES, batch_size_per_device, ...]
-      trajs = shard(trajs)
-      times = shard(times)
+      batch = Batch(
+        u=shard(batch.u),
+        c=shard(batch.c),
+        x=shard(batch.x),
+        t=shard(batch.t),
+      )
 
       # Get loss and updated state
       subkey, key = jax.random.split(key)
       subkey = shard_prng_key(subkey)
-      state, loss, grads = _train_one_batch(subkey, state, stats, trajs, times)
+      state, loss, grads = _train_one_batch(subkey, state, stats, batch)
       # NOTE: Using the first element of replicated loss and grads
       loss_epoch += loss[0] * FLAGS.batch_size / num_samples_trn
       grad_epoch += np.mean(jax.tree_util.tree_flatten(
@@ -457,6 +469,7 @@ def train(
 
     return state, loss_epoch, grad_epoch
 
+  # TMP: TODO: UPDATE
   @functools.partial(jax.pmap, static_broadcasted_argnums=(0,))
   def _evaluate_direct_prediction(
     tau: int,
@@ -490,6 +503,7 @@ def train(
 
     return batch_metrics.__dict__
 
+  # TMP: TODO: UPDATE
   @jax.pmap
   def _evaluate_rollout_prediction(
     state: TrainState,
@@ -529,6 +543,7 @@ def train(
 
     return batch_metrics.__dict__
 
+  # TMP: TODO: UPDATE
   @jax.pmap
   def _evaluate_final_prediction(
     state: TrainState,
@@ -573,6 +588,7 @@ def train(
 
     return batch_metrics.__dict__
 
+  # TMP: TODO: UPDATE
   def evaluate(
     state: TrainState,
     batches: Iterable[Tuple[Array, Array]],
@@ -692,14 +708,15 @@ def train(
     return metrics
 
   # Evaluate before training
-  metrics_trn = evaluate(
-    state=state,
-    batches=dataset.batches(mode='train', batch_size=FLAGS.batch_size),
-  )
-  metrics_val = evaluate(
-    state=state,
-    batches=dataset.batches(mode='valid', batch_size=FLAGS.batch_size),
-  )
+  # TMP: Uncomment
+  # metrics_trn = evaluate(
+  #   state=state,
+  #   batches=dataset.batches(mode='train', batch_size=FLAGS.batch_size),
+  # )
+  # metrics_val = evaluate(
+  #   state=state,
+  #   batches=dataset.batches(mode='valid', batch_size=FLAGS.batch_size),
+  # )
 
   # Report the initial evaluations
   time_tot_pre = time() - time_int_pre
@@ -710,12 +727,12 @@ def train(
     f'TIME: {time_tot_pre : 06.1f}s',
     f'GRAD: {0. : .2e}',
     f'LOSS: {0. : .2e}',
-    f'DR-0.5: {metrics_val.direct_tau_frac.l1 * 100 : .2f}%',
-    f'DR-1: {metrics_val.direct_tau_min.l1 * 100 : .2f}%',
-    f'DR-{FLAGS.tau_max}: {metrics_val.direct_tau_max.l1 * 100 : .2f}%',
-    f'FN: {metrics_val.final.l1 * 100 : .2f}%',
-    f'TRN-DR-1: {metrics_trn.direct_tau_min.l1 * 100 : .2f}%',
-    f'TRN-FN: {metrics_trn.final.l1 * 100 : .2f}%',
+    # f'DR-0.5: {metrics_val.direct_tau_frac.l1 * 100 : .2f}%',  # TMP: Uncomment
+    # f'DR-1: {metrics_val.direct_tau_min.l1 * 100 : .2f}%',
+    # f'DR-{FLAGS.tau_max}: {metrics_val.direct_tau_max.l1 * 100 : .2f}%',
+    # f'FN: {metrics_val.final.l1 * 100 : .2f}%',
+    # f'TRN-DR-1: {metrics_trn.direct_tau_min.l1 * 100 : .2f}%',
+    # f'TRN-FN: {metrics_trn.final.l1 * 100 : .2f}%',
   ]))
 
   # Set up the checkpoint manager
@@ -746,15 +763,15 @@ def train(
     )
 
     if (epoch % evaluation_frequency) == 0:
-      # Evaluate
-      metrics_trn = evaluate(
-        state=state,
-        batches=dataset.batches(mode='train', batch_size=FLAGS.batch_size),
-      )
-      metrics_val = evaluate(
-        state=state,
-        batches=dataset.batches(mode='valid', batch_size=FLAGS.batch_size),
-      )
+      # Evaluate  # TMP: UNCOMMENT
+      # metrics_trn = evaluate(
+      #   state=state,
+      #   batches=dataset.batches(mode='train', batch_size=FLAGS.batch_size),
+      # )
+      # metrics_val = evaluate(
+      #   state=state,
+      #   batches=dataset.batches(mode='valid', batch_size=FLAGS.batch_size),
+      # )
 
       # Log the results
       time_tot = time() - time_int
@@ -765,30 +782,30 @@ def train(
         f'TIME: {time_tot : 06.1f}s',
         f'GRAD: {grad.item() : .2e}',
         f'LOSS: {loss.item() : .2e}',
-        f'DR-0.5: {metrics_val.direct_tau_frac.l1 * 100 : .2f}%',
-        f'DR-1: {metrics_val.direct_tau_min.l1 * 100 : .2f}%',
-        f'DR-{FLAGS.tau_max}: {metrics_val.direct_tau_max.l1 * 100 : .2f}%',
-        f'FN: {metrics_val.final.l1 * 100 : .2f}%',
-        f'TRN-DR-1: {metrics_trn.direct_tau_min.l1 * 100 : .2f}%',
-        f'TRN-FN: {metrics_trn.final.l1 * 100 : .2f}%',
+        # f'DR-0.5: {metrics_val.direct_tau_frac.l1 * 100 : .2f}%',  # TMP: UNCOMMENT
+        # f'DR-1: {metrics_val.direct_tau_min.l1 * 100 : .2f}%',
+        # f'DR-{FLAGS.tau_max}: {metrics_val.direct_tau_max.l1 * 100 : .2f}%',
+        # f'FN: {metrics_val.final.l1 * 100 : .2f}%',
+        # f'TRN-DR-1: {metrics_trn.direct_tau_min.l1 * 100 : .2f}%',
+        # f'TRN-FN: {metrics_trn.final.l1 * 100 : .2f}%',
       ]))
 
-      with disable_logging(level=logging.FATAL):
-        checkpoint_metrics = {
-          'loss': loss.item(),
-          'train': metrics_trn.to_dict(),
-          'valid': metrics_val.to_dict(),
-        }
-        # Store the state and the metrics
-        step = epochs_before + epoch
-        checkpoint_manager.save(
-          step=step,
-          items={'state': jax.device_get(unreplicate(state)),},
-          metrics=checkpoint_metrics,
-          save_kwargs={'save_args': checkpointer_save_args}
-        )
-        with open(DIR / 'metrics' / f'{str(step)}.json', 'w') as f:
-          json.dump(checkpoint_metrics, f)
+      # with disable_logging(level=logging.FATAL):  # TMP: UNCOMMENT
+      #   checkpoint_metrics = {
+      #     'loss': loss.item(),
+      #     'train': metrics_trn.to_dict(),
+      #     'valid': metrics_val.to_dict(),
+      #   }
+      #   # Store the state and the metrics
+      #   step = epochs_before + epoch
+      #   checkpoint_manager.save(
+      #     step=step,
+      #     items={'state': jax.device_get(unreplicate(state)),},
+      #     metrics=checkpoint_metrics,
+      #     save_kwargs={'save_args': checkpointer_save_args}
+      #   )
+      #   with open(DIR / 'metrics' / f'{str(step)}.json', 'w') as f:
+      #     json.dump(checkpoint_metrics, f)
 
     else:
       # Log the results
@@ -805,55 +822,30 @@ def train(
 
   return unreplicate(state)
 
-def get_model(model_name: str, model_configs: Mapping[str, Any], dataset: Dataset) -> AbstractOperator:
+def get_model(model_configs: Mapping[str, Any], dataset: Dataset) -> AbstractOperator:
   """
   Build the model based on the given configurations.
   """
 
-  # Check the inputs
-  model_name = model_name.upper()
-  assert model_name in ['RIGNO', 'UNET']
-
   # Set model kwargs
   if not model_configs:
-    if model_name == 'RIGNO':
-      model_configs = dict(
-        num_outputs=dataset.shape[-1],
-        num_grid_nodes=dataset.shape[2:4],
-        num_mesh_nodes=(FLAGS.num_mesh_nodes, FLAGS.num_mesh_nodes),
-        periodic=dataset.metadata.periodic,
-        concatenate_tau=True,
-        concatenate_t=True,
-        conditional_normalization=True,
-        conditional_norm_latent_size=16,
-        node_latent_size=FLAGS.node_latent_size,
-        edge_latent_size=FLAGS.edge_latent_size,
-        num_mlp_hidden_layers=FLAGS.num_mlp_hidden_layers,
-        mlp_hidden_size=FLAGS.mlp_hidden_size,
-        num_message_passing_steps=FLAGS.num_message_passing_steps,
-        num_message_passing_steps_grid=FLAGS.num_message_passing_steps_grid,
-        overlap_factor_grid2mesh=FLAGS.overlap_factor_grid2mesh,
-        overlap_factor_mesh2grid=FLAGS.overlap_factor_mesh2grid,
-        num_multimesh_levels=FLAGS.num_multimesh_levels,
-        node_coordinate_freqs=FLAGS.node_coordinate_freqs,
-        p_dropout_edges_grid2mesh=FLAGS.p_dropout_edges_grid2mesh,
-        p_dropout_edges_multimesh=FLAGS.p_dropout_edges_multimesh,
-        p_dropout_edges_mesh2grid=FLAGS.p_dropout_edges_mesh2grid,
-      )
-    elif model_name == 'UNET':
-      model_configs = dict(
-        features=FLAGS.unet_features,
-        outputs=dataset.shape[-1],
-        conditional_norm_latent_size=16,
-      )
+    model_configs = dict(
+      num_outputs=dataset.shape[-1],
+      processor_steps=FLAGS.processor_steps,
+      node_latent_size=FLAGS.node_latent_size,
+      edge_latent_size=FLAGS.edge_latent_size,
+      mlp_hidden_layers=FLAGS.mlp_hidden_layers,
+      mlp_hidden_size=FLAGS.mlp_hidden_size,
+      concatenate_tau=True,
+      concatenate_t=True,
+      conditional_normalization=True,
+      conditional_norm_latent_size=16,
+      p_dropout_edges_p2r=FLAGS.p_dropout_edges_p2r,
+      p_dropout_edges_r2r=FLAGS.p_dropout_edges_r2r,
+      p_dropout_edges_r2p=FLAGS.p_dropout_edges_r2p,
+    )
 
-  # Set the model class
-  if model_name == 'RIGNO':
-    model_class = RIGNO
-  elif model_name == 'UNET':
-    model_class = UNet
-
-  model = model_class(**model_configs)
+  model = RIGNO(**model_configs)
 
   return model
 
@@ -882,18 +874,19 @@ def main(argv):
   # Read the dataset
   subkey, key = jax.random.split(key)
   dataset = Dataset(
-    key=subkey,
     datadir=FLAGS.datadir,
     datapath=FLAGS.datapath,
+    include_passive_variables=False,
+    concatenate_coeffs=False,
+    time_cutoff_idx=(IDX_FN + 1),
+    time_downsample_factor=FLAGS.time_downsample_factor,
+    space_downsample_grid=True,  # TODO: Support False
+    space_downsample_factor=FLAGS.space_downsample_factor,
     n_train=FLAGS.n_train,
     n_valid=FLAGS.n_valid,
     n_test=FLAGS.n_test,
-    time_cutoff_idx=(IDX_FN + 1),
-    time_downsample_factor=FLAGS.time_downsample_factor,
-    space_downsample_grid=True,
-    space_downsample_factor=FLAGS.space_downsample_factor,
     preload=True,
-    include_passive_variables=False,
+    key=subkey,
   )
   dataset.compute_stats(residual_steps=FLAGS.tau_max)
 
@@ -907,15 +900,13 @@ def main(argv):
     params = state['params']
     with open(DIR_OLD_EXPERIMENT / 'configs.json', 'rb') as f:
       old_configs = json.load(f)
-      model_name = old_configs['flags']['model']
       model_configs = old_configs['model_configs']
   else:
     params = None
-    model_name = FLAGS.model or 'RIGNO'
     model_configs = None
 
   # Get the model
-  model = get_model(model_name, model_configs, dataset)
+  model = get_model(model_configs, dataset)
 
   # Store the configurations
   DIR = DIR_EXPERIMENTS / f'E{FLAGS.exp}' / FLAGS.datapath / FLAGS.datetime
