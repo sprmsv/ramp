@@ -6,11 +6,11 @@ from rigno.utils import Array
 
 
 class Inputs(NamedTuple):
-  u_inp: Array
-  c_inp: Union[Array, None]
+  u: Array
+  c: Union[Array, None]
   x_inp: Array
   x_out: Array
-  t_inp: Union[Array, None]
+  t: Union[Array, None]
   tau: Union[float, int, None]
 
 class AbstractOperator(nn.Module):

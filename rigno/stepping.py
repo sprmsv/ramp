@@ -15,14 +15,14 @@ class Stepper(ABC):
 
   def normalize_inputs(self, stats, inputs: Inputs) -> Inputs:
 
-    u_nrm = normalize(inputs.u_inp, shift=stats['u']['mean'], scale=stats['u']['std'])
-    if inputs.c_inp is None:
+    u_nrm = normalize(inputs.u, shift=stats['u']['mean'], scale=stats['u']['std'])
+    if inputs.c is None:
       c_nrm = None
     else:
-      c_nrm = normalize(inputs.c_inp, shift=stats['c']['mean'], scale=stats['c']['std'])
+      c_nrm = normalize(inputs.c, shift=stats['c']['mean'], scale=stats['c']['std'])
     x_inp_nrm = 2 * ((inputs.x_inp - stats['x']['min']) / (stats['x']['max'] - stats['x']['min'])) - 1
     x_out_nrm = 2 * ((inputs.x_out - stats['x']['min']) / (stats['x']['max'] - stats['x']['min'])) - 1
-    t_nrm = (inputs.t_inp - stats['t']['min']) / (stats['t']['max'] - stats['t']['min'])
+    t_nrm = (inputs.t - stats['t']['min']) / (stats['t']['max'] - stats['t']['min'])
     tau_nrm = (inputs.tau) / (stats['t']['max'] - stats['t']['min'])
 
     inputs_nrm = Inputs(
@@ -67,7 +67,7 @@ class Stepper(ABC):
       tau = forcing
       _inputs = Inputs(
         u_inp=u_inp,
-        c_inp=inputs.c_inp,
+        c_inp=inputs.c,
         x_inp=inputs.x_inp,
         x_out=inputs.x_out,
         t_inp=t_inp,
@@ -90,7 +90,7 @@ class Stepper(ABC):
     forcing = tau_fract
 
     (u_out, _), _ = jax.lax.scan(f=scan_fn_fractional,
-      init=(inputs.u_inp, inputs.t_inp), xs=forcing, length=num_steps)
+      init=(inputs.u, inputs.t), xs=forcing, length=num_steps)
 
     return u_out
 
@@ -161,7 +161,7 @@ class TimeDerivativeStepper(Stepper):
     )
 
     # Get predicted output
-    u_prd = inputs.u_inp + (d_prd * inputs.tau)
+    u_prd = inputs.u + (d_prd * inputs.tau)
 
     return u_prd
 
@@ -190,7 +190,7 @@ class TimeDerivativeStepper(Stepper):
     )
 
     # Get target normalized derivatives
-    d_tgt = (u_tgt - inputs.u_inp) / inputs.tau
+    d_tgt = (u_tgt - inputs.u) / inputs.tau
     d_tgt_nrm = normalize(
       d_tgt,
       shift=stats['der']['mean'],
@@ -232,7 +232,7 @@ class ResidualStepper(Stepper):
     )
 
     # Get predicted output
-    u_prd = inputs.u_inp + r_prd
+    u_prd = inputs.u + r_prd
 
     return u_prd
 
@@ -261,7 +261,7 @@ class ResidualStepper(Stepper):
     )
 
     # Get target normalized residuals
-    r_tgt = u_tgt - inputs.u_inp
+    r_tgt = u_tgt - inputs.u
     r_tgt_nrm = normalize(
       r_tgt,
       shift=stats['res']['mean'],
@@ -374,11 +374,11 @@ class AutoregressiveStepper:
     # NOTE: Assuming constant x  # TODO: Support variable x
     # NOTE: Assuming constant c  # TODO: Support variable c
 
-    u_inp = inputs.u_inp
+    u_inp = inputs.u
     batch_size = u_inp.shape[0]
     num_pnodes = u_inp.shape[2]
     num_vars = u_inp.shape[3]
-    t_inp = inputs.t_inp.astype(float)
+    t_inp = inputs.t.astype(float)
     random = (key is not None)
     if not random:
       key, _ = jax.random.split(jax.random.PRNGKey(0))  # NOTE: It won't be used
@@ -389,7 +389,7 @@ class AutoregressiveStepper:
       key = forcing[-2:].astype('uint32')
       _inputs = Inputs(
         u_inp=u_inp,
-        c_inp=inputs.c_inp,
+        c_inp=inputs.c,
         x_inp=inputs.x_inp,
         x_out=inputs.x_out,
         t_inp=t_inp,
@@ -472,8 +472,8 @@ class AutoregressiveStepper:
   ) -> Array:
     """Takes num_jumps large steps, each of length num_steps_direct."""
 
-    u_inp = inputs.u_inp
-    t_inp = inputs.t_inp.astype(float)
+    u_inp = inputs.u
+    t_inp = inputs.t.astype(float)
     random = (key is not None)
     if not random:
       key, _ = jax.random.split(jax.random.PRNGKey(0))  # Won't be used
@@ -484,7 +484,7 @@ class AutoregressiveStepper:
       tau = self.tau_base * self.num_steps_direct
       _inputs = Inputs(
         u_inp=u_inp,
-        c_inp=inputs.c_inp,
+        c_inp=inputs.c,
         x_inp=inputs.x_inp,
         x_out=inputs.x_out,
         t_inp=t_inp,

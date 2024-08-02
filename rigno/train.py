@@ -40,7 +40,7 @@ IDX_FN = 14
 
 FLAGS = flags.FLAGS
 
-# TODO: UPDATE
+# TMP: TODO: UPDATE
 def define_flags():
   # FLAGS::general
   flags.DEFINE_string(name='exp', default='000', required=False,

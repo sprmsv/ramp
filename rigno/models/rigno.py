@@ -755,20 +755,20 @@ class RIGNO(AbstractOperator):
     """Inputs must be of shape [batch_size, 1, num_physical_nodes, num_inputs]"""
 
     # Check input functions
-    self._check_function(inputs.u_inp, x=inputs.x_inp)
-    if inputs.c_inp is not None:
-      self._check_function(inputs.c_inp, x=inputs.x_inp)
-    assert inputs.u_inp.shape[3] == self.num_outputs
+    self._check_function(inputs.u, x=inputs.x_inp)
+    if inputs.c is not None:
+      self._check_function(inputs.c, x=inputs.x_inp)
+    assert inputs.u.shape[3] == self.num_outputs
 
     # Read dimensions
-    batch_size = inputs.u_inp.shape[0]
+    batch_size = inputs.u.shape[0]
     num_pnodes_inp = inputs.x_inp.shape[0]
     num_pnodes_out = inputs.x_out.shape[0]
 
     # Prepare the time channel
     if self.concatenate_t:
-      assert inputs.t_inp is not None
-      t_inp = jnp.array(inputs.t_inp, dtype=jnp.float32)
+      assert inputs.t is not None
+      t_inp = jnp.array(inputs.t, dtype=jnp.float32)
       if t_inp.size == 1:
         t_inp = jnp.tile(t_inp.reshape(1, 1), reps=(batch_size, 1))
     # Prepare the time difference channel
@@ -779,10 +779,10 @@ class RIGNO(AbstractOperator):
         tau = jnp.tile(tau.reshape(1, 1), reps=(batch_size, 1))
 
     # Concatenate the known coefficients to the channels of the input function
-    if inputs.c_inp is None:
-      u_inp = inputs.u_inp
+    if inputs.c is None:
+      u_inp = inputs.u
     else:
-      u_inp = jnp.concatenate([inputs.u_inp, inputs.c_inp], axis=-1)
+      u_inp = jnp.concatenate([inputs.u, inputs.c], axis=-1)
 
     # Prepare the physical node features
     # u -> [num_pnodes_inp, batch_size, num_inputs]
