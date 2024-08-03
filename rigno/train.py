@@ -24,7 +24,8 @@ from rigno.experiments import DIR_EXPERIMENTS
 from rigno.metrics import BatchMetrics, Metrics, EvalMetrics
 from rigno.metrics import rel_lp_loss
 from rigno.metrics import mse_error, rel_lp_error_per_var, rel_lp_error_norm
-from rigno.models.rigno import AbstractOperator, RIGNO
+from rigno.models.operator import AbstractOperator, Inputs
+from rigno.models.rigno import RIGNO
 from rigno.models.rigno import RegionInteractionGraphBuilder, RegionInteractionGraphs
 from rigno.stepping import AutoregressiveStepper
 from rigno.stepping import TimeDerivativeStepper
@@ -40,7 +41,6 @@ IDX_FN = 14
 
 FLAGS = flags.FLAGS
 
-# TMP: TODO: UPDATE
 def define_flags():
   # FLAGS::general
   flags.DEFINE_string(name='exp', default='000', required=False,
@@ -108,10 +108,10 @@ def define_flags():
 
   # FLAGS::model::RIGNO
   flags.DEFINE_float(name='overlap_factor_p2r', default=4.0, required=False,
-    help='Overlap factor for grid2mesh edges (encoder)'
+    help='Overlap factor for p2r edges (encoder)'
   )
   flags.DEFINE_float(name='overlap_factor_r2p', default=4.0, required=False,
-    help='Overlap factor for mesh2grid edges (decoder)'
+    help='Overlap factor for r2p edges (decoder)'
   )
   flags.DEFINE_integer(name='rmesh_levels', default=4, required=False,
     help='Number of multimesh connection levels (processor)'
@@ -134,14 +134,8 @@ def define_flags():
   flags.DEFINE_integer(name='processor_steps', default=18, required=False,
     help='Number of message-passing steps in the processor'
   )
-  flags.DEFINE_float(name='p_dropout_edges_p2r', default=0.5, required=False,
-    help='Probability of dropping out edges of grid2mesh'
-  )
-  flags.DEFINE_float(name='p_dropout_edges_r2r', default=0.5, required=False,
-    help='Probability of dropping out edges of the multi-mesh'
-  )
-  flags.DEFINE_float(name='p_dropout_edges_r2p', default=0.5, required=False,
-    help='Probability of dropping out edges of mesh2grid'
+  flags.DEFINE_float(name='p_edge_masking', default=0.5, required=False,
+    help='Probability of random edge masking'
   )
 
 def train(
@@ -213,7 +207,6 @@ def train(
 
   # Construct the graphs
   # NOTE: Assuming fix mesh for all batches
-  # TMP CHECK: Key = None ??
   graphs = builder.build(
     x_inp=dataset.sample._x,
     x_out=dataset.sample._x,
@@ -241,6 +234,7 @@ def train(
     key: flax.typing.PRNGKey,
     state: TrainState,
     stats: dict,
+    graphs: RegionInteractionGraphs,
     batch: Batch,
   ) -> Tuple[TrainState, Array, Array]:
     """Loads a batch, normalizes it, updates the state based on it, and returns it."""
@@ -249,9 +243,12 @@ def train(
       key: flax.typing.PRNGKey,
       state: TrainState,
       u_inp: Array,
+      c_inp: Array,
+      x_inp: Array,
       t_inp: Array,
-      u_tgt: Array,
       tau: Array,
+      u_tgt: Array,
+      x_out: Array,
     ) -> Tuple[TrainState, Array, PyTreeDef]:
       # NOTE: INPUT SHAPES [batch_size_per_device, ...]
 
@@ -259,9 +256,12 @@ def train(
         key: flax.typing.PRNGKey,
         params: flax.typing.Collection,
         u_inp: Array,
+        c_inp: Array,
+        x_inp: Array,
         t_inp: Array,
-        u_tgt: Array,
         tau: Array,
+        u_tgt: Array,
+        x_out: Array,
       ) -> Tuple[Array, PyTreeDef]:
         """
         Computes the loss and the gradients of the loss w.r.t the parameters.
@@ -270,9 +270,12 @@ def train(
         def _compute_loss(
           params: flax.typing.Collection,
           u_inp: Array,
+          c_inp: Array,
+          x_inp: Array,
           t_inp: Array,
           tau: Array,
           u_tgt: Array,
+          x_out: Array,
           key: flax.typing.PRNGKey,
         ) -> Array:
           """Computes the prediction of the model and returns its loss."""
@@ -281,13 +284,20 @@ def train(
 
           # Get the output
           key, subkey = jax.random.split(key)
+          inputs = Inputs(
+            u=u_inp,
+            c=c_inp,
+            x_inp=x_inp,
+            x_out=x_out,
+            t=t_inp,
+            tau=tau,
+          )
           _loss_inputs = stepper.get_loss_inputs(
             variables=variables,
             stats=stats,
-            u_inp=u_inp,
-            t_inp=t_inp,
             u_tgt=u_tgt,
-            tau=tau,
+            inputs=inputs,
+            graphs=graphs,
             key=subkey,
           )
 
@@ -300,24 +310,35 @@ def train(
           tau_mid = tau_cutoff + jax.random.uniform(key=subkey, shape=tau.shape) * (tau - 2 * tau_cutoff)
           # Get intermediary output
           key, subkey = jax.random.split(key)
+          inputs = Inputs(
+            u=u_inp,
+            c=c_inp,
+            x_inp=x_inp,
+            x_out=x_out,
+            t=t_inp,
+            tau=tau_mid,
+          )
           u_int = stepper.apply(
             variables={'params': params},
             stats=stats,
-            u_inp=u_inp,
-            t_inp=t_inp,
-            tau=tau_mid,
+            inputs=inputs,
+            graphs=graphs,
             key=subkey,
           )
+          c_int = c_inp  # TODO: Approximate c_int
+          x_int = x_inp  # TODO: Support variable x
           t_int = t_inp + tau_mid
         else:
           tau_mid = 0.
           u_int = u_inp
+          c_int = c_inp  # TODO: Approximate c_int
+          x_int = x_inp  # TODO: Support variable x
           t_int = t_inp
 
         # Compute gradients
         key, subkey = jax.random.split(key)
         loss, grads = jax.value_and_grad(_compute_loss)(
-          params, u_int, t_int, (tau - tau_mid), u_tgt, key=subkey)
+          params, u_int, c_int, x_int, t_int, (tau - tau_mid), u_tgt, x_out, key=subkey)
 
         return loss, grads
 
@@ -326,9 +347,12 @@ def train(
         key=key,
         params=state.params,
         u_inp=u_inp,
+        c_inp=c_inp,
+        x_inp=x_inp,
         t_inp=t_inp,
-        u_tgt=u_tgt,
         tau=tau,
+        u_tgt=u_tgt,
+        x_out=x_out,
       )
       # Synchronize loss and gradients
       loss = jax.lax.pmean(_loss, axis_name='device')
@@ -345,7 +369,16 @@ def train(
           operand=batch.u,
           start_index=(lt), slice_size=1, axis=1)
     )(lead_times)
-    # TMP TODO: Add c_batch
+    c_inp_batch = jax.vmap(
+        lambda lt: jax.lax.dynamic_slice_in_dim(
+          operand=batch.c,
+          start_index=(lt), slice_size=1, axis=1)
+    )(lead_times) if (batch.c is not None) else None
+    x_inp_batch = jax.vmap(
+        lambda lt: jax.lax.dynamic_slice_in_dim(
+          operand=batch.x,
+          start_index=(lt), slice_size=1, axis=1)
+    )(lead_times)
     t_inp_batch = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
           operand=batch.t,
@@ -356,11 +389,17 @@ def train(
           operand=jnp.concatenate([batch.u, jnp.zeros_like(batch.u)], axis=1),
           start_index=(lt+1), slice_size=tau_max, axis=1)
     )(lead_times)
+    x_out_batch = jax.vmap(
+        lambda lt: jax.lax.dynamic_slice_in_dim(
+          operand=jnp.concatenate([batch.x, jnp.zeros_like(batch.x)], axis=1),
+          start_index=(lt+1), slice_size=tau_max, axis=1)
+    )(lead_times)
 
     # Repeat inputs along the time axis to match with u_tgt
     # -> [num_lead_times, batch_size_per_device, tau_max, ...]
     u_inp_batch = jnp.tile(u_inp_batch, reps=(1, 1, tau_max, 1, 1))
-    # TMP TODO: Add c_batch
+    c_inp_batch = jnp.tile(c_inp_batch, reps=(1, 1, tau_max, 1, 1)) if (batch.c is not None) else None
+    x_inp_batch = jnp.tile(x_inp_batch, reps=(1, 1, tau_max, 1, 1))
     t_inp_batch = jnp.tile(t_inp_batch, reps=(1, 1, tau_max, 1, 1))
     tau_batch = jnp.tile(
       (jnp.arange(1, tau_max+1)).reshape(1, 1, tau_max, 1),
@@ -369,11 +408,14 @@ def train(
 
     # Put all pairs along the batch axis
     # -> [batch_size_per_device * num_lead_times * tau_max, ...]
-    u_inp_batch = u_inp_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1, num_pnodes, num_vars)
-    # TMP TODO: Add c_batch
+    u_inp_batch = u_inp_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1, num_pnodes, -1)
+    x_inp_batch = x_inp_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1, num_pnodes, -1)
+    c_inp_batch = c_inp_batch.reshape(
+      (num_lead_times*batch_size_per_device*tau_max), 1, num_pnodes, -1) if (batch.c is not None) else None
     t_inp_batch = t_inp_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1)
     tau_batch = tau_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1)
-    u_tgt_batch = u_tgt_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1, num_pnodes, num_vars)
+    u_tgt_batch = u_tgt_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1, num_pnodes, -1)
+    x_out_batch = x_out_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1, num_pnodes, -1)
 
     # Remove the invalid pairs
     # -> [batch_size_per_device * num_valid_pairs, ...]
@@ -385,20 +427,28 @@ def train(
       for _n in range(_d + 1)
     ]).astype(int)
     u_inp_batch = jnp.delete(u_inp_batch, idx_invalid_pairs, axis=0)
-    # TMP TODO: Add c_batch
+    c_inp_batch = jnp.delete(c_inp_batch, idx_invalid_pairs, axis=0) if (batch.c is not None) else None
+    x_inp_batch = jnp.delete(x_inp_batch, idx_invalid_pairs, axis=0)
     t_inp_batch = jnp.delete(t_inp_batch, idx_invalid_pairs, axis=0)
     tau_batch = jnp.delete(tau_batch, idx_invalid_pairs, axis=0)
     u_tgt_batch = jnp.delete(u_tgt_batch, idx_invalid_pairs, axis=0)
+    x_out_batch = jnp.delete(x_out_batch, idx_invalid_pairs, axis=0)
 
     # Shuffle and split the pairs
     # -> [num_valid_pairs, batch_size_per_device, ...]
     num_valid_pairs = u_tgt_batch.shape[0] // batch_size_per_device
     key, subkey = jax.random.split(key)
-    # TMP TODO: Add c_batch
-    u_inp_batch, t_inp_batch, tau_batch, u_tgt_batch = shuffle_arrays(
-      subkey, [u_inp_batch, t_inp_batch, tau_batch, u_tgt_batch])
-    u_inp_batch, t_inp_batch, tau_batch, u_tgt_batch = split_arrays(
-      [u_inp_batch, t_inp_batch, tau_batch, u_tgt_batch], size=batch_size_per_device)
+    if batch.c is None:
+      u_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch = shuffle_arrays(
+        subkey, [u_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch])
+      u_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch = split_arrays(
+        [u_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch], size=batch_size_per_device)
+    else:
+      u_inp_batch, c_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch = shuffle_arrays(
+        subkey, [u_inp_batch, c_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch])
+      u_inp_batch, c_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch = split_arrays(
+        [u_inp_batch, c_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch], size=batch_size_per_device)
+
 
     # Add loss and gradients for each subbatch
     def _update_state(i, carry):
@@ -409,9 +459,12 @@ def train(
         key=_subkey,
         state=_state,
         u_inp=u_inp_batch[i],
+        c_inp=(c_inp_batch[i] if (batch.c is not None) else None),
+        x_inp=x_inp_batch[i],
         t_inp=t_inp_batch[i],
-        u_tgt=u_tgt_batch[i],
         tau=tau_batch[i],
+        u_tgt=u_tgt_batch[i],
+        x_out=x_out_batch[i],
       )
       # Update the carried loss and gradients of the subbatch
       _loss_updated = _loss_carried + _loss_subbatch / num_valid_pairs
@@ -461,7 +514,7 @@ def train(
       # Get loss and updated state
       subkey, key = jax.random.split(key)
       subkey = shard_prng_key(subkey)
-      state, loss, grads = _train_one_batch(subkey, state, stats, batch)
+      state, loss, grads = _train_one_batch(subkey, state, stats, graphs, batch)
       # NOTE: Using the first element of replicated loss and grads
       loss_epoch += loss[0] * FLAGS.batch_size / num_samples_trn
       grad_epoch += np.mean(jax.tree_util.tree_flatten(
@@ -840,9 +893,7 @@ def get_model(model_configs: Mapping[str, Any], dataset: Dataset) -> AbstractOpe
       concatenate_t=True,
       conditional_normalization=True,
       conditional_norm_latent_size=16,
-      p_dropout_edges_p2r=FLAGS.p_dropout_edges_p2r,
-      p_dropout_edges_r2r=FLAGS.p_dropout_edges_r2r,
-      p_dropout_edges_r2p=FLAGS.p_dropout_edges_r2p,
+      p_edge_masking=FLAGS.p_edge_masking,
     )
 
   model = RIGNO(**model_configs)
@@ -934,15 +985,29 @@ def main(argv):
 
   # Initialzize the model or use the loaded parameters
   if not params:
-    num_grid_points = dataset.shape[2:4]
-    num_vars = dataset.shape[-1]
-    model_init_kwargs = dict(
-      u_inp=jnp.ones(shape=(FLAGS.batch_size, 1, *num_grid_points, num_vars)),
-      t_inp=jnp.zeros(shape=(FLAGS.batch_size, 1)),
+    dummy_graph_builder = RegionInteractionGraphBuilder(
+      periodic=dataset.metadata.periodic,
+      rmesh_levels=1,
+      subsample_factor=2,
+      overlap_factor_p2r=.01,
+      overlap_factor_r2p=.01,
+      node_coordinate_freqs=FLAGS.node_coordinate_freqs,
+    )
+    dummy_graphs = dummy_graph_builder.build(
+      x_inp=dataset.sample._x,
+      x_out=dataset.sample._x,
+      domain=np.array(dataset.metadata.domain_x),
+    )
+    dummy_inputs = Inputs(
+      u=jnp.ones(shape=(FLAGS.batch_size, 1, *dataset.sample.u.shape[2:])),
+      c=jnp.ones(shape=(FLAGS.batch_size, 1, *dataset.sample.c.shape[2:])) if (dataset.sample.c is not None) else None,
+      x_inp=dataset.sample.x,
+      x_out=dataset.sample.x,
+      t=jnp.zeros(shape=(FLAGS.batch_size, 1)),
       tau=jnp.ones(shape=(FLAGS.batch_size, 1)),
     )
     subkey, key = jax.random.split(key)
-    variables = jax.jit(model.init)(subkey, **model_init_kwargs)
+    variables = jax.jit(model.init)(subkey, inputs=dummy_inputs, graphs=dummy_graphs)
     params = variables['params']
 
   # Calculate the total number of parameters

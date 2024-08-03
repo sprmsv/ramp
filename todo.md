@@ -2,8 +2,10 @@
 
 # NEXT STEPS
 
-- Update train script
+- Update train script evaluations
 - Update test script
+
+- Support metrics for unstructured meshes
 
 - Experiment with the new version (unstructured mesh)
     - Step 1: reproduce results for full grids

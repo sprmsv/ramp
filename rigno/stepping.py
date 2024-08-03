@@ -26,11 +26,11 @@ class Stepper(ABC):
     tau_nrm = (inputs.tau) / (stats['t']['max'] - stats['t']['min'])
 
     inputs_nrm = Inputs(
-      u_inp=u_nrm,
-      c_inp=c_nrm,
+      u=u_nrm,
+      c=c_nrm,
       x_inp=x_inp_nrm,
       x_out=x_out_nrm,
-      t_inp=t_nrm,
+      t=t_nrm,
       tau=tau_nrm,
     )
 

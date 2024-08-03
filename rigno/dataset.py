@@ -229,7 +229,7 @@ DATASET_METADATA = {
   ),
   # reaction_diffusion
   'reaction_diffusion/allen_cahn': Metadata(
-    periodic=False,
+    periodic=True,  # TMP SET TO FALSE
     data_group='solution',
     coeff_group=None,
     domain_t=(0, 0.0002),
@@ -266,7 +266,7 @@ DATASET_METADATA = {
 
 class Batch(NamedTuple):
   u: Array
-  c: Array
+  c: Union[Array, None]
   t: Array
   x: Array
 
@@ -307,7 +307,7 @@ class Dataset:
   ):
 
     # Set attributes
-    self.key = key or jax.random.PRNGKey(0)
+    self.key = key if (key is not None) else jax.random.PRNGKey(0)
     self.metadata = DATASET_METADATA[datapath]
     self.preload = preload
     self.concatenate_coeffs = concatenate_coeffs

@@ -145,8 +145,8 @@ class RegionInteractionGraphBuilder:
         ], axis=0)
     d_ij = np.linalg.norm(z_ij, axis=-1, keepdims=True)
     # Normalize and concatenate edge features
-    assert np.all(np.abs(z_ij) <= max_edge_length)
-    assert np.all(np.abs(d_ij) <= max_edge_length)
+    assert np.all(np.abs(z_ij) <= max_edge_length), np.max(np.abs(z_ij))
+    assert np.all(np.abs(d_ij) <= max_edge_length), np.max(np.abs(d_ij))
     z_ij = z_ij / max_edge_length
     d_ij = d_ij / max_edge_length
     edge_feats = np.concatenate([z_ij, d_ij], axis=-1)
@@ -292,7 +292,7 @@ class RegionInteractionGraphBuilder:
 
     return graph
 
-  def build(self, x_inp: Array, x_out: Array, domain: Array, key: Union[flax.typing.PRNGKey, None]) -> RegionInteractionGraphs:
+  def build(self, x_inp: Array, x_out: Array, domain: Array, key: Union[flax.typing.PRNGKey, None] = None) -> RegionInteractionGraphs:
 
     # Normalize coordinates in [-1, +1)
     x_inp = 2 * (x_inp - domain[0]) / (domain[1] - domain[0]) - 1
@@ -335,6 +335,7 @@ class Encoder(nn.Module):
   use_layer_norm: bool = True
   conditional_normalization: bool = True
   conditional_norm_latent_size: bool = True
+  p_edge_masking: float = .0
 
   def setup(self):
     self.gnn = DeepTypedGraphNet(
@@ -394,7 +395,7 @@ class Encoder(nn.Module):
     edges = graph.edges[p2r_edges_key]
     # Drop out edges randomly with the given probability
     if key is not None:
-      n_edges_after = int((1 - self.p_dropout_edges_p2r) * edges.features.shape[0])
+      n_edges_after = int((1 - self.p_edge_masking) * edges.features.shape[0])
       [new_edge_features, new_edge_senders, new_edge_receivers] = shuffle_arrays(
         key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers])
       new_edge_features = new_edge_features[:n_edges_after]
@@ -442,6 +443,7 @@ class Processor(nn.Module):
   use_layer_norm: bool = True
   conditional_normalization: bool = True
   conditional_norm_latent_size: bool = True
+  p_edge_masking: float = .0
 
   def setup(self):
     self.gnn = DeepTypedGraphNet(
@@ -490,7 +492,7 @@ class Processor(nn.Module):
     # NOTE: We need the structural edge features, because it is the first
     # time we are seeing this particular set of edges.
     if key is not None:
-      n_edges_after = int((1 - self.p_dropout_edges_r2r) * edges.features.shape[0])
+      n_edges_after = int((1 - self.p_edge_masking) * edges.features.shape[0])
       [new_edge_features, new_edge_senders, new_edge_receivers] = shuffle_arrays(
         key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers])
       new_edge_features = new_edge_features[:n_edges_after]
@@ -537,13 +539,14 @@ class Decoder(nn.Module):
   use_layer_norm: bool = True
   conditional_normalization: bool = True
   conditional_norm_latent_size: bool = True
+  p_edge_masking: float = .0
 
   def setup(self):
     self.gnn = DeepTypedGraphNet(
     # NOTE: with variable mesh, the output pnode features must be embedded
     embed_nodes=(dict(pnodes=True) if self.variable_mesh else False),
     embed_edges=True,  # Embed raw features of the edges
-    # Require a specific node dimensionaly for the grid node outputs
+    # Require a specific node dimensionaly for the physical node outputs
     # NOTE: This triggers the independent mapping for pnodes
     node_output_size=dict(pnodes=self.num_outputs),
     edge_latent_size=dict(r2p=self.edge_latent_size),
@@ -591,7 +594,7 @@ class Decoder(nn.Module):
     edges = graph.edges[r2p_edges_key]
     # Drop out edges randomly with the given probability
     if key is not None:
-      n_edges_after = int((1 - self.p_dropout_edges_r2p) * edges.features.shape[0])
+      n_edges_after = int((1 - self.p_edge_masking) * edges.features.shape[0])
       [new_edge_features, new_edge_senders, new_edge_receivers] = shuffle_arrays(
         key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers])
       new_edge_features = new_edge_features[:n_edges_after]
@@ -643,9 +646,7 @@ class RIGNO(AbstractOperator):
   concatenate_tau: bool = True
   conditional_normalization: bool = True
   conditional_norm_latent_size: int = 16
-  p_dropout_edges_p2r: int = 0.5
-  p_dropout_edges_r2r: int = 0.5
-  p_dropout_edges_r2p: int = 0.5
+  p_edge_masking: int = 0.5
 
   def _check_coordinates(self, x: Array) -> None:
     assert x is not None
@@ -658,7 +659,7 @@ class RIGNO(AbstractOperator):
     assert u is not None
     assert u.ndim == 4
     assert u.shape[1] == 1
-    assert u.shape[2] == x.shape[0]
+    assert u.shape[2] == x.shape[2], f'u: {u.shape}, x: {x.shape}'
 
   def setup(self):
     # NOTE: There are a few architectural considerations for variable mesh
@@ -673,6 +674,7 @@ class RIGNO(AbstractOperator):
       mlp_hidden_layers=self.mlp_hidden_layers,
       conditional_normalization=self.conditional_normalization,
       conditional_norm_latent_size=self.conditional_norm_latent_size,
+      p_edge_masking=self.p_edge_masking,
       name='encoder',
     )
 
@@ -684,6 +686,7 @@ class RIGNO(AbstractOperator):
       mlp_hidden_layers=self.mlp_hidden_layers,
       conditional_normalization=self.conditional_normalization,
       conditional_norm_latent_size=self.conditional_norm_latent_size,
+      p_edge_masking=self.p_edge_masking,
       name='processor',
     )
 
@@ -696,6 +699,7 @@ class RIGNO(AbstractOperator):
       mlp_hidden_layers=self.mlp_hidden_layers,
       conditional_normalization=self.conditional_normalization,
       conditional_norm_latent_size=self.conditional_norm_latent_size,
+      p_edge_masking=self.p_edge_masking,
       name='decoder',
     )
 
@@ -762,8 +766,8 @@ class RIGNO(AbstractOperator):
 
     # Read dimensions
     batch_size = inputs.u.shape[0]
-    num_pnodes_inp = inputs.x_inp.shape[0]
-    num_pnodes_out = inputs.x_out.shape[0]
+    num_pnodes_inp = inputs.x_inp.shape[2]
+    num_pnodes_out = inputs.x_out.shape[2]
 
     # Prepare the time channel
     if self.concatenate_t:

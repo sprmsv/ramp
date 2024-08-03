@@ -1,6 +1,6 @@
 from copy import copy
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Sequence, Union
 
 import jax.numpy as jnp
 
@@ -45,13 +45,13 @@ class EvalMetrics:
   def to_dict(self):
       return {key: val.__dict__ for key, val in self.__dict__.items()}
 
-def lp_norm(arr: Array, p: int = 2, axis: Sequence[int] = None) -> Array:
+def lp_norm(arr: Array, p: int = 2, axis: Union[None, Sequence[int]] = None) -> Array:
     """
     Returns the Bochner Lp-norm of an array.
 
     Args:
         arr: Point-wise values on a uniform grid with the dimensions
-            [batch, time, space_0, space_1, var]
+            [batch, time, space, var]
         p: Order of the norm. Defaults to 2.
         axis: The axes for to sum over. Defaults to None.
 
@@ -61,7 +61,7 @@ def lp_norm(arr: Array, p: int = 2, axis: Sequence[int] = None) -> Array:
 
     # Set the axis
     if axis is None:
-        axis = (1, 2, 3, 4)
+        axis = (1, 2, 3)
 
     # Sum on timespace (quadrature) and variables
     abs_pow_sum = jnp.sum(jnp.power(jnp.abs(arr), p), axis=axis)
@@ -76,9 +76,9 @@ def rel_lp_error(gtr: Array, prd: Array, p: int = 2, vars: Sequence[int] = None)
 
     Args:
         gtr: Point-wise values of a ground-truth function on a uniform
-            grid with the dimensions [batch, time, space_0, space_1, var]
+            grid with the dimensions [batch, time, space, var]
         prd: Point-wise values of a predicted function on a uniform
-            grid with the dimensions [batch, time, space_0, space_1, var]
+            grid with the dimensions [batch, time, space, var]
         p: Order of the norm. Defaults to 2.
         vars: Index of the variables to use for computing the error. Defaults to None.
 
@@ -102,9 +102,9 @@ def rel_lp_error_per_var(gtr: Array, prd: Array, p: int = 2, vars: Sequence[int]
 
     Args:
         gtr: Point-wise values of a ground-truth function on a uniform
-            grid with the dimensions [batch, time, space_0, space_1, var]
+            grid with the dimensions [batch, time, space, var]
         prd: Point-wise values of a predicted function on a uniform
-            grid with the dimensions [batch, time, space_0, space_1, var]
+            grid with the dimensions [batch, time, space, var]
         p: Order of the norm. Defaults to 2.
         vars: Index of the variables to use for computing the error. Defaults to None.
 
@@ -115,8 +115,8 @@ def rel_lp_error_per_var(gtr: Array, prd: Array, p: int = 2, vars: Sequence[int]
     err = (prd - gtr)
     if vars is not None:
         err = err[..., vars]
-    err_norm = lp_norm(err, p=p, axis=(1, 2, 3))
-    gtr_norm = lp_norm(gtr, p=p, axis=(1, 2, 3))
+    err_norm = lp_norm(err, p=p, axis=(1, 2))
+    gtr_norm = lp_norm(gtr, p=p, axis=(1, 2))
 
     return (err_norm / (gtr_norm + EPSILON))
 
@@ -128,9 +128,9 @@ def rel_lp_error_norm(gtr: Array, prd: Array, p: int = 2, vars: Sequence[int] = 
 
     Args:
         gtr: Point-wise values of a ground-truth function on a uniform
-            grid with the dimensions [batch, time, space_0, space_1, var]
+            grid with the dimensions [batch, time, space, var]
         prd: Point-wise values of a predicted function on a uniform
-            grid with the dimensions [batch, time, space_0, space_1, var]
+            grid with the dimensions [batch, time, space, var]
         p: Order of the norm. Defaults to 2.
         vars: Index of the variables to use for computing the error. Defaults to None.
 
@@ -148,9 +148,9 @@ def rel_lp_loss(gtr: Array, prd: Array, p: int = 2) -> Array:
 
     Args:
         gtr: Point-wise values of a ground-truth function on a uniform
-            grid with the dimensions [batch, time, space_0, space_1, var]
+            grid with the dimensions [batch, time, space, var]
         prd: Point-wise values of a predicted function on a uniform
-            grid with the dimensions [batch, time, space_0, space_1, var]
+            grid with the dimensions [batch, time, space, var]
         p: Order of the norm. Defaults to 2.
 
     Returns:
@@ -162,16 +162,16 @@ def rel_lp_loss(gtr: Array, prd: Array, p: int = 2) -> Array:
 def mse_error(gtr: Array, prd: Array) -> Array:
     """
     Returns the mean squared error per variable.
-    All input shapes are [batch, time, space_0, space_1, var]
+    All input shapes are [batch, time, space, var]
     Output shape is [batch,].
     """
 
-    return jnp.mean(jnp.power(prd - gtr, 2), axis=(1, 2, 3, 4))
+    return jnp.mean(jnp.power(prd - gtr, 2), axis=(1, 2, 3))
 
 def mse_loss(gtr: Array, prd: Array) -> ScalarArray:
     """
     Returns the mean squared error.
-    All input shapes are [batch, time, space_0, space_1, var]
+    All input shapes are [batch, time, space, var]
     Output shape is a scalar.
     """
 
