@@ -297,8 +297,8 @@ class Dataset:
     concatenate_coeffs: bool = False,
     time_cutoff_idx: int = None,
     time_downsample_factor: int = 1,
-    space_downsample_grid: bool = False,
     space_downsample_factor: int = 1,
+    unstructured: bool = False,
     n_train: int = 0,
     n_valid: int = 0,
     n_test: int = 0,
@@ -313,7 +313,7 @@ class Dataset:
     self.concatenate_coeffs = concatenate_coeffs
     self.time_cutoff_idx = time_cutoff_idx
     self.time_downsample_factor = time_downsample_factor
-    self.space_downsample_grid = space_downsample_grid
+    self.unstructured = unstructured
     self.space_downsample_factor = space_downsample_factor
 
     # Modify metadata
@@ -336,6 +336,7 @@ class Dataset:
       else self.reader[self.data_group].shape[0])
     self.sample = self._fetch(0)
     self.shape = self.sample.shape
+
 
     # Check sample dimensions
     for arr in self.sample.unravel():
@@ -454,7 +455,7 @@ class Dataset:
       c = None
 
     # Downsample the spatial grid
-    if self.space_downsample_grid:
+    if not self.unstructured:
       u = u[:, :, ::self.space_downsample_factor, ::self.space_downsample_factor]
       if c is not None:
         c = c[:, :, ::self.space_downsample_factor, ::self.space_downsample_factor]
@@ -496,18 +497,26 @@ class Dataset:
       x = x[:, ::self.time_downsample_factor]
 
     # Downsample the space coordinates randomly
-    # NOTE: The discretization is different for each sample
-    # NOTE: The discretization is different for each snapshot
-    if not self.space_downsample_grid:
-      for _s in range(u.shape[0]):
-        for _t in range(u.shape[1]):
-          self.key, subkey = jax.random.split(self.key)
-          if c is not None:
-            u[_s, _t], c[_s, _t], x[_s, _t] = shuffle_arrays(
-              key=subkey, arrays=[u[_s, _t], c[_s, _t], x[_s, _t]])
-          else:
-            u[_s, _t], x[_s, _t] = shuffle_arrays(
-              key=subkey, arrays=[u[_s, _t], x[_s, _t]])
+    if self.unstructured:
+      different = False
+      if not different:
+        permutation = jax.random.permutation(self.key, u.shape[2])
+        # NOTE: Same discretization for all snapshots
+        u = u[:, :, permutation]
+        c = c[:, :, permutation] if (c is not None) else None
+        x = x[:, :, permutation]
+      else:
+        # NOTE: The discretization is different for each sample
+        # NOTE: The discretization is different for each snapshot
+          for _s in range(u.shape[0]):
+            for _t in range(u.shape[1]):
+              self.key, subkey = jax.random.split(self.key)
+              if c is not None:
+                u[_s, _t], c[_s, _t], x[_s, _t] = shuffle_arrays(
+                  key=subkey, arrays=[u[_s, _t], c[_s, _t], x[_s, _t]])
+              else:
+                u[_s, _t], x[_s, _t] = shuffle_arrays(
+                  key=subkey, arrays=[u[_s, _t], x[_s, _t]])
       size = int(u.shape[2] / (self.space_downsample_factor ** 2))
       u = u[:, :, :size]
       c = c[:, :, :size] if (c is not None) else None

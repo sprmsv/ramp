@@ -22,7 +22,7 @@ from jax.tree_util import PyTreeDef
 from rigno.dataset import Dataset, Batch
 from rigno.experiments import DIR_EXPERIMENTS
 from rigno.metrics import BatchMetrics, Metrics, EvalMetrics
-from rigno.metrics import rel_lp_loss
+from rigno.metrics import rel_lp_loss, mse_loss
 from rigno.metrics import mse_error, rel_lp_error_per_var, rel_lp_error_norm
 from rigno.models.operator import AbstractOperator, Inputs
 from rigno.models.rigno import RIGNO
@@ -147,7 +147,7 @@ def train(
   unroll: bool,
   epochs: int,
   epochs_before: int = 0,
-  loss_fn: Callable = rel_lp_loss,
+  loss_fn: Callable = mse_loss,
 ) -> TrainState:
   """Trains a model and returns the state."""
 
@@ -191,8 +191,8 @@ def train(
     raise ValueError
   one_step_predictor = AutoregressiveStepper(
     stepper=stepper,
-    tau_max=1,
-    tau_base=1.,
+    tau_max=1,  # TMP NO!!!
+    tau_base=1.,  # TMP NO!!!
   )
 
   # Define the graph builder
@@ -389,6 +389,11 @@ def train(
           operand=jnp.concatenate([batch.u, jnp.zeros_like(batch.u)], axis=1),
           start_index=(lt+1), slice_size=tau_max, axis=1)
     )(lead_times)
+    t_tgt_batch = jax.vmap(
+        lambda lt: jax.lax.dynamic_slice_in_dim(
+          operand=jnp.concatenate([batch.t, jnp.zeros_like(batch.t)], axis=1),
+          start_index=(lt+1), slice_size=tau_max, axis=1)
+    )(lead_times)
     x_out_batch = jax.vmap(
         lambda lt: jax.lax.dynamic_slice_in_dim(
           operand=jnp.concatenate([batch.x, jnp.zeros_like(batch.x)], axis=1),
@@ -401,10 +406,6 @@ def train(
     c_inp_batch = jnp.tile(c_inp_batch, reps=(1, 1, tau_max, 1, 1)) if (batch.c is not None) else None
     x_inp_batch = jnp.tile(x_inp_batch, reps=(1, 1, tau_max, 1, 1))
     t_inp_batch = jnp.tile(t_inp_batch, reps=(1, 1, tau_max, 1, 1))
-    tau_batch = jnp.tile(
-      (jnp.arange(1, tau_max+1)).reshape(1, 1, tau_max, 1),
-      reps=(num_lead_times, batch_size_per_device, 1, 1)
-    )
 
     # Put all pairs along the batch axis
     # -> [batch_size_per_device * num_lead_times * tau_max, ...]
@@ -413,9 +414,12 @@ def train(
     c_inp_batch = c_inp_batch.reshape(
       (num_lead_times*batch_size_per_device*tau_max), 1, num_pnodes, -1) if (batch.c is not None) else None
     t_inp_batch = t_inp_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1)
-    tau_batch = tau_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1)
+    t_tgt_batch = t_tgt_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1)
     u_tgt_batch = u_tgt_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1, num_pnodes, -1)
     x_out_batch = x_out_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1, num_pnodes, -1)
+
+    # Get tau as the difference between input and target t
+    tau_batch = t_tgt_batch - t_inp_batch
 
     # Remove the invalid pairs
     # -> [batch_size_per_device * num_valid_pairs, ...]
@@ -796,7 +800,8 @@ def train(
     checkpointer_options = orbax.checkpoint.CheckpointManagerOptions(
       max_to_keep=1,
       keep_period=None,
-      best_fn=(lambda metrics: metrics['valid']['final']['l2']),
+      # best_fn=(lambda metrics: metrics['valid']['final']['l2']),  # TMP
+      best_fn=(lambda metrics: metrics['loss']),  # TMP
       best_mode='min',
       create=True,)
     checkpointer_save_args = orbax_utils.save_args_from_target(target={'state': state})
@@ -843,22 +848,22 @@ def train(
         # f'TRN-FN: {metrics_trn.final.l1 * 100 : .2f}%',
       ]))
 
-      # with disable_logging(level=logging.FATAL):  # TMP: UNCOMMENT
-      #   checkpoint_metrics = {
-      #     'loss': loss.item(),
-      #     'train': metrics_trn.to_dict(),
-      #     'valid': metrics_val.to_dict(),
-      #   }
-      #   # Store the state and the metrics
-      #   step = epochs_before + epoch
-      #   checkpoint_manager.save(
-      #     step=step,
-      #     items={'state': jax.device_get(unreplicate(state)),},
-      #     metrics=checkpoint_metrics,
-      #     save_kwargs={'save_args': checkpointer_save_args}
-      #   )
-      #   with open(DIR / 'metrics' / f'{str(step)}.json', 'w') as f:
-      #     json.dump(checkpoint_metrics, f)
+      with disable_logging(level=logging.FATAL):
+        checkpoint_metrics = {
+          'loss': loss.item(),
+          # 'train': metrics_trn.to_dict(),  # TMP
+          # 'valid': metrics_val.to_dict(),
+        }
+        # Store the state and the metrics
+        step = epochs_before + epoch
+        checkpoint_manager.save(
+          step=step,
+          items={'state': jax.device_get(unreplicate(state)),},
+          metrics=checkpoint_metrics,
+          save_kwargs={'save_args': checkpointer_save_args}
+        )
+        with open(DIR / 'metrics' / f'{str(step)}.json', 'w') as f:
+          json.dump(checkpoint_metrics, f)
 
     else:
       # Log the results
@@ -931,8 +936,8 @@ def main(argv):
     concatenate_coeffs=False,
     time_cutoff_idx=(IDX_FN + 1),
     time_downsample_factor=FLAGS.time_downsample_factor,
-    space_downsample_grid=True,  # TODO: Support False
     space_downsample_factor=FLAGS.space_downsample_factor,
+    unstructured=True,  # TMP TODO: Parameterize
     n_train=FLAGS.n_train,
     n_valid=FLAGS.n_valid,
     n_test=FLAGS.n_test,

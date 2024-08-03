@@ -140,8 +140,8 @@ class RegionInteractionGraphBuilder:
       # NOTE: For the r2r multi-mesh, use extended domain indices and shifts
       else:
         z_ij = np.stack([
-          ((x_sen[s] + shifts[domain_sen[s]]) - (x_rec[r] + shifts[domain_rec[r]]))
-          for s, r in zip(idx_sen, idx_rec)
+          ((x_sen[s] + shifts[dom_s]) - (x_rec[r] + shifts[dom_r]))
+          for s, r, dom_s, dom_r in zip(idx_sen, idx_rec, domain_sen, domain_rec)
         ], axis=0)
     d_ij = np.linalg.norm(z_ij, axis=-1, keepdims=True)
     # Normalize and concatenate edge features
