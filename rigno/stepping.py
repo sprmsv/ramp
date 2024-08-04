@@ -1,12 +1,12 @@
 from abc import ABC, abstractmethod
+from typing import Union
 
 import flax.typing
 import jax
 import jax.numpy as jnp
 
 from rigno.models.operator import AbstractOperator, Inputs
-from rigno.utils import Array, normalize, unnormalize
-
+from rigno.utils import Array, is_multiple, normalize, unnormalize
 
 class Stepper(ABC):
 
@@ -66,11 +66,11 @@ class Stepper(ABC):
       u_inp, t_inp = carry
       tau = forcing
       _inputs = Inputs(
-        u_inp=u_inp,
-        c_inp=inputs.c,
+        u=u_inp,
+        c=inputs.c,
         x_inp=inputs.x_inp,
         x_out=inputs.x_out,
-        t_inp=t_inp,
+        t=t_inp,
         tau=tau
       )
       u_out = self.apply(
@@ -339,26 +339,27 @@ class OutputStepper(Stepper):
 
 class AutoregressiveStepper:
 
-  def __init__(self, stepper: Stepper, tau_max: float = 1., tau_base: float = 1.):
+  def __init__(self, stepper: Stepper, dt: float, tau_max: Union[None, float] = None):
     """
     Class for autoregressive inferrence of an operator.
 
     Args:
         stepper: Uses an operator with proper stepping method.
-        tau_max: Maximum time delta of direct predictions with respect to the time resolution of the trained model. Defaults to 1.
-        tau_base: Time resolution of the output with respect to the time resolution of the trained model. Defaults to 1.
+        dt: Time resolution of the trajectory.
+        tau_max: Maximum time difference of direct predictions. Defaults to None.
     """
 
-    # FIXME: Maybe we can benefit from checkpointing scan_fn instead
-    self.tau_base = tau_base
-    if tau_max >= tau_base:
-      assert tau_max % tau_base == 0
-      self.num_steps_direct = int(tau_max / tau_base)
+    if tau_max is None:
+      tau_max = dt
+    self.dt = dt
+    if tau_max >= dt:
+      assert is_multiple(tau_max, dt)
+      self.num_steps_direct = int(tau_max / dt)
       self._apply_operator = jax.checkpoint(stepper.apply)
     else:
-      assert tau_base % tau_max == 0
+      assert is_multiple(dt, tau_max)
       self.num_steps_direct = 1
-      num_unrolls_per_step = int(tau_base / tau_max)
+      num_unrolls_per_step = int(dt / tau_max)
       def _stepper_unroll(*args, **kwargs):
         return stepper.unroll(*args, **kwargs, num_steps=num_unrolls_per_step)
       self._apply_operator = jax.checkpoint(_stepper_unroll)
@@ -374,6 +375,7 @@ class AutoregressiveStepper:
     # NOTE: Assuming constant x  # TODO: Support variable x
     # NOTE: Assuming constant c  # TODO: Support variable c
 
+    assert inputs.tau is None
     u_inp = inputs.u
     batch_size = u_inp.shape[0]
     num_pnodes = u_inp.shape[2]
@@ -388,11 +390,11 @@ class AutoregressiveStepper:
       tau = forcing[0]
       key = forcing[-2:].astype('uint32')
       _inputs = Inputs(
-        u_inp=u_inp,
-        c_inp=inputs.c,
+        u=u_inp,
+        c=inputs.c,
         x_inp=inputs.x_inp,
         x_out=inputs.x_out,
-        t_inp=t_inp,
+        t=t_inp,
         tau=tau,
       )
       u_out = self._apply_operator(
@@ -416,13 +418,13 @@ class AutoregressiveStepper:
         init=(u_inp, t_inp), xs=forcing, length=_num_direct_steps)
       u_out = jnp.squeeze(u_out, axis=2).swapaxes(0, 1)
       u_next = u_out[:, -1:]
-      t_next = t_inp + self.tau_base * self.num_steps_direct
+      t_next = t_inp + self.dt * self.num_steps_direct
       carry = (u_next, t_next)
       return carry, u_out
 
     # Get full sets of direct predictions
     num_jumps = num_steps // self.num_steps_direct
-    tau_tiled = self.tau_base * jnp.tile(
+    tau_tiled = self.dt * jnp.tile(
       jnp.arange(1, self.num_steps_direct+1), reps=(num_jumps, 1)
     ).reshape(num_jumps, self.num_steps_direct)
     key, subkey = jax.random.split(key)
@@ -442,7 +444,7 @@ class AutoregressiveStepper:
     # Get the last set of direct predictions partially (if necessary)
     num_steps_rem = num_steps % self.num_steps_direct
     if num_steps_rem:
-      tau_tiled = self.tau_base * jnp.arange(1, num_steps_rem+1).reshape(1, num_steps_rem)
+      tau_tiled = self.dt * jnp.arange(1, num_steps_rem+1).reshape(1, num_steps_rem)
       key, subkey = jax.random.split(key, num=2)
       keys = subkey.reshape(1, 2)
       forcings = jnp.concatenate([tau_tiled, keys], axis=-1)
@@ -472,6 +474,7 @@ class AutoregressiveStepper:
   ) -> Array:
     """Takes num_jumps large steps, each of length num_steps_direct."""
 
+    assert inputs.tau is None
     u_inp = inputs.u
     t_inp = inputs.t.astype(float)
     random = (key is not None)
@@ -481,13 +484,13 @@ class AutoregressiveStepper:
     def scan_fn(carry, forcing):
       u_inp, t_inp = carry
       subkey = forcing if random else None
-      tau = self.tau_base * self.num_steps_direct
+      tau = self.dt * self.num_steps_direct
       _inputs = Inputs(
-        u_inp=u_inp,
-        c_inp=inputs.c,
+        u=u_inp,
+        c=inputs.c,
         x_inp=inputs.x_inp,
         x_out=inputs.x_out,
-        t_inp=t_inp,
+        t=t_inp,
         tau=tau,
       )
       u_out = self._apply_operator(

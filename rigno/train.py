@@ -3,7 +3,7 @@ import pickle
 import functools
 from datetime import datetime
 from time import time
-from typing import Tuple, Any, Mapping, Iterable, Callable
+from typing import Tuple, Any, Mapping, Iterable, Callable, Union
 
 import flax.linen as nn
 import flax.typing
@@ -32,7 +32,7 @@ from rigno.stepping import TimeDerivativeStepper
 from rigno.stepping import ResidualStepper
 from rigno.stepping import OutputStepper
 from rigno.test import get_direct_estimations
-from rigno.utils import disable_logging, Array, shuffle_arrays, split_arrays, normalize
+from rigno.utils import disable_logging, Array, shuffle_arrays, split_arrays, is_multiple
 
 
 NUM_DEVICES = jax.local_device_count()
@@ -107,6 +107,9 @@ def define_flags():
   )
 
   # FLAGS::model::RIGNO
+  flags.DEFINE_float(name='mesh_subsample_factor', default=4.0, required=False,
+    help='Factor for random subsampling of hierarchical meshes'
+  )
   flags.DEFINE_float(name='overlap_factor_p2r', default=4.0, required=False,
     help='Overlap factor for p2r edges (encoder)'
   )
@@ -191,15 +194,14 @@ def train(
     raise ValueError
   one_step_predictor = AutoregressiveStepper(
     stepper=stepper,
-    tau_max=1,  # TMP NO!!!
-    tau_base=1.,  # TMP NO!!!
+    dt=dataset.dt,
   )
 
   # Define the graph builder
   builder = RegionInteractionGraphBuilder(
     periodic=dataset.metadata.periodic,
     rmesh_levels=FLAGS.rmesh_levels,
-    subsample_factor=2,  # TMP TODO: Parameterize
+    subsample_factor=FLAGS.mesh_subsample_factor,
     overlap_factor_p2r=FLAGS.overlap_factor_p2r,
     overlap_factor_r2p=FLAGS.overlap_factor_r2p,
     node_coordinate_freqs=FLAGS.node_coordinate_freqs,
@@ -306,7 +308,7 @@ def train(
         if unroll:
           # Split tau for unrolling
           key, subkey = jax.random.split(key)
-          tau_cutoff = .2
+          tau_cutoff = .2 * dataset.dt
           tau_mid = tau_cutoff + jax.random.uniform(key=subkey, shape=tau.shape) * (tau - 2 * tau_cutoff)
           # Get intermediary output
           key, subkey = jax.random.split(key)
@@ -526,47 +528,49 @@ def train(
 
     return state, loss_epoch, grad_epoch
 
-  # TMP: TODO: UPDATE
   @functools.partial(jax.pmap, static_broadcasted_argnums=(0,))
   def _evaluate_direct_prediction(
-    tau: int,
+    tau_ratio: Union[float, int],
     state: TrainState,
     stats,
-    trajs: Array,
+    graphs: RegionInteractionGraphs,
+    batch: Batch
   ) -> Mapping:
 
-    if tau < 1:
-      step = lambda *args, **kwargs: stepper.unroll(*args, **kwargs, num_steps=int(1 / tau))
-      _tau = 1
+    if tau_ratio < 1:
+      assert is_multiple(1., tau_ratio)
+      step = lambda *args, **kwargs: stepper.unroll(*args, **kwargs, num_steps=int(1 / tau_ratio))
+      _tau_ratio = 1
     else:
+      assert isinstance(tau_ratio, int)
       step = stepper.apply
-      _tau = tau
+      _tau_ratio = tau_ratio
 
     u_prd = get_direct_estimations(
       step=step,
       variables={'params': state.params},
       stats=stats,
-      trajs=trajs,
-      tau=_tau,
+      graphs=graphs,
+      batch=batch,
+      tau=(_tau_ratio * dataset.dt),
       time_downsample_factor=1,
     )
 
     # Get mean errors per each sample in the batch
     batch_metrics = BatchMetrics(
-      mse=mse_error(trajs[:, _tau:], u_prd[:, :-_tau]),
-      l1=rel_lp_error_norm(trajs[:, _tau:], u_prd[:, :-_tau], p=1),
-      l2=rel_lp_error_norm(trajs[:, _tau:], u_prd[:, :-_tau], p=2),
+      mse=mse_error(batch.u[:, _tau_ratio:], u_prd[:, :-_tau_ratio]),
+      l1=rel_lp_error_norm(batch.u[:, _tau_ratio:], u_prd[:, :-_tau_ratio], p=1),
+      l2=rel_lp_error_norm(batch.u[:, _tau_ratio:], u_prd[:, :-_tau_ratio], p=2),
     )
 
     return batch_metrics.__dict__
 
-  # TMP: TODO: UPDATE
   @jax.pmap
   def _evaluate_rollout_prediction(
     state: TrainState,
     stats,
-    trajs: Array,
-    times: Array,
+    graphs: RegionInteractionGraphs,
+    batch: Batch
   ) -> Mapping:
     """
     Predicts the trajectories autoregressively.
@@ -574,10 +578,16 @@ def train(
     Inputs are of shape [batch_size_per_device, ...]
     """
 
-    # Set input and target
-    u_inp = trajs[:, :1]
-    t_inp = times[:, :1]
-    u_tgt = trajs
+    # Set inputs and target
+    u_tgt = batch.u
+    inputs = Inputs(
+      u=batch.u[:, :1],
+      c=(batch.c[:, :1] if (batch.c is not None) else None),
+      x_inp=batch._x,
+      x_out=batch._x,
+      t=batch.t[:, :1],
+      tau=None,
+    )
 
     # Get unrolled predictions
     variables = {'params': state.params}
@@ -585,9 +595,9 @@ def train(
     u_prd, _ = _predictor.unroll(
       variables=variables,
       stats=stats,
-      u_inp=u_inp,
-      t_inp=t_inp,
       num_steps=num_times,
+      inputs=inputs,
+      graphs=graphs,
     )
 
     # Calculate the errors
@@ -597,23 +607,27 @@ def train(
       l2=rel_lp_error_norm(u_tgt, u_prd, p=2),
     )
 
-
     return batch_metrics.__dict__
 
-  # TMP: TODO: UPDATE
   @jax.pmap
   def _evaluate_final_prediction(
     state: TrainState,
     stats,
-    trajs: Array,
-    times: Array,
+    graphs: RegionInteractionGraphs,
+    batch: Batch
   ) -> Mapping:
 
     # Set input and target
     idx_fn = IDX_FN // FLAGS.time_downsample_factor
-    u_inp = trajs[:, :1]
-    t_inp = times[:, :1]
-    u_tgt = trajs[:, (idx_fn):(idx_fn+1)]
+    u_tgt = batch.u[:, (idx_fn):(idx_fn+1)]
+    inputs = Inputs(
+      u=batch.u[:, :1],
+      c=(batch.c[:, :1] if (batch.c is not None) else None),
+      x_inp=batch._x,
+      x_out=batch._x,
+      t=batch.t[:, :1],
+      tau=None,
+    )
 
     # Get prediction at the final step
     _predictor = one_step_predictor
@@ -623,17 +637,26 @@ def train(
     u_prd = _predictor.jump(
       variables=variables,
       stats=stats,
-      u_inp=u_inp,
-      t_inp=t_inp,
       num_jumps=_num_jumps,
+      inputs=inputs,
+      graphs=graphs,
     )
     if _num_direct_steps:
+      _num_dt_jumped = _num_jumps * _predictor.num_steps_direct
+      inputs = Inputs(
+        u=u_prd,
+        c=(batch.c[:, [_num_dt_jumped]] if (batch.c is not None) else None),
+        x_inp=batch._x,
+        x_out=batch._x,
+        t=(batch.t[:, :1] + _num_dt_jumped * _predictor.dt),
+        tau=None,
+      )
       _, u_prd = _predictor.unroll(
         variables=variables,
         stats=stats,
-        u_inp=u_prd,
-        t_inp=t_inp,
         num_steps=_num_direct_steps,
+        inputs=inputs,
+        graphs=graphs,
       )
 
     # Calculate the errors
@@ -645,10 +668,9 @@ def train(
 
     return batch_metrics.__dict__
 
-  # TMP: TODO: UPDATE
   def evaluate(
     state: TrainState,
-    batches: Iterable[Tuple[Array, Array]],
+    batches: Iterable[Batch],
     direct: bool = True,
     rollout: bool = False,
     final: bool = True,
@@ -662,41 +684,35 @@ def train(
     metrics_final: list[BatchMetrics] = []
 
     for batch in batches:
-      # Unwrap the batch
-      trajs = batch
-      times = jnp.tile(jnp.arange(trajs.shape[1]), reps=(trajs.shape[0], 1))
-
       # Split the batch between devices
       # -> [NUM_DEVICES, batch_size_per_device, ...]
-      trajs = shard(trajs)
-      times = shard(times)
+      batch = Batch(
+        u=shard(batch.u),
+        c=shard(batch.c),
+        x=shard(batch.x),
+        t=shard(batch.t),
+      )
 
       # Evaluate direct prediction
       if direct:
-        # tau=.5
-        batch_metrics_direct_tau_frac = _evaluate_direct_prediction(
-          .5, state, stats, trajs,
-        )
+        # tau = .5*dt
+        batch_metrics_direct_tau_frac = _evaluate_direct_prediction(.5, state, stats, graphs, batch)
         batch_metrics_direct_tau_frac = BatchMetrics(**batch_metrics_direct_tau_frac)
         # Re-arrange the sub-batches gotten from each device
         batch_metrics_direct_tau_frac.reshape(shape=(batch_size_per_device * NUM_DEVICES, 1))
         # Append the metrics to the list
         metrics_direct_tau_frac.append(batch_metrics_direct_tau_frac)
 
-        # tau=1
-        batch_metrics_direct_tau_min = _evaluate_direct_prediction(
-          1, state, stats, trajs,
-        )
+        # tau = dt
+        batch_metrics_direct_tau_min = _evaluate_direct_prediction(1, state, stats, graphs, batch)
         batch_metrics_direct_tau_min = BatchMetrics(**batch_metrics_direct_tau_min)
         # Re-arrange the sub-batches gotten from each device
         batch_metrics_direct_tau_min.reshape(shape=(batch_size_per_device * NUM_DEVICES, 1))
         # Append the metrics to the list
         metrics_direct_tau_min.append(batch_metrics_direct_tau_min)
 
-        # tau=tau_max
-        batch_metrics_direct_tau_max = _evaluate_direct_prediction(
-          FLAGS.tau_max, state, stats, trajs,
-        )
+        # tau = tau_max
+        batch_metrics_direct_tau_max = _evaluate_direct_prediction(FLAGS.tau_max, state, stats, graphs, batch)
         batch_metrics_direct_tau_max = BatchMetrics(**batch_metrics_direct_tau_max)
         # Re-arrange the sub-batches gotten from each device
         batch_metrics_direct_tau_max.reshape(shape=(batch_size_per_device * NUM_DEVICES, 1))
@@ -705,9 +721,7 @@ def train(
 
       # Evaluate rollout prediction
       if rollout:
-        batch_metrics_rollout = _evaluate_rollout_prediction(
-          state, stats, trajs, times,
-        )
+        batch_metrics_rollout = _evaluate_rollout_prediction(state, stats, graphs, batch)
         batch_metrics_rollout = BatchMetrics(**batch_metrics_rollout)
         # Re-arrange the sub-batches gotten from each device
         batch_metrics_rollout.reshape(shape=(batch_size_per_device * NUM_DEVICES, 1))
@@ -716,10 +730,8 @@ def train(
 
       # Evaluate final prediction
       if final:
-        assert (IDX_FN // FLAGS.time_downsample_factor) < trajs.shape[2]
-        batch_metrics_final = _evaluate_final_prediction(
-          state, stats, trajs, times,
-        )
+        assert (IDX_FN // FLAGS.time_downsample_factor) < batch.u.shape[2]
+        batch_metrics_final = _evaluate_final_prediction(state, stats, graphs, batch)
         batch_metrics_final = BatchMetrics(**batch_metrics_final)
         # Re-arrange the sub-batches gotten from each device
         batch_metrics_final.reshape(shape=(batch_size_per_device * NUM_DEVICES, 1))
@@ -765,15 +777,14 @@ def train(
     return metrics
 
   # Evaluate before training
-  # TMP: Uncomment
-  # metrics_trn = evaluate(
-  #   state=state,
-  #   batches=dataset.batches(mode='train', batch_size=FLAGS.batch_size),
-  # )
-  # metrics_val = evaluate(
-  #   state=state,
-  #   batches=dataset.batches(mode='valid', batch_size=FLAGS.batch_size),
-  # )
+  metrics_trn = evaluate(
+    state=state,
+    batches=dataset.batches(mode='train', batch_size=FLAGS.batch_size),
+  )
+  metrics_val = evaluate(
+    state=state,
+    batches=dataset.batches(mode='valid', batch_size=FLAGS.batch_size),
+  )
 
   # Report the initial evaluations
   time_tot_pre = time() - time_int_pre
@@ -784,12 +795,12 @@ def train(
     f'TIME: {time_tot_pre : 06.1f}s',
     f'GRAD: {0. : .2e}',
     f'LOSS: {0. : .2e}',
-    # f'DR-0.5: {metrics_val.direct_tau_frac.l1 * 100 : .2f}%',  # TMP: Uncomment
-    # f'DR-1: {metrics_val.direct_tau_min.l1 * 100 : .2f}%',
-    # f'DR-{FLAGS.tau_max}: {metrics_val.direct_tau_max.l1 * 100 : .2f}%',
-    # f'FN: {metrics_val.final.l1 * 100 : .2f}%',
-    # f'TRN-DR-1: {metrics_trn.direct_tau_min.l1 * 100 : .2f}%',
-    # f'TRN-FN: {metrics_trn.final.l1 * 100 : .2f}%',
+    f'DR-0.5: {metrics_val.direct_tau_frac.l1 * 100 : .2f}%',
+    f'DR-1: {metrics_val.direct_tau_min.l1 * 100 : .2f}%',
+    f'DR-{FLAGS.tau_max}: {metrics_val.direct_tau_max.l1 * 100 : .2f}%',
+    f'FN: {metrics_val.final.l1 * 100 : .2f}%',
+    f'TRN-DR-1: {metrics_trn.direct_tau_min.l1 * 100 : .2f}%',
+    f'TRN-FN: {metrics_trn.final.l1 * 100 : .2f}%',
   ]))
 
   # Set up the checkpoint manager
@@ -800,8 +811,7 @@ def train(
     checkpointer_options = orbax.checkpoint.CheckpointManagerOptions(
       max_to_keep=1,
       keep_period=None,
-      # best_fn=(lambda metrics: metrics['valid']['final']['l2']),  # TMP
-      best_fn=(lambda metrics: metrics['loss']),  # TMP
+      best_fn=(lambda metrics: metrics['valid']['final']['l2']),
       best_mode='min',
       create=True,)
     checkpointer_save_args = orbax_utils.save_args_from_target(target={'state': state})
@@ -821,15 +831,15 @@ def train(
     )
 
     if (epoch % evaluation_frequency) == 0:
-      # Evaluate  # TMP: UNCOMMENT
-      # metrics_trn = evaluate(
-      #   state=state,
-      #   batches=dataset.batches(mode='train', batch_size=FLAGS.batch_size),
-      # )
-      # metrics_val = evaluate(
-      #   state=state,
-      #   batches=dataset.batches(mode='valid', batch_size=FLAGS.batch_size),
-      # )
+      # Evaluate
+      metrics_trn = evaluate(
+        state=state,
+        batches=dataset.batches(mode='train', batch_size=FLAGS.batch_size),
+      )
+      metrics_val = evaluate(
+        state=state,
+        batches=dataset.batches(mode='valid', batch_size=FLAGS.batch_size),
+      )
 
       # Log the results
       time_tot = time() - time_int
@@ -840,19 +850,19 @@ def train(
         f'TIME: {time_tot : 06.1f}s',
         f'GRAD: {grad.item() : .2e}',
         f'LOSS: {loss.item() : .2e}',
-        # f'DR-0.5: {metrics_val.direct_tau_frac.l1 * 100 : .2f}%',  # TMP: UNCOMMENT
-        # f'DR-1: {metrics_val.direct_tau_min.l1 * 100 : .2f}%',
-        # f'DR-{FLAGS.tau_max}: {metrics_val.direct_tau_max.l1 * 100 : .2f}%',
-        # f'FN: {metrics_val.final.l1 * 100 : .2f}%',
-        # f'TRN-DR-1: {metrics_trn.direct_tau_min.l1 * 100 : .2f}%',
-        # f'TRN-FN: {metrics_trn.final.l1 * 100 : .2f}%',
+        f'DR-0.5: {metrics_val.direct_tau_frac.l1 * 100 : .2f}%',
+        f'DR-1: {metrics_val.direct_tau_min.l1 * 100 : .2f}%',
+        f'DR-{FLAGS.tau_max}: {metrics_val.direct_tau_max.l1 * 100 : .2f}%',
+        f'FN: {metrics_val.final.l1 * 100 : .2f}%',
+        f'TRN-DR-1: {metrics_trn.direct_tau_min.l1 * 100 : .2f}%',
+        f'TRN-FN: {metrics_trn.final.l1 * 100 : .2f}%',
       ]))
 
       with disable_logging(level=logging.FATAL):
         checkpoint_metrics = {
           'loss': loss.item(),
-          # 'train': metrics_trn.to_dict(),  # TMP
-          # 'valid': metrics_val.to_dict(),
+          'train': metrics_trn.to_dict(),
+          'valid': metrics_val.to_dict(),
         }
         # Store the state and the metrics
         step = epochs_before + epoch
@@ -876,7 +886,6 @@ def train(
         f'GRAD: {grad.item() : .2e}',
         f'LOSS: {loss.item() : .2e}',
       ]))
-
 
   return unreplicate(state)
 
@@ -937,7 +946,7 @@ def main(argv):
     time_cutoff_idx=(IDX_FN + 1),
     time_downsample_factor=FLAGS.time_downsample_factor,
     space_downsample_factor=FLAGS.space_downsample_factor,
-    unstructured=True,  # TMP TODO: Parameterize
+    unstructured=False,
     n_train=FLAGS.n_train,
     n_valid=FLAGS.n_valid,
     n_test=FLAGS.n_test,
@@ -993,7 +1002,7 @@ def main(argv):
     dummy_graph_builder = RegionInteractionGraphBuilder(
       periodic=dataset.metadata.periodic,
       rmesh_levels=1,
-      subsample_factor=2,
+      subsample_factor=4,
       overlap_factor_p2r=.01,
       overlap_factor_r2p=.01,
       node_coordinate_freqs=FLAGS.node_coordinate_freqs,

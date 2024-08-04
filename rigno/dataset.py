@@ -279,11 +279,7 @@ class Batch(NamedTuple):
 
   @property
   def _x(self) -> Array:
-    if all([np.all(self.x[i, j] == self.x[0, 0])
-            for i in range(self.x.shape[0]) for j in range(self.x.shape[1])]):
-      return self.x[0, 0]
-    else:
-      return None
+    return self.x[0, 0]
 
   def __len__(self) -> int:
     return self.shape[0]
@@ -336,7 +332,7 @@ class Dataset:
       else self.reader[self.data_group].shape[0])
     self.sample = self._fetch(0)
     self.shape = self.sample.shape
-
+    self.dt = (self.sample.t[0, 1] - self.sample.t[0, 0]).item() # NOTE: Assuming fix dt
 
     # Check sample dimensions
     for arr in self.sample.unravel():
@@ -498,7 +494,7 @@ class Dataset:
 
     # Downsample the space coordinates randomly
     if self.unstructured:
-      different = False
+      different = False  # CHECK: Check all usages of Batch._x if switched on
       if not different:
         permutation = jax.random.permutation(self.key, u.shape[2])
         # NOTE: Same discretization for all snapshots

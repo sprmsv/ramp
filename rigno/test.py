@@ -15,10 +15,11 @@ from absl import app, flags, logging
 from flax.training.common_utils import shard, shard_prng_key
 from flax.jax_utils import replicate
 
-from rigno.dataset import Dataset
+from rigno.dataset import Dataset, Batch
 from rigno.experiments import DIR_EXPERIMENTS
 from rigno.metrics import rel_lp_error_norm
-from rigno.models.rigno import AbstractOperator, RIGNO
+from rigno.models.operator import AbstractOperator, Inputs
+from rigno.models.rigno import RIGNO, RegionInteractionGraphs, RegionInteractionGraphBuilder
 from rigno.models.unet import UNet
 from rigno.plot import plot_estimates, plot_ensemble, plot_error_vs_time
 from rigno.stepping import Stepper, TimeDerivativeStepper, ResidualStepper, OutputStepper
@@ -62,46 +63,18 @@ def print_between_dashes(msg):
   logging.info(msg)
   logging.info('-' * 80)
 
-def change_resolution(u: Array, resolution: Tuple[int, int]) -> Array:
-  """
-  Changes the resolution of an input array on axes (2, 3).
-
-  Args:
-      u: The input array.
-      resolution: The target resolution.
-
-  Returns:
-      The input array with the target resolution.
-  """
-
-  # Return if the resolution is fine
-  if u.shape[2:4] == resolution:
-    return u
-
-  # Get the downsampling factor
-  space_downsample_factor = [
-    (dim_before / dim_after)
-    for (dim_before, dim_after)
-    in zip(u.shape[2:4], resolution)
-  ]
-
-  # Subsample if possible
-  if all([(d % 1) == 0 for d in space_downsample_factor]):
-    d = [int(d) for d in space_downsample_factor]
-    return u[:, :, ::d[0], ::d[1]]
-  # Interpolate otherwise
-  else:
-    d = [(1/d) for d in space_downsample_factor]
-    return scipy.ndimage.zoom(u, zoom=(1, 1, d[0], d[1], 1), order=2)
+# TMP Finish up
+def change_discretization(u: Array):
+  ...
 
 def profile_inferrence(
   dataset: Dataset,
+  graphs: RegionInteractionGraphs,
   model: AbstractOperator,
   stepping: Type[Stepper],
   state: dict,
   stats: dict,
-  resolution: Tuple[int, int],
-  p_edge_masking_grid2mesh: float,
+  p_edge_masking: float,
   repeats: int = 10,
   jit: bool = True,
 ):
@@ -109,8 +82,7 @@ def profile_inferrence(
   # Configure and build new model
   model_configs = model.configs
   if isinstance(model, RIGNO):
-    model_configs['num_grid_nodes'] = resolution
-    model_configs['p_dropout_edges_grid2mesh'] = p_edge_masking_grid2mesh
+    model_configs['p_dropout_edges_grid2mesh'] = p_edge_masking
     model_configs['p_dropout_edges_multimesh'] = 0.
     model_configs['p_dropout_edges_mesh2grid'] = 0.
   elif isinstance(model, UNet):
@@ -126,41 +98,32 @@ def profile_inferrence(
   # Get a batch and transform it
   batch_size_per_device = FLAGS.batch_size // NUM_DEVICES
   batch = next(dataset.batches(mode='test', batch_size=batch_size_per_device))
-  u_inp = batch[:, [0]]
-  u_inp = change_resolution(u_inp, resolution)
 
-  # Profile compilation
-  t_compilation = profile(
-    f=apply_fn,
-    kwargs=dict(
-      variables={'params': state['params']},
-      stats=stats,
-      u_inp=u_inp,
-      t_inp=0.,
-      tau=1.,
+  # Set model inputs
+  model_kwargs = dict(
+    variables={'params': state['params']},
+    stats=stats,
+    inputs=Inputs(
+      u=batch.u[:, [0]],
+      c=(batch.c[:, [0]] if (batch.c is not None) else None),
+      x_inp=batch._x,
+      x_out=batch._x,
+      t=batch.t[:, [0]],
+      tau=dataset.dt,
     ),
-    repeats=1,
+    graphs=graphs,
   )
 
+  # Profile compilation
+  t_compilation = profile(f=apply_fn, kwargs=model_kwargs, repeats=1)
   # Profile inferrence after compilation
-  t = profile(
-    f=apply_fn,
-    kwargs=dict(
-      variables={'params': state['params']},
-      stats=stats,
-      u_inp=u_inp,
-      t_inp=0.,
-      tau=1.,
-    ),
-    repeats=repeats,
-  ) / repeats
+  t = profile(f=apply_fn, kwargs=model_kwargs, repeats=repeats) / repeats
 
   general_info = [
     'NUMBER OF DEVICES: 1',
     f'BATCH SIZE PER DEVICE: {batch_size_per_device}',
     f'MODEL: {model.__class__.__name__}',
-    f'RESOLUTION: {resolution}',
-    f'p_edge_masking_grid2mesh: {p_edge_masking_grid2mesh}',
+    f'p_edge_masking: {p_edge_masking}',
   ]
 
   times_info = [
@@ -176,41 +139,48 @@ def profile_inferrence(
   for line in all_msgs:
     logging.info(line)
 
+# TMP Update
 def get_direct_estimations(
   step: Stepper.apply,
   variables,
   stats,
-  trajs: Array,
-  tau: int,
-  time_downsample_factor: int,
+  graphs: RegionInteractionGraphs,
+  batch: Batch,
+  tau: float,
+  time_downsample_factor: int = 1,  # TMP REMOVE?
   key = None,
 ) -> Array:
   """Inputs are of shape [batch_size_per_device, ...]"""
 
   # Set lead times
-  lead_times = jnp.arange(trajs.shape[1])
-  batch_size = trajs.shape[0]
+  lead_times = jnp.arange(batch.shape[1])
+  batch_size = batch.shape[0]
 
   # Get inputs for all lead times
   # -> [num_lead_times, batch_size_per_device, ...]
   u_inp = jax.vmap(
       lambda lt: jax.lax.dynamic_slice_in_dim(
-        operand=trajs,
+        operand=batch.u,
         start_index=(lt), slice_size=1, axis=1)
   )(lead_times)
-  t_inp = lead_times.repeat(repeats=batch_size).reshape(-1, batch_size, 1)
+  t_inp = batch.t.swapaxes(0, 1).reshape(-1, batch_size, 1)
 
   # Get model estimations
   def _use_step_on_mini_batches(carry, x):
     idx = carry
-    _u_inp = u_inp[idx]
-    _t_inp = t_inp[idx]
+    inputs = Inputs(
+      u=u_inp[idx],
+      c=(batch.c[:, [idx]] if (batch.c is not None) else None),
+      x_inp=batch._x,
+      x_out=batch._x,
+      t=(t_inp[idx] / time_downsample_factor),
+      tau=tau,
+    )
     _u_prd = step(
       variables=variables,
       stats=stats,
-      u_inp=_u_inp,
-      t_inp=(_t_inp / time_downsample_factor),
-      tau=(tau / time_downsample_factor),
+      inputs=inputs,
+      graphs=graphs,
       key=key,
     )
     carry += 1
@@ -220,7 +190,7 @@ def get_direct_estimations(
     f=_use_step_on_mini_batches,
     init=0,
     xs=None,
-    length=trajs.shape[1],
+    length=batch.shape[1],
   )
 
   # Re-arrange
@@ -229,6 +199,7 @@ def get_direct_estimations(
 
   return u_prd
 
+# TMP Update
 def get_rollout_estimations(
   unroll: AutoregressiveStepper.unroll,
   num_steps: int,
@@ -251,6 +222,7 @@ def get_rollout_estimations(
 
   return rollout
 
+# TMP Update
 def get_all_estimations(
   dataset: Dataset,
   model: AbstractOperator,
@@ -365,7 +337,7 @@ def get_all_estimations(
       unrollers[resolution][tau_max] = AutoregressiveStepper(
         stepper=steppers[resolution],
         tau_max=(tau_max / train_flags['time_downsample_factor']),
-        tau_base=(1. / train_flags['time_downsample_factor'])
+        dt=(1. / train_flags['time_downsample_factor'])
       )
       apply_unroll_jit[resolution][tau_max] = jax.jit(
         unrollers[resolution][tau_max].unroll, static_argnums=(4,))
@@ -538,6 +510,7 @@ def get_all_estimations(
 
   return errors, u_prd_rollout
 
+# TMP Update
 def get_ensemble_estimations(
   repeats: int,
   dataset: Dataset,
@@ -616,7 +589,7 @@ def get_ensemble_estimations(
   unroller = AutoregressiveStepper(
     stepper=stepper,
     tau_max=(tau_max / train_flags['time_downsample_factor']),
-    tau_base=(1. / train_flags['time_downsample_factor'])
+    dt=(1. / train_flags['time_downsample_factor'])
   )
   apply_unroll_jit = jax.jit(
     unroller.unroll, static_argnums=(4,))
@@ -662,22 +635,28 @@ def main(argv):
   dataset = Dataset(
     datadir=FLAGS.datadir,
     datapath=datapath,
+    include_passive_variables=False,
+    concatenate_coeffs=False,
+    time_downsample_factor=1,
+    space_downsample_factor=1,
+    unstructured=False,
     n_train=0,
     n_valid=0,
     n_test=FLAGS.n_test,
     preload=True,
-    time_downsample_factor=1,
-    space_downsample_factor=1,
   )
   dataset_small = Dataset(
     datadir=FLAGS.datadir,
     datapath=datapath,
+    include_passive_variables=False,
+    concatenate_coeffs=False,
+    time_downsample_factor=1,
+    space_downsample_factor=1,
+    unstructured=False,
     n_train=0,
     n_valid=0,
     n_test=min(4, FLAGS.n_test),
     preload=True,
-    time_downsample_factor=1,
-    space_downsample_factor=1,
   )
 
   # Read the stats
@@ -692,7 +671,6 @@ def main(argv):
     configs = json.load(f)
   time_downsample_factor = configs['flags']['time_downsample_factor']
   tau_max_train = configs['flags']['tau_max']
-  model_name = configs['flags']['model'].upper()
   model_configs = configs['model_configs']
   resolution_train = tuple(configs['resolution'])
   # Read the state
@@ -713,25 +691,39 @@ def main(argv):
     raise ValueError
 
   # Set the model
-  if model_name == 'RIGNO':
-    model_class = RIGNO
-  elif model_name == 'UNET':
-    model_class = UNet
-  else:
-    raise ValueError
-  model = model_class(**model_configs)
+  model = RIGNO(**model_configs)
+
+  # Define the graph builder
+  builder = RegionInteractionGraphBuilder(
+    periodic=dataset.metadata.periodic,
+    rmesh_levels=configs['flags']['rmesh_levels'],
+    subsample_factor=configs['flags']['mesh_subsample_factor'],
+    overlap_factor_p2r=configs['flags']['overlap_factor_p2r'],
+    overlap_factor_r2p=configs['flags']['overlap_factor_r2p'],
+    node_coordinate_freqs=configs['flags']['node_coordinate_freqs'],
+  )
+
+  # TMP TODO: Build a graph for each discretization
+  # Construct the graphs
+  # NOTE: Assuming fix mesh for all batches
+  graphs = builder.build(
+    x_inp=dataset.sample._x,
+    x_out=dataset.sample._x,
+    domain=np.array(dataset.metadata.domain_x),
+    key=None,
+  )
 
   # Profile
   # NOTE: One compilation
   if FLAGS.profile:
     profile_inferrence(
       dataset=dataset,
+      graphs=graphs,
       model=model,
       stepping=stepping,
       state=state,
       stats=stats,
-      resolution=resolution_train,
-      p_edge_masking_grid2mesh=0,
+      p_edge_masking=.0,
     )
 
   # Create a clean directory for tests
@@ -742,17 +734,14 @@ def main(argv):
   DIR_TESTS.mkdir()
   DIR_FIGS.mkdir()
 
-  # Set evaluation settings
-  interpolate_tau = True
+  # Set evaluation settings  # TMP
   tau_min = 1
-  tau_max = time_downsample_factor * (tau_max_train + (tau_max_train > 1))
+  tau_max = (tau_max_train + (tau_max_train > 1))
   taus_direct = [.5] + list(range(tau_min, tau_max + 1))
-  if not interpolate_tau:
-    taus_direct = [tau for tau in taus_direct if (tau % 2) == 0]
   # NOTE: One compilation per tau_rollout
   taus_rollout = [.5, 1] + [time_downsample_factor * d for d in range(1, tau_max_train+1)]
   # NOTE: Two compilations per resolution
-  resolutions = [(px, px) for px in [32, 48, 64, 96, 128]] if FLAGS.resolution else []
+  space_downsample_factors = [4, 3, 2, 1.5, 1] if FLAGS.resolution else []
   noise_levels = [0, .005, .01, .02] if FLAGS.noise else []
 
   # Set the groundtruth trajectories
@@ -770,7 +759,7 @@ def main(argv):
     train_flags=configs['flags'],
     taus_direct=taus_direct,
     taus_rollout=taus_rollout,
-    resolutions=resolutions,
+    resolutions=space_downsample_factors,
     noise_levels=noise_levels,
     p_edge_masking_grid2mesh=0,
   )

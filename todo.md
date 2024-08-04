@@ -2,10 +2,16 @@
 
 # NEXT STEPS
 
-- Update train script evaluations
-- Update test script
 
 - Support metrics for unstructured meshes
+    - How to evaluate Lp-norm with data on unstructured mesh?
+    - The current evaluation metrics are not really valid !! Unless trained/evaluated with uniform grids
+
+- Update visualizations
+
+- Update test script
+    - Build a graph for each discretization
+    - Instead of resolutions, test with multiple space_subsample_factor's
 
 - Experiment with the new version (unstructured mesh)
     - Step 1: reproduce results for full grids
@@ -17,7 +23,15 @@
 - wave_equation: do not learn identity map for propagation speed
     - Allows using residual/derivative stepping
 
+- Check RIGNO.variable_mesh and try it
 - (??) Extend autoregressive and unrollings to variable x and c
+
+- Add more discretization invariance tests
+    1. Shuffle nodes and edges
+    2. Multiple random sub-samples of the full mesh
+    3. Super-resolution and sub-resolution
+    4. Trained on grid, validated on unstructured mesh
+    5. Different x_inp and x_out (not supported currently)
 
 # Future work
 

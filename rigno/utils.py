@@ -25,6 +25,9 @@ class disable_logging:
   def __exit__(self, exc_type, exc_value, traceback):
     logging.set_verbosity(self.level_init)
 
+def is_multiple(b, a):
+  return abs(int(b / a) * a - b) < 1e-08
+
 def profile(f: Callable, kwargs: dict, repeats: int = 1):
   t_0 = time()
   for _ in range(repeats):
