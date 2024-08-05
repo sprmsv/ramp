@@ -953,7 +953,11 @@ def main(argv):
     preload=True,
     key=subkey,
   )
-  dataset.compute_stats(residual_steps=FLAGS.tau_max)
+  if dataset.time_dependent:
+    dataset.compute_stats(residual_steps=FLAGS.tau_max)
+  else:
+    assert FLAGS.stepper == 'out'
+    dataset.compute_stats()
 
   # Read the checkpoint
   if FLAGS.params:

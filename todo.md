@@ -1,10 +1,30 @@
 # Project Updates
 
 - Results with full grids can be reproduced with the new UNSTRUCTURED scheme
+
 - Results with partial grids are comparable with structured
+
 - Wave equation with derivative stepping and known parameters works
 
+## SOME UNANSWERED QUESTIONS
+
+- Instable with tau_max = 7
+
+- Why NS-SVS + NS-Sines do not generalize on time??
+
+- Is noise injection helpful for us?
+    - It seems like that for every other architecture out there, noise injection
+        reduces rollout errors. For us, at least training unrolling, did not bring
+        any good, but maybe Gaussian noise injection does.
+        On the other hand, without doing ANYTHING, we are able to control the noise,
+        and even the self-induced rollout noises are damped (check rollout errors
+        with high tau_max). Investigate if this is particular to our architecture.
+
+- Does it really outperform FNO on 1D problems?
+
 # NEXT STEPS
+
+- Launch long trainigs
 
 - Extend for time-independent problems
 
@@ -13,14 +33,6 @@
 - Update test script
     - Build a graph for each discretization
     - Instead of resolutions, test with multiple space_subsample_factor's
-
-- Support metrics for unstructured meshes
-    - How to evaluate Lp-norm with data on unstructured mesh?
-    - The current evaluation metrics are not valid Lp norms
-
-- Check RIGNO.variable_mesh and try it
-
-- (??) Extend autoregressive and unrollings to variable x and c
 
 # Future work
 
@@ -44,26 +56,6 @@
     - Maybe we need to benchmark gladstone2024mesh too
     - We should be careful with what we focus on:
         - a possibility is focusing on this new paradigm for down and up-scaling layers
-
-## SOME UNANSWERED QUESTIONS
-
-- Instable with tau_max = 7
-
-- Why NS-SVS + NS-Sines do not generalize on time??
-
-- Is resolution 32 too low to capture the HF signals?
-  - Super-resolution works when trained with 64x64
-  - Sub-res works too when trained with 128x128
-
-- Is noise injection helpful for us?
-    - It seems like that for every other architecture out there, noise injection
-        reduces rollout errors. For us, at least training unrolling, did not bring
-        any good, but maybe Gaussian noise injection does.
-        On the other hand, without doing ANYTHING, we are able to control the noise,
-        and even the self-induced rollout noises are damped (check rollout errors
-        with high tau_max). Investigate if this is particular to our architecture.
-
-- Does it really outperform FNO on 1D problems?
 
 ## Architectural Experiments
 
@@ -94,9 +86,20 @@
     - FLOPs / MADD
     - Inference time (improve your benchmarking)
 
+
+
 ## General Boundary Conditions
 - Extend for general boundary conditions (e.g., open, Robin)
 - Impose Dirichlet boundary conditions differently
+
+## Variable known parameters
+
+- Extend autoregressive and unrollings to variable c
+
+## Variable mesh
+
+- Check RIGNO.variable_mesh and try it
+- Extend autoregressive and unrollings to variable x
 
 ## Multi-level RIGNO:
 - Make the encoder and decoder modular

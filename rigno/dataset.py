@@ -39,24 +39,28 @@ ACTIVE_VARS_CE = [0, 1, 2, 3]
 ACTIVE_VARS_GCE = [0, 1, 2, 3, 5]
 ACTIVE_VARS_RD = [0]
 ACTIVE_VARS_WE = [0]
+ACTIVE_VARS_PE = [0]
 
 TARGET_VARS_NS = [0, 1]
 TARGET_VARS_CE = [1, 2]
 TARGET_VARS_GCE = [1, 2]
 TARGET_VARS_RD = [0]
 TARGET_VARS_WE = [0]
+TARGET_VARS_PE = [0]
 
 SIGNED_NS = {'u': [True, True], 'c': None}
 SIGNED_CE = {'u': [False, True, True, False, False], 'c': None}
 SIGNED_GCE = {'u': [False, True, True, False, False, False], 'c': None}
 SIGNED_RD = {'u': [True], 'c': None}
 SIGNED_WE = {'u': [True], 'c': [False]}
+SIGNED_PE = {'u': [True], 'c': [False]}
 
 NAMES_NS = {'u': ['$v_x$', '$v_y$'], 'c': None}
 NAMES_CE = {'u': ['$\\rho$', '$v_x$', '$v_y$', '$p$'], 'c': None}
 NAMES_GCE = {'u': ['$\\rho$', '$v_x$', '$v_y$', '$p$', 'E', '$\\phi$'], 'c': None}
 NAMES_RD = {'u': ['$u$'], 'c': None}
 NAMES_WE = {'u': ['$u$'], 'c': ['$c$']}
+NAMES_PE = {'u': ['$u$'], 'c': ['$f$']}
 
 DATASET_METADATA = {
   # incompressible_fluids: [velocity, velocity]
@@ -262,12 +266,57 @@ DATASET_METADATA = {
     signed=SIGNED_WE,
     names=NAMES_WE,
   ),
+  # poisson_equation
+  'poisson_equation/sines': Metadata(
+    periodic=False,
+    data_group='solution',
+    coeff_group='source',
+    domain_t=None,
+    domain_x=([0, 0], [1, 1]),
+    active_variables=ACTIVE_VARS_PE,
+    target_variables=TARGET_VARS_PE,
+    signed=SIGNED_PE,
+    names=NAMES_PE,
+  ),
+  'poisson_equation/chebyshev': Metadata(
+    periodic=False,
+    data_group='solution',
+    coeff_group='source',
+    domain_t=None,
+    domain_x=([0, 0], [1, 1]),
+    active_variables=ACTIVE_VARS_PE,
+    target_variables=TARGET_VARS_PE,
+    signed=SIGNED_PE,
+    names=NAMES_PE,
+  ),
+  'poisson_equation/pwc': Metadata(
+    periodic=False,
+    data_group='solution',
+    coeff_group='source',
+    domain_t=None,
+    domain_x=([0, 0], [1, 1]),
+    active_variables=ACTIVE_VARS_PE,
+    target_variables=TARGET_VARS_PE,
+    signed=SIGNED_PE,
+    names=NAMES_PE,
+  ),
+  'poisson_equation/gaussians': Metadata(
+    periodic=False,
+    data_group='solution',
+    coeff_group='source',
+    domain_t=None,
+    domain_x=([0, 0], [1, 1]),
+    active_variables=ACTIVE_VARS_PE,
+    target_variables=TARGET_VARS_PE,
+    signed=SIGNED_PE,
+    names=NAMES_PE,
+  ),
 }
 
 class Batch(NamedTuple):
   u: Array
   c: Union[Array, None]
-  t: Array
+  t: Union[Array, None]
   x: Array
 
   @property
@@ -332,7 +381,8 @@ class Dataset:
       else self.reader[self.data_group].shape[0])
     self.sample = self._fetch(0)
     self.shape = self.sample.shape
-    self.dt = (self.sample.t[0, 1] - self.sample.t[0, 0]).item() # NOTE: Assuming fix dt
+    if self.time_dependent:
+      self.dt = (self.sample.t[0, 1] - self.sample.t[0, 0]).item() # NOTE: Assuming fix dt
 
     # Check sample dimensions
     for arr in self.sample.unravel():
@@ -362,7 +412,7 @@ class Dataset:
       't': {
         'min': np.array(self.metadata.domain_t[0]).reshape(1, 1, 1, 1),
         'max': np.array(self.metadata.domain_t[1]).reshape(1, 1, 1, 1),
-      },
+      } if self.time_dependent else None,
       'res': {'mean': None, 'std': None},
       'der': {'mean': None, 'std': None},
     }
@@ -380,6 +430,10 @@ class Dataset:
         test_coeff = self.reader[self.coeff_group][np.arange((_len_dataset - n_test), (_len_dataset))]
         self.coeff = np.concatenate([train_coeff, valid_coeff, test_coeff], axis=0)
 
+  @property
+  def time_dependent(self):
+    return self.metadata.domain_t is not None
+
   def compute_stats(self, residual_steps: int = 0) -> None:
 
     # Check inputs
@@ -388,9 +442,7 @@ class Dataset:
 
     # Get all trajectories
     batch = self.train(np.arange(self.nums['train']))
-    u = batch.u
-    c = batch.c
-    t = batch.t
+    u, c, _, t = batch.unravel()
 
     # Compute statistics of solutions and coefficients
     self.stats['u']['mean'] = np.mean(u, axis=(0, 1, 2), keepdims=True)
@@ -400,20 +452,21 @@ class Dataset:
       self.stats['c']['std'] = np.std(c, axis=(0, 1, 2), keepdims=True)
 
     # Compute statistics of the residuals and time derivatives
-    _get_res = lambda s, trj: (trj[:, (s):] - trj[:, :-(s)])
-    residuals = []
-    derivatives = []
-    for s in range(1, residual_steps+1):
-      res = _get_res(s, u)
-      tau = _get_res(s, t)
-      residuals.append(res)
-      derivatives.append(res / tau)
-    residuals = np.concatenate(residuals, axis=1)
-    derivatives = np.concatenate(derivatives, axis=1)
-    self.stats['res']['mean'] = np.mean(residuals, axis=(0, 1, 2), keepdims=True)
-    self.stats['res']['std'] = np.std(residuals, axis=(0, 1, 2), keepdims=True)
-    self.stats['der']['mean'] = np.mean(derivatives, axis=(0, 1, 2), keepdims=True)
-    self.stats['der']['std'] = np.std(derivatives, axis=(0, 1, 2), keepdims=True)
+    if self.time_dependent:
+      _get_res = lambda s, trj: (trj[:, (s):] - trj[:, :-(s)])
+      residuals = []
+      derivatives = []
+      for s in range(1, residual_steps+1):
+        res = _get_res(s, u)
+        tau = _get_res(s, t)
+        residuals.append(res)
+        derivatives.append(res / tau)
+      residuals = np.concatenate(residuals, axis=1)
+      derivatives = np.concatenate(derivatives, axis=1)
+      self.stats['res']['mean'] = np.mean(residuals, axis=(0, 1, 2), keepdims=True)
+      self.stats['res']['std'] = np.std(residuals, axis=(0, 1, 2), keepdims=True)
+      self.stats['der']['mean'] = np.mean(derivatives, axis=(0, 1, 2), keepdims=True)
+      self.stats['der']['std'] = np.std(derivatives, axis=(0, 1, 2), keepdims=True)
 
   def _fetch(self, idx: Union[int, Sequence]) -> Batch:
     """Fetches a sample from the dataset, given its global index."""
@@ -433,6 +486,8 @@ class Dataset:
       u = np.moveaxis(u, source=(2, 3, 4), destination=(4, 2, 3))
     elif len(u.shape) == 4:  # NOTE: Single-variable datasets
       u = np.expand_dims(u, axis=-1)
+    elif len(u.shape) == 3:  # NOTE: Single-variable time-independent datasets
+      u = np.expand_dims(u, axis=(1, -1))
 
     # Select variables
     if self.idx_vars is not None:
@@ -473,23 +528,26 @@ class Dataset:
       c = c.reshape(u.shape[0], u.shape[1], (u.shape[2] * u.shape[3]), -1)
 
     # Define temporal coordinates
-    t = np.linspace(*self.metadata.domain_t, u.shape[1], endpoint=True)
-    t = t.reshape(1, -1, 1, 1)
-    # Repeat along sample trajectory
-    t = np.tile(t, reps=(u.shape[0], 1, 1, 1))
+    if self.metadata.domain_t is not None:
+      t = np.linspace(*self.metadata.domain_t, u.shape[1], endpoint=True)
+      t = t.reshape(1, -1, 1, 1)
+      # Repeat along sample trajectory
+      t = np.tile(t, reps=(u.shape[0], 1, 1, 1))
+    else:
+      t = None
 
     # Cut the time axis
-    if self.time_cutoff_idx:
+    if self.time_dependent and self.time_cutoff_idx:
       u = u[:, :self.time_cutoff_idx]
       if c is not None: c = c[:, :self.time_cutoff_idx]
       t = t[:, :self.time_cutoff_idx]
       x = x[:, :self.time_cutoff_idx]
 
     # Downsample in the time axis
-    if self.time_downsample_factor > 1:
+    if self.time_dependent and self.time_downsample_factor > 1:
       u = u[:, ::self.time_downsample_factor]
       if c is not None: c = c[:, ::self.time_downsample_factor]
-      t = t[:, ::self.time_downsample_factor]
+      if t is not None: t = t[:, ::self.time_downsample_factor]
       x = x[:, ::self.time_downsample_factor]
 
     # Downsample the space coordinates randomly
