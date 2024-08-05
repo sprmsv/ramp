@@ -299,21 +299,16 @@ class RegionInteractionGraphBuilder:
     x_out = 2 * (x_out - domain[0]) / (domain[1] - domain[0]) - 1
 
     # Randomly sub-sample pmesh to get rmesh
-    if key is None:
-      key = jax.random.PRNGKey(0)
-    x_rmesh = _subsample_pointset(key=key, x=x_inp, factor=self.subsample_factor)
-
-    # NOTE: Always include boundary nodes for non-periodic BC
-    # TODO: Update based on boundary node settings  # TMP
-    if not self.periodic:
-      _boundary_linspace = jnp.linspace(-1, 1, 64, endpoint=True).reshape(-1, 1)
-      x_boundary = jnp.concatenate([
-        jnp.concatenate([-jnp.ones_like(_boundary_linspace), _boundary_linspace], axis=1),
-        jnp.concatenate([_boundary_linspace, +jnp.ones_like(_boundary_linspace)], axis=1),
-        jnp.concatenate([+jnp.ones_like(_boundary_linspace), _boundary_linspace], axis=1),
-        jnp.concatenate([_boundary_linspace, -jnp.ones_like(_boundary_linspace)], axis=1),
-      ])
-      x_rmesh = jnp.concatenate([x_rmesh, x_boundary])
+    if key is None: key = jax.random.PRNGKey(0)
+    if self.periodic:
+      x_rmesh = _subsample_pointset(key=key, x=x_inp, factor=self.subsample_factor)
+    else:
+      # NOTE: Always keep boundary nodes for non-periodic BC
+      idx_bound = np.where((x_inp[:, 0] == -1) | (x_inp[:, 0] == +1) | (x_inp[:, 1] == -1) | (x_inp[:, 1] == +1))
+      x_boundary = x_inp[idx_bound]
+      x_internal = np.delete(x_inp, idx_bound, axis=0)
+      x_rmesh_internal = _subsample_pointset(key=key, x=x_internal, factor=self.subsample_factor)
+      x_rmesh, = shuffle_arrays(key=key, arrays=(jnp.concatenate([x_boundary, x_rmesh_internal]),))
 
     # Compute minimum support radius of each rmesh node
     r_min = self._compute_minimum_support_radii(x_rmesh)

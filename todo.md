@@ -1,30 +1,30 @@
 # Project Updates
 
+- Results with full grids can be reproduced with the new UNSTRUCTURED scheme
+- Results with partial grids are comparable with structured
+- Wave equation with derivative stepping and known parameters works
+
 # NEXT STEPS
 
+- Extend for time-independent problems
 
-- Support metrics for unstructured meshes
-    - How to evaluate Lp-norm with data on unstructured mesh?
-    - The current evaluation metrics are not really valid !! Unless trained/evaluated with uniform grids
-
-- Update visualizations
+- Update all visualizations
 
 - Update test script
     - Build a graph for each discretization
     - Instead of resolutions, test with multiple space_subsample_factor's
 
-- Experiment with the new version (unstructured mesh)
-    - Step 1: reproduce results for full grids
-    - Step 2: experiment with partial grids
-    - Step 3: experiment with unstructured datasets
-
-- Extend for time-independent problems
-
-- wave_equation: do not learn identity map for propagation speed
-    - Allows using residual/derivative stepping
+- Support metrics for unstructured meshes
+    - How to evaluate Lp-norm with data on unstructured mesh?
+    - The current evaluation metrics are not valid Lp norms
 
 - Check RIGNO.variable_mesh and try it
+
 - (??) Extend autoregressive and unrollings to variable x and c
+
+# Future work
+
+## Experiments
 
 - Add more discretization invariance tests
     1. Shuffle nodes and edges
@@ -33,7 +33,7 @@
     4. Trained on grid, validated on unstructured mesh
     5. Different x_inp and x_out (not supported currently)
 
-# Future work
+- Trained with partial grid vs. trained with full grid
 
 ## Literature
 

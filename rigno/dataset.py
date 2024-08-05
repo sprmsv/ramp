@@ -229,7 +229,7 @@ DATASET_METADATA = {
   ),
   # reaction_diffusion
   'reaction_diffusion/allen_cahn': Metadata(
-    periodic=True,  # TMP SET TO FALSE
+    periodic=False,
     data_group='solution',
     coeff_group=None,
     domain_t=(0, 0.0002),
@@ -275,7 +275,7 @@ class Batch(NamedTuple):
     return self.u.shape
 
   def unravel(self) -> tuple:
-    return (self.u, self.c, self.t, self.x)
+    return (self.u, self.c, self.x, self.t)
 
   @property
   def _x(self) -> Array:
@@ -494,25 +494,12 @@ class Dataset:
 
     # Downsample the space coordinates randomly
     if self.unstructured:
-      different = False  # CHECK: Check all usages of Batch._x if switched on
-      if not different:
-        permutation = jax.random.permutation(self.key, u.shape[2])
-        # NOTE: Same discretization for all snapshots
-        u = u[:, :, permutation]
-        c = c[:, :, permutation] if (c is not None) else None
-        x = x[:, :, permutation]
-      else:
-        # NOTE: The discretization is different for each sample
-        # NOTE: The discretization is different for each snapshot
-          for _s in range(u.shape[0]):
-            for _t in range(u.shape[1]):
-              self.key, subkey = jax.random.split(self.key)
-              if c is not None:
-                u[_s, _t], c[_s, _t], x[_s, _t] = shuffle_arrays(
-                  key=subkey, arrays=[u[_s, _t], c[_s, _t], x[_s, _t]])
-              else:
-                u[_s, _t], x[_s, _t] = shuffle_arrays(
-                  key=subkey, arrays=[u[_s, _t], x[_s, _t]])
+      permutation = jax.random.permutation(self.key, u.shape[2])
+      # NOTE: Same discretization for all snapshots
+      u = u[:, :, permutation]
+      c = c[:, :, permutation] if (c is not None) else None
+      x = x[:, :, permutation]
+
       size = int(u.shape[2] / (self.space_downsample_factor ** 2))
       u = u[:, :, :size]
       c = c[:, :, :size] if (c is not None) else None
