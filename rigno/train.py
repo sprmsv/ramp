@@ -540,12 +540,13 @@ def train(
 
   @functools.partial(jax.pmap, static_broadcasted_argnums=(0,))
   def _evaluate_direct_prediction(
-    tau_ratio: Union[float, int],
+    tau_ratio: Union[None, float, int],
     state: TrainState,
     stats,
     graphs: RegionInteractionGraphs,
     batch: Batch
   ) -> Mapping:
+
 
     if tau_ratio < 1:
       assert is_multiple(1., tau_ratio)
@@ -627,45 +628,63 @@ def train(
     batch: Batch
   ) -> Mapping:
 
-    # Set input and target
-    idx_fn = IDX_FN // FLAGS.time_downsample_factor
-    u_tgt = batch.u[:, (idx_fn):(idx_fn+1)]
-    inputs = Inputs(
-      u=batch.u[:, :1],
-      c=(batch.c[:, :1] if (batch.c is not None) else None),
-      x_inp=batch._x,
-      x_out=batch._x,
-      t=batch.t[:, :1],
-      tau=None,
-    )
 
-    # Get prediction at the final step
-    _predictor = autoregressive
-    _num_jumps = idx_fn // _predictor.num_steps_direct
-    _num_direct_steps = idx_fn % _predictor.num_steps_direct
-    variables = {'params': state.params}
-    u_prd = _predictor.jump(
-      variables=variables,
-      stats=stats,
-      num_jumps=_num_jumps,
-      inputs=inputs,
-      graphs=graphs,
-    )
-    if _num_direct_steps:
-      _num_dt_jumped = _num_jumps * _predictor.num_steps_direct
+    if dataset.time_dependent:
+      # Set input and target
+      idx_fn = IDX_FN // FLAGS.time_downsample_factor
+      u_tgt = batch.u[:, (idx_fn):(idx_fn+1)]
       inputs = Inputs(
-        u=u_prd,
-        c=(batch.c[:, [_num_dt_jumped]] if (batch.c is not None) else None),
+        u=batch.u[:, :1],
+        c=(batch.c[:, :1] if (batch.c is not None) else None),
         x_inp=batch._x,
         x_out=batch._x,
-        t=(batch.t[:, :1] + _num_dt_jumped * _predictor.dt),
+        t=batch.t[:, :1],
         tau=None,
       )
-      _, u_prd = _predictor.unroll(
+
+      # Get prediction at the final step
+      _predictor = autoregressive
+      _num_jumps = idx_fn // _predictor.num_steps_direct
+      _num_direct_steps = idx_fn % _predictor.num_steps_direct
+      variables = {'params': state.params}
+      u_prd = _predictor.jump(
         variables=variables,
         stats=stats,
-        num_steps=_num_direct_steps,
+        num_jumps=_num_jumps,
         inputs=inputs,
+        graphs=graphs,
+      )
+      if _num_direct_steps:
+        _num_dt_jumped = _num_jumps * _predictor.num_steps_direct
+        inputs = Inputs(
+          u=u_prd,
+          c=(batch.c[:, [_num_dt_jumped]] if (batch.c is not None) else None),
+          x_inp=batch._x,
+          x_out=batch._x,
+          t=(batch.t[:, :1] + _num_dt_jumped * _predictor.dt),
+          tau=None,
+        )
+        _, u_prd = _predictor.unroll(
+          variables=variables,
+          stats=stats,
+          num_steps=_num_direct_steps,
+          inputs=inputs,
+          graphs=graphs,
+        )
+
+    else:
+      u_tgt = batch.u[:, [0]]
+      u_prd = stepper.apply(
+        variables={'params': state.params},
+        stats=stats,
+        inputs=Inputs(
+          u=batch.c[:, [0]],
+          c=None,
+          x_inp=batch._x,
+          x_out=batch._x,
+          t=None,
+          tau=None,
+        ),
         graphs=graphs,
       )
 
@@ -695,9 +714,8 @@ def train(
 
     # Turn off unrelevent evaluations
     if not dataset.time_dependent:
-      direct = False  # TMP
+      direct = False
       rollout = False
-      final = False
 
     for batch in batches:
       # Split the batch between devices
@@ -746,7 +764,7 @@ def train(
 
       # Evaluate final prediction
       if final:
-        assert (IDX_FN // FLAGS.time_downsample_factor) < batch.u.shape[2]
+        if dataset.time_dependent: assert (IDX_FN // FLAGS.time_downsample_factor) < batch.u.shape[2]
         batch_metrics_final = _evaluate_final_prediction(state, stats, graphs, batch)
         batch_metrics_final = BatchMetrics(**batch_metrics_final)
         # Re-arrange the sub-batches gotten from each device
@@ -827,8 +845,7 @@ def train(
     checkpointer_options = orbax.checkpoint.CheckpointManagerOptions(
       max_to_keep=1,
       keep_period=None,
-      # best_fn=(lambda metrics: metrics['valid']['final']['l2']),  # TMP
-      best_fn=(lambda metrics: metrics['loss']),
+      best_fn=(lambda metrics: metrics['valid']['final']['l2']),
       best_mode='min',
       create=True,)
     checkpointer_save_args = orbax_utils.save_args_from_target(target={'state': state})

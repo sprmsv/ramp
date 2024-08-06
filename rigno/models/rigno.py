@@ -62,8 +62,6 @@ class RegionInteractionGraphBuilder:
   ) -> Array:
     """ord_distance can be 1, 2, or np.inf"""
 
-    assert jnp.all(radii < 1.0)
-
     # Get relative coordinates
     rel = points[:, None] - centers
     # Mirror relative positions because of periodic boudnary conditions
@@ -82,9 +80,13 @@ class RegionInteractionGraphBuilder:
     return idx_nodes
 
   def _init_structural_features(self,
-    x_sen: Array, x_rec: Array,
-    idx_sen: list[int], idx_rec: list[int],
+    x_sen: Array,
+    x_rec: Array,
+    idx_sen: list[int],
+    idx_rec: list[int],
     max_edge_length: float,
+    feats_sen: Array = None,
+    feats_rec: Array = None,
     domain_sen: list[int] = None,
     domain_rec: list[int] = None,
     shifts: list[Array] = None,
@@ -114,6 +116,11 @@ class RegionInteractionGraphBuilder:
     else:
       sender_node_feats = np.concatenate([x_sen], axis=-1)
       receiver_node_feats = np.concatenate([x_rec], axis=-1)
+    # Concatenate with forced features
+    if feats_sen is not None:
+      sender_node_feats = np.concatenate([sender_node_feats, feats_sen], axis=-1)
+    if feats_rec is not None:
+      receiver_node_feats = np.concatenate([receiver_node_feats, feats_rec], axis=-1)
 
     # Build node sets
     sender_node_set = NodeSet(
@@ -200,7 +207,8 @@ class RegionInteractionGraphBuilder:
       x_rec=x_rmesh,
       idx_sen=idx_nodes[:, 0],
       idx_rec=idx_nodes[:, 1],
-      max_edge_length=np.max(radius),
+      max_edge_length=(2. * jnp.sqrt(x_rmesh.shape[1])),
+      feats_rec=radius.reshape(-1, 1),
     )
 
     # Construct the graph
@@ -212,8 +220,11 @@ class RegionInteractionGraphBuilder:
 
     return graph
 
-  def _build_r2r_graph(self, x_rmesh: Array) -> TypedGraph:
+  def _build_r2r_graph(self, x_rmesh: Array, r_min: Array) -> TypedGraph:
     """Constructrs the processor graph (rmesh to rmesh)"""
+
+    # Set the sub-region radii
+    radius = self.overlap_factor_p2r * r_min
 
     # Define edges and their corresponding -extended- domain
     edges = []
@@ -247,6 +258,8 @@ class RegionInteractionGraphBuilder:
       idx_sen=[i for (i, j) in edges],
       idx_rec=[j for (i, j) in edges],
       max_edge_length=(2. * jnp.sqrt(x_rmesh.shape[1])),
+      feats_sen=radius.reshape(-1, 1),
+      feats_rec=radius.reshape(-1, 1),
       shifts=jnp.array(self._domain_shifts).squeeze(1),
       domain_sen=[i for (i, j) in domains],
       domain_rec=[j for (i, j) in domains],
@@ -280,7 +293,8 @@ class RegionInteractionGraphBuilder:
       x_rec=x_out,
       idx_sen=idx_nodes[:, 1],
       idx_rec=idx_nodes[:, 0],
-      max_edge_length=np.max(radius),
+      max_edge_length=(2. * jnp.sqrt(x_rmesh.shape[1])),
+      feats_sen=radius.reshape(-1, 1),
     )
 
     # Construct the graph
@@ -316,7 +330,7 @@ class RegionInteractionGraphBuilder:
     # Build the graphs
     graphs = RegionInteractionGraphs(
       p2r=self._build_p2r_graph(x_inp, x_rmesh, r_min),
-      r2r=self._build_r2r_graph(x_rmesh),
+      r2r=self._build_r2r_graph(x_rmesh, r_min),
       r2p=self._build_r2p_graph(x_out, x_rmesh, r_min),
     )
 

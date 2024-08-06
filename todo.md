@@ -8,6 +8,16 @@
 
 - Wave equation with derivative stepping and known parameters works
 
+## Paper details
+
+- The whole unstructured mesh handling
+
+- Lp metrics for unstructured meshes
+
+- added support radius to the structural regional node features
+
+- Time-independent datasets: no t, no tau
+
 ## SOME UNANSWERED QUESTIONS
 
 - Instable with tau_max = 7
@@ -27,8 +37,6 @@
 # NEXT STEPS
 
 - Launch long trainigs
-
-- Extend for time-independent problems
 
 - Update all visualizations
 
