@@ -53,7 +53,7 @@ SIGNED_CE = {'u': [False, True, True, False, False], 'c': None}
 SIGNED_GCE = {'u': [False, True, True, False, False, False], 'c': None}
 SIGNED_RD = {'u': [True], 'c': None}
 SIGNED_WE = {'u': [True], 'c': [False]}
-SIGNED_PE = {'u': [True], 'c': [False]}
+SIGNED_PE = {'u': [True], 'c': [True]}
 
 NAMES_NS = {'u': ['$v_x$', '$v_y$'], 'c': None}
 NAMES_CE = {'u': ['$\\rho$', '$v_x$', '$v_y$', '$p$'], 'c': None}
@@ -410,9 +410,11 @@ class Dataset:
         'max': np.array(self.metadata.domain_x[1]).reshape(1, 1, 1, -1),
       },
       't': {
-        'min': np.array(self.metadata.domain_t[0]).reshape(1, 1, 1, 1),
-        'max': np.array(self.metadata.domain_t[1]).reshape(1, 1, 1, 1),
-      } if self.time_dependent else None,
+        'min': np.array(self.metadata.domain_t[0]).reshape(1, 1, 1, 1)
+          if self.time_dependent else None,
+        'max': np.array(self.metadata.domain_t[1]).reshape(1, 1, 1, 1)
+          if self.time_dependent else None,
+      },
       'res': {'mean': None, 'std': None},
       'der': {'mean': None, 'std': None},
     }

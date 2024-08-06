@@ -328,8 +328,8 @@ class Encoder(nn.Module):
   mlp_hidden_size: int
   mlp_hidden_layers: int = 1
   use_layer_norm: bool = True
-  conditional_normalization: bool = True
-  conditional_norm_latent_size: bool = True
+  conditioned_normalization: bool = True
+  cond_norm_hidden_size: bool = True
   p_edge_masking: float = .0
 
   def setup(self):
@@ -342,8 +342,8 @@ class Encoder(nn.Module):
       mlp_num_hidden_layers=self.mlp_hidden_layers,
       num_message_passing_steps=1,
       use_layer_norm=self.use_layer_norm,
-      conditional_normalization=self.conditional_normalization,
-      conditional_norm_latent_size=self.conditional_norm_latent_size,
+      conditioned_normalization=self.conditioned_normalization,
+      cond_norm_hidden_size=self.cond_norm_hidden_size,
       include_sent_messages_in_node_update=False,
       activation='swish',
       f32_aggregation=True,
@@ -354,7 +354,7 @@ class Encoder(nn.Module):
   def __call__(self,
     graph: TypedGraph,
     pnode_features: Array,
-    tau: float,
+    tau: Union[None, float],
     key: Union[flax.typing.PRNGKey, None] = None,
   ) -> tuple[Array, Array]:
     """Runs the p2r GNN, extracting latent physical and regional nodes."""
@@ -436,8 +436,8 @@ class Processor(nn.Module):
   mlp_hidden_size: int
   mlp_hidden_layers: int = 1
   use_layer_norm: bool = True
-  conditional_normalization: bool = True
-  conditional_norm_latent_size: bool = True
+  conditioned_normalization: bool = True
+  cond_norm_hidden_size: bool = True
   p_edge_masking: float = .0
 
   def setup(self):
@@ -450,8 +450,8 @@ class Processor(nn.Module):
       mlp_num_hidden_layers=self.mlp_hidden_layers,
       num_message_passing_steps=self.steps,
       use_layer_norm=True,
-      conditional_normalization=self.conditional_normalization,
-      conditional_norm_latent_size=self.conditional_norm_latent_size,
+      conditioned_normalization=self.conditioned_normalization,
+      cond_norm_hidden_size=self.cond_norm_hidden_size,
       include_sent_messages_in_node_update=False,
       activation='swish',
       f32_aggregation=False,
@@ -462,7 +462,7 @@ class Processor(nn.Module):
   def __call__(self,
     graph: TypedGraph,
     rnode_features: Array,
-    tau: float,
+    tau: Union[None, float],
     key: Union[flax.typing.PRNGKey, None] = None,
   ) -> Array:
     """Runs the r2r GNN, extracting updated latent regional nodes."""
@@ -532,8 +532,8 @@ class Decoder(nn.Module):
   mlp_hidden_size: int
   mlp_hidden_layers: int = 1
   use_layer_norm: bool = True
-  conditional_normalization: bool = True
-  conditional_norm_latent_size: bool = True
+  conditioned_normalization: bool = True
+  cond_norm_hidden_size: bool = True
   p_edge_masking: float = .0
 
   def setup(self):
@@ -550,8 +550,8 @@ class Decoder(nn.Module):
     mlp_num_hidden_layers=self.mlp_hidden_layers,
     num_message_passing_steps=1,
     use_layer_norm=True,
-    conditional_normalization=self.conditional_normalization,
-    conditional_norm_latent_size=self.conditional_norm_latent_size,
+    conditioned_normalization=self.conditioned_normalization,
+    cond_norm_hidden_size=self.cond_norm_hidden_size,
     include_sent_messages_in_node_update=False,
     activation='swish',
     f32_aggregation=False,
@@ -563,7 +563,7 @@ class Decoder(nn.Module):
     graph: TypedGraph,
     rnode_features: Array,
     pnode_features: Array,
-    tau: float,
+    tau: Union[None, float],
     key: Union[flax.typing.PRNGKey, None] = None,
   ) -> Array:
     """Runs the r2p GNN, extracting the output physical nodes."""
@@ -639,8 +639,8 @@ class RIGNO(AbstractOperator):
   mlp_hidden_size: int = 128
   concatenate_t: bool = True
   concatenate_tau: bool = True
-  conditional_normalization: bool = True
-  conditional_norm_latent_size: int = 16
+  conditioned_normalization: bool = True
+  cond_norm_hidden_size: int = 16
   p_edge_masking: int = 0.5
 
   def _check_coordinates(self, x: Array) -> None:
@@ -667,8 +667,8 @@ class RIGNO(AbstractOperator):
       node_latent_size=self.node_latent_size,
       mlp_hidden_size=self.mlp_hidden_size,
       mlp_hidden_layers=self.mlp_hidden_layers,
-      conditional_normalization=self.conditional_normalization,
-      conditional_norm_latent_size=self.conditional_norm_latent_size,
+      conditioned_normalization=self.conditioned_normalization,
+      cond_norm_hidden_size=self.cond_norm_hidden_size,
       p_edge_masking=self.p_edge_masking,
       name='encoder',
     )
@@ -679,8 +679,8 @@ class RIGNO(AbstractOperator):
       node_latent_size=self.node_latent_size,
       mlp_hidden_size=self.mlp_hidden_size,
       mlp_hidden_layers=self.mlp_hidden_layers,
-      conditional_normalization=self.conditional_normalization,
-      conditional_norm_latent_size=self.conditional_norm_latent_size,
+      conditioned_normalization=self.conditioned_normalization,
+      cond_norm_hidden_size=self.cond_norm_hidden_size,
       p_edge_masking=self.p_edge_masking,
       name='processor',
     )
@@ -692,8 +692,8 @@ class RIGNO(AbstractOperator):
       node_latent_size=self.node_latent_size,
       mlp_hidden_size=self.mlp_hidden_size,
       mlp_hidden_layers=self.mlp_hidden_layers,
-      conditional_normalization=self.conditional_normalization,
-      conditional_norm_latent_size=self.conditional_norm_latent_size,
+      conditioned_normalization=self.conditioned_normalization,
+      cond_norm_hidden_size=self.cond_norm_hidden_size,
       p_edge_masking=self.p_edge_masking,
       name='decoder',
     )
@@ -709,7 +709,7 @@ class RIGNO(AbstractOperator):
   def _encode_process_decode(self,
     graphs: RegionInteractionGraphs,
     pnode_features: Array,
-    tau: float,
+    tau: Union[None, float],
     key: flax.typing.PRNGKey = None,
   ) -> Array:
 
@@ -776,6 +776,8 @@ class RIGNO(AbstractOperator):
       tau = jnp.array(inputs.tau, dtype=jnp.float32)
       if tau.size == 1:
         tau = jnp.tile(tau.reshape(1, 1), reps=(batch_size, 1))
+    else:
+      tau = None
 
     # Concatenate the known coefficients to the channels of the input function
     if inputs.c is None:

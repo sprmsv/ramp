@@ -25,7 +25,7 @@ Generalization to TypedGraphs of the deep Graph Neural Network from:
 }
 """
 
-from typing import Mapping, Optional
+from typing import Mapping, Optional, Union
 
 import jax
 import jax.numpy as jnp
@@ -110,8 +110,8 @@ class DeepTypedGraphNet(nn.Module):
   edge_output_size: Optional[Mapping[str, int]] = None
   include_sent_messages_in_node_update: bool = False
   use_layer_norm: bool = True
-  conditional_normalization: bool = False
-  conditional_norm_latent_size: int = 16
+  conditioned_normalization: bool = False
+  cond_norm_hidden_size: int = 16
   activation: str = 'swish'
   f32_aggregation: bool = False
   aggregate_edges_for_nodes_fn: str = 'segment_mean'
@@ -194,8 +194,8 @@ class DeepTypedGraphNet(nn.Module):
             ),
             activation=self._activation,
             use_layer_norm=self.use_layer_norm,
-            use_conditional_norm=self.conditional_normalization,
-            conditional_norm_latent_size=self.conditional_norm_latent_size,
+            use_conditional_norm=self.conditioned_normalization,
+            cond_norm_hidden_size=self.cond_norm_hidden_size,
             name=f'processor_{step_i}_edges_{edge_set_name}',
           )
           for edge_set_name in self.edge_latent_size.keys()
@@ -208,8 +208,8 @@ class DeepTypedGraphNet(nn.Module):
             ),
             activation=self._activation,
             use_layer_norm=self.use_layer_norm,
-            use_conditional_norm=self.conditional_normalization,
-            conditional_norm_latent_size=self.conditional_norm_latent_size,
+            use_conditional_norm=self.conditioned_normalization,
+            cond_norm_hidden_size=self.cond_norm_hidden_size,
             name=f'processor_{step_i}_nodes_{node_set_name}',
           )
           for node_set_name in self.node_latent_size.keys()
@@ -251,7 +251,7 @@ class DeepTypedGraphNet(nn.Module):
     )
     self._output_network = GraphMapFeatures(**output_kwargs)
 
-  def __call__(self, input_graph: TypedGraph, condition: float) -> TypedGraph:
+  def __call__(self, input_graph: TypedGraph, condition: Union[None, float]) -> TypedGraph:
     """Forward pass of the learnable dynamics model."""
     # Embed input features (if applicable).
     latent_graph_0 = self._embed(input_graph, c=condition)

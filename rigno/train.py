@@ -5,7 +5,6 @@ from datetime import datetime
 from time import time
 from typing import Tuple, Any, Mapping, Iterable, Callable, Union
 
-import flax.linen as nn
 import flax.typing
 import jax
 import jax.numpy as jnp
@@ -172,18 +171,19 @@ def train(
   time_int_pre = time()
 
   # Define the permissible lead times
-  num_lead_times = num_times - 1
-  assert num_lead_times > 0
-  assert tau_max < num_times
-  num_lead_times_full = max(0, num_times - tau_max)
-  num_lead_times_part = num_lead_times - num_lead_times_full
-  num_valid_pairs = (
-    num_lead_times_full * tau_max
-    + (num_lead_times_part * (num_lead_times_part+1) // 2)
-  )
-  lead_times = jnp.arange(num_times - 1)
+  if dataset.time_dependent:
+    num_lead_times = num_times - 1
+    assert num_lead_times > 0
+    assert tau_max < num_times
+    num_lead_times_full = max(0, num_times - tau_max)
+    num_lead_times_part = num_lead_times - num_lead_times_full
+    num_valid_pairs = (
+      num_lead_times_full * tau_max
+      + (num_lead_times_part * (num_lead_times_part+1) // 2)
+    )
+    lead_times = jnp.arange(num_times - 1)
 
-  # Define the autoregressive predictor
+  # Define the steppers
   if FLAGS.stepper == 'der':
     stepper = TimeDerivativeStepper(operator=model)
   elif FLAGS.stepper == 'res':
@@ -192,10 +192,8 @@ def train(
     stepper = OutputStepper(operator=model)
   else:
     raise ValueError
-  one_step_predictor = AutoregressiveStepper(
-    stepper=stepper,
-    dt=dataset.dt,
-  )
+  if dataset.time_dependent:
+    autoregressive = AutoregressiveStepper(stepper=stepper, dt=dataset.dt)
 
   # Define the graph builder
   builder = RegionInteractionGraphBuilder(
@@ -219,7 +217,7 @@ def train(
   # Set the normalization statistics
   stats = {
     key: {
-      k: (jnp.array(v) if v is not None else None)
+      k: (jnp.array(v) if (v is not None) else None)
       for k, v in val.items()
     }
     for key, val in dataset.stats.items()
@@ -330,17 +328,18 @@ def train(
           c_int = c_inp  # TODO: Approximate c_int
           x_int = x_inp  # TODO: Support variable x
           t_int = t_inp + tau_mid
+          tau_int = tau - tau_mid
         else:
-          tau_mid = 0.
           u_int = u_inp
           c_int = c_inp  # TODO: Approximate c_int
           x_int = x_inp  # TODO: Support variable x
           t_int = t_inp
+          tau_int = tau
 
         # Compute gradients
         key, subkey = jax.random.split(key)
         loss, grads = jax.value_and_grad(_compute_loss)(
-          params, u_int, c_int, x_int, t_int, (tau - tau_mid), u_tgt, x_out, key=subkey)
+          params, u_int, c_int, x_int, t_int, tau_int, u_tgt, x_out, key=subkey)
 
         return loss, grads
 
@@ -364,97 +363,108 @@ def train(
 
       return state, loss, grads
 
-    # Index trajectories and times and collect input/output pairs
-    # -> [num_lead_times, batch_size_per_device, ...]
-    u_inp_batch = jax.vmap(
-        lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=batch.u,
-          start_index=(lt), slice_size=1, axis=1)
-    )(lead_times)
-    c_inp_batch = jax.vmap(
-        lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=batch.c,
-          start_index=(lt), slice_size=1, axis=1)
-    )(lead_times) if (batch.c is not None) else None
-    x_inp_batch = jax.vmap(
-        lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=batch.x,
-          start_index=(lt), slice_size=1, axis=1)
-    )(lead_times)
-    t_inp_batch = jax.vmap(
-        lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=batch.t,
-          start_index=(lt), slice_size=1, axis=1)
-    )(lead_times)
-    u_tgt_batch = jax.vmap(
-        lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=jnp.concatenate([batch.u, jnp.zeros_like(batch.u)], axis=1),
-          start_index=(lt+1), slice_size=tau_max, axis=1)
-    )(lead_times)
-    t_tgt_batch = jax.vmap(
-        lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=jnp.concatenate([batch.t, jnp.zeros_like(batch.t)], axis=1),
-          start_index=(lt+1), slice_size=tau_max, axis=1)
-    )(lead_times)
-    x_out_batch = jax.vmap(
-        lambda lt: jax.lax.dynamic_slice_in_dim(
-          operand=jnp.concatenate([batch.x, jnp.zeros_like(batch.x)], axis=1),
-          start_index=(lt+1), slice_size=tau_max, axis=1)
-    )(lead_times)
+    if dataset.time_dependent:
+      # Index trajectories and times and collect input/output pairs
+      # -> [num_lead_times, batch_size_per_device, ...]
+      u_inp_batch = jax.vmap(
+          lambda lt: jax.lax.dynamic_slice_in_dim(
+            operand=batch.u,
+            start_index=(lt), slice_size=1, axis=1)
+      )(lead_times)
+      c_inp_batch = jax.vmap(
+          lambda lt: jax.lax.dynamic_slice_in_dim(
+            operand=batch.c,
+            start_index=(lt), slice_size=1, axis=1)
+      )(lead_times) if (batch.c is not None) else None
+      x_inp_batch = jax.vmap(
+          lambda lt: jax.lax.dynamic_slice_in_dim(
+            operand=batch.x,
+            start_index=(lt), slice_size=1, axis=1)
+      )(lead_times)
+      t_inp_batch = jax.vmap(
+          lambda lt: jax.lax.dynamic_slice_in_dim(
+            operand=batch.t,
+            start_index=(lt), slice_size=1, axis=1)
+      )(lead_times)
+      u_tgt_batch = jax.vmap(
+          lambda lt: jax.lax.dynamic_slice_in_dim(
+            operand=jnp.concatenate([batch.u, jnp.zeros_like(batch.u)], axis=1),
+            start_index=(lt+1), slice_size=tau_max, axis=1)
+      )(lead_times)
+      t_tgt_batch = jax.vmap(
+          lambda lt: jax.lax.dynamic_slice_in_dim(
+            operand=jnp.concatenate([batch.t, jnp.zeros_like(batch.t)], axis=1),
+            start_index=(lt+1), slice_size=tau_max, axis=1)
+      )(lead_times)
+      x_out_batch = jax.vmap(
+          lambda lt: jax.lax.dynamic_slice_in_dim(
+            operand=jnp.concatenate([batch.x, jnp.zeros_like(batch.x)], axis=1),
+            start_index=(lt+1), slice_size=tau_max, axis=1)
+      )(lead_times)
 
-    # Repeat inputs along the time axis to match with u_tgt
-    # -> [num_lead_times, batch_size_per_device, tau_max, ...]
-    u_inp_batch = jnp.tile(u_inp_batch, reps=(1, 1, tau_max, 1, 1))
-    c_inp_batch = jnp.tile(c_inp_batch, reps=(1, 1, tau_max, 1, 1)) if (batch.c is not None) else None
-    x_inp_batch = jnp.tile(x_inp_batch, reps=(1, 1, tau_max, 1, 1))
-    t_inp_batch = jnp.tile(t_inp_batch, reps=(1, 1, tau_max, 1, 1))
+      # Repeat inputs along the time axis to match with u_tgt
+      # -> [num_lead_times, batch_size_per_device, tau_max, ...]
+      u_inp_batch = jnp.tile(u_inp_batch, reps=(1, 1, tau_max, 1, 1))
+      c_inp_batch = jnp.tile(c_inp_batch, reps=(1, 1, tau_max, 1, 1)) if (batch.c is not None) else None
+      x_inp_batch = jnp.tile(x_inp_batch, reps=(1, 1, tau_max, 1, 1))
+      t_inp_batch = jnp.tile(t_inp_batch, reps=(1, 1, tau_max, 1, 1))
 
-    # Put all pairs along the batch axis
-    # -> [batch_size_per_device * num_lead_times * tau_max, ...]
-    u_inp_batch = u_inp_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1, num_pnodes, -1)
-    x_inp_batch = x_inp_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1, num_pnodes, -1)
-    c_inp_batch = c_inp_batch.reshape(
-      (num_lead_times*batch_size_per_device*tau_max), 1, num_pnodes, -1) if (batch.c is not None) else None
-    t_inp_batch = t_inp_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1)
-    t_tgt_batch = t_tgt_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1)
-    u_tgt_batch = u_tgt_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1, num_pnodes, -1)
-    x_out_batch = x_out_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1, num_pnodes, -1)
+      # Put all pairs along the batch axis
+      # -> [batch_size_per_device * num_lead_times * tau_max, ...]
+      u_inp_batch = u_inp_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1, num_pnodes, -1)
+      x_inp_batch = x_inp_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1, num_pnodes, -1)
+      c_inp_batch = c_inp_batch.reshape(
+        (num_lead_times*batch_size_per_device*tau_max), 1, num_pnodes, -1) if (batch.c is not None) else None
+      t_inp_batch = t_inp_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1)
+      t_tgt_batch = t_tgt_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1)
+      u_tgt_batch = u_tgt_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1, num_pnodes, -1)
+      x_out_batch = x_out_batch.reshape((num_lead_times*batch_size_per_device*tau_max), 1, num_pnodes, -1)
 
-    # Get tau as the difference between input and target t
-    tau_batch = t_tgt_batch - t_inp_batch
+      # Get tau as the difference between input and target t
+      tau_batch = t_tgt_batch - t_inp_batch
 
-    # Remove the invalid pairs
-    # -> [batch_size_per_device * num_valid_pairs, ...]
-    offset_full_lead_times = (num_times - tau_max) * tau_max * batch_size_per_device
-    idx_invalid_pairs = np.array([
-      (offset_full_lead_times + (_d * batch_size_per_device + _b) * tau_max - (_n + 1))
-      for _d in range(tau_max - 1)
-      for _b in range(1, batch_size_per_device + 1)
-      for _n in range(_d + 1)
-    ]).astype(int)
-    u_inp_batch = jnp.delete(u_inp_batch, idx_invalid_pairs, axis=0)
-    c_inp_batch = jnp.delete(c_inp_batch, idx_invalid_pairs, axis=0) if (batch.c is not None) else None
-    x_inp_batch = jnp.delete(x_inp_batch, idx_invalid_pairs, axis=0)
-    t_inp_batch = jnp.delete(t_inp_batch, idx_invalid_pairs, axis=0)
-    tau_batch = jnp.delete(tau_batch, idx_invalid_pairs, axis=0)
-    u_tgt_batch = jnp.delete(u_tgt_batch, idx_invalid_pairs, axis=0)
-    x_out_batch = jnp.delete(x_out_batch, idx_invalid_pairs, axis=0)
+      # Remove the invalid pairs
+      # -> [batch_size_per_device * num_valid_pairs, ...]
+      offset_full_lead_times = (num_times - tau_max) * tau_max * batch_size_per_device
+      idx_invalid_pairs = np.array([
+        (offset_full_lead_times + (_d * batch_size_per_device + _b) * tau_max - (_n + 1))
+        for _d in range(tau_max - 1)
+        for _b in range(1, batch_size_per_device + 1)
+        for _n in range(_d + 1)
+      ]).astype(int)
+      u_inp_batch = jnp.delete(u_inp_batch, idx_invalid_pairs, axis=0)
+      c_inp_batch = jnp.delete(c_inp_batch, idx_invalid_pairs, axis=0) if (batch.c is not None) else None
+      x_inp_batch = jnp.delete(x_inp_batch, idx_invalid_pairs, axis=0)
+      t_inp_batch = jnp.delete(t_inp_batch, idx_invalid_pairs, axis=0)
+      tau_batch = jnp.delete(tau_batch, idx_invalid_pairs, axis=0)
+      u_tgt_batch = jnp.delete(u_tgt_batch, idx_invalid_pairs, axis=0)
+      x_out_batch = jnp.delete(x_out_batch, idx_invalid_pairs, axis=0)
 
-    # Shuffle and split the pairs
-    # -> [num_valid_pairs, batch_size_per_device, ...]
-    num_valid_pairs = u_tgt_batch.shape[0] // batch_size_per_device
-    key, subkey = jax.random.split(key)
-    if batch.c is None:
-      u_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch = shuffle_arrays(
-        subkey, [u_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch])
-      u_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch = split_arrays(
-        [u_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch], size=batch_size_per_device)
+      # Shuffle and split the pairs
+      # -> [num_valid_pairs, batch_size_per_device, ...]
+      num_valid_pairs = u_tgt_batch.shape[0] // batch_size_per_device
+      key, subkey = jax.random.split(key)
+      if batch.c is None:
+        u_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch = shuffle_arrays(
+          subkey, [u_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch])
+        u_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch = split_arrays(
+          [u_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch], size=batch_size_per_device)
+      else:
+        u_inp_batch, c_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch = shuffle_arrays(
+          subkey, [u_inp_batch, c_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch])
+        u_inp_batch, c_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch = split_arrays(
+          [u_inp_batch, c_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch], size=batch_size_per_device)
     else:
-      u_inp_batch, c_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch = shuffle_arrays(
-        subkey, [u_inp_batch, c_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch])
-      u_inp_batch, c_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch = split_arrays(
-        [u_inp_batch, c_inp_batch, x_inp_batch, t_inp_batch, tau_batch, u_tgt_batch, x_out_batch], size=batch_size_per_device)
-
+      num_valid_pairs = 1
+      # Prepare time-independent input-output pairs
+      # -> [1, batch_size_per_device, ...]
+      u_inp_batch = jnp.expand_dims(batch.c, axis=0)
+      x_inp_batch = jnp.expand_dims(batch.x, axis=0)
+      c_inp_batch = None
+      t_inp_batch = None
+      tau_batch = None
+      u_tgt_batch = jnp.expand_dims(batch.u, axis=0)
+      x_out_batch = jnp.expand_dims(batch.x, axis=0)
 
     # Add loss and gradients for each subbatch
     def _update_state(i, carry):
@@ -465,10 +475,10 @@ def train(
         key=_subkey,
         state=_state,
         u_inp=u_inp_batch[i],
-        c_inp=(c_inp_batch[i] if (batch.c is not None) else None),
+        c_inp=(c_inp_batch[i] if (c_inp_batch is not None) else None),
         x_inp=x_inp_batch[i],
-        t_inp=t_inp_batch[i],
-        tau=tau_batch[i],
+        t_inp=(t_inp_batch[i] if (t_inp_batch is not None) else None),
+        tau=(tau_batch[i] if (tau_batch is not None) else None),
         u_tgt=u_tgt_batch[i],
         x_out=x_out_batch[i],
       )
@@ -591,7 +601,7 @@ def train(
 
     # Get unrolled predictions
     variables = {'params': state.params}
-    _predictor = one_step_predictor
+    _predictor = autoregressive
     u_prd, _ = _predictor.unroll(
       variables=variables,
       stats=stats,
@@ -630,7 +640,7 @@ def train(
     )
 
     # Get prediction at the final step
-    _predictor = one_step_predictor
+    _predictor = autoregressive
     _num_jumps = idx_fn // _predictor.num_steps_direct
     _num_direct_steps = idx_fn % _predictor.num_steps_direct
     variables = {'params': state.params}
@@ -682,6 +692,12 @@ def train(
     metrics_direct_tau_max: list[BatchMetrics] = []
     metrics_rollout: list[BatchMetrics] = []
     metrics_final: list[BatchMetrics] = []
+
+    # Turn off unrelevent evaluations
+    if not dataset.time_dependent:
+      direct = False  # TMP
+      rollout = False
+      final = False
 
     for batch in batches:
       # Split the batch between devices
@@ -795,12 +811,12 @@ def train(
     f'TIME: {time_tot_pre : 06.1f}s',
     f'GRAD: {0. : .2e}',
     f'LOSS: {0. : .2e}',
-    f'DR-0.5: {metrics_val.direct_tau_frac.l1 * 100 : .2f}%',
-    f'DR-1: {metrics_val.direct_tau_min.l1 * 100 : .2f}%',
-    f'DR-{FLAGS.tau_max}: {metrics_val.direct_tau_max.l1 * 100 : .2f}%',
-    f'FN: {metrics_val.final.l1 * 100 : .2f}%',
-    f'TRN-DR-1: {metrics_trn.direct_tau_min.l1 * 100 : .2f}%',
-    f'TRN-FN: {metrics_trn.final.l1 * 100 : .2f}%',
+    f'DR-0.5: {metrics_val.direct_tau_frac.l1 : .2%}' if metrics_val.direct_tau_frac.l1 else '',
+    f'DR-1: {metrics_val.direct_tau_min.l1 : .2%}' if metrics_val.direct_tau_min.l1 else '',
+    f'DR-{FLAGS.tau_max}: {metrics_val.direct_tau_max.l1 : .2%}' if metrics_val.direct_tau_max.l1 else '',
+    f'FN: {metrics_val.final.l1 : .2%}' if metrics_val.final.l1 else '',
+    f'TRN-DR-1: {metrics_trn.direct_tau_min.l1 : .2%}' if metrics_trn.direct_tau_min.l1 else '',
+    f'TRN-FN: {metrics_trn.final.l1 : .2%}' if metrics_trn.final.l1 else '',
   ]))
 
   # Set up the checkpoint manager
@@ -811,7 +827,8 @@ def train(
     checkpointer_options = orbax.checkpoint.CheckpointManagerOptions(
       max_to_keep=1,
       keep_period=None,
-      best_fn=(lambda metrics: metrics['valid']['final']['l2']),
+      # best_fn=(lambda metrics: metrics['valid']['final']['l2']),  # TMP
+      best_fn=(lambda metrics: metrics['loss']),
       best_mode='min',
       create=True,)
     checkpointer_save_args = orbax_utils.save_args_from_target(target={'state': state})
@@ -850,12 +867,12 @@ def train(
         f'TIME: {time_tot : 06.1f}s',
         f'GRAD: {grad.item() : .2e}',
         f'LOSS: {loss.item() : .2e}',
-        f'DR-0.5: {metrics_val.direct_tau_frac.l1 * 100 : .2f}%',
-        f'DR-1: {metrics_val.direct_tau_min.l1 * 100 : .2f}%',
-        f'DR-{FLAGS.tau_max}: {metrics_val.direct_tau_max.l1 * 100 : .2f}%',
-        f'FN: {metrics_val.final.l1 * 100 : .2f}%',
-        f'TRN-DR-1: {metrics_trn.direct_tau_min.l1 * 100 : .2f}%',
-        f'TRN-FN: {metrics_trn.final.l1 * 100 : .2f}%',
+        f'DR-0.5: {metrics_val.direct_tau_frac.l1 : .2%}' if metrics_val.direct_tau_frac.l1 else '',
+        f'DR-1: {metrics_val.direct_tau_min.l1 : .2%}' if metrics_val.direct_tau_min.l1 else '',
+        f'DR-{FLAGS.tau_max}: {metrics_val.direct_tau_max.l1 : .2%}' if metrics_val.direct_tau_max.l1 else '',
+        f'FN: {metrics_val.final.l1 : .2%}' if metrics_val.final.l1 else '',
+        f'TRN-DR-1: {metrics_trn.direct_tau_min.l1 : .2%}' if metrics_trn.direct_tau_min.l1 else '',
+        f'TRN-FN: {metrics_trn.final.l1 : .2%}' if metrics_trn.final.l1 else '',
       ]))
 
       with disable_logging(level=logging.FATAL):
@@ -903,10 +920,10 @@ def get_model(model_configs: Mapping[str, Any], dataset: Dataset) -> AbstractOpe
       edge_latent_size=FLAGS.edge_latent_size,
       mlp_hidden_layers=FLAGS.mlp_hidden_layers,
       mlp_hidden_size=FLAGS.mlp_hidden_size,
-      concatenate_tau=True,
-      concatenate_t=True,
-      conditional_normalization=True,
-      conditional_norm_latent_size=16,
+      concatenate_tau=(True if dataset.time_dependent else False),
+      concatenate_t=(True if dataset.time_dependent else False),
+      conditioned_normalization=(True if dataset.time_dependent else False),
+      cond_norm_hidden_size=16,
       p_edge_masking=FLAGS.p_edge_masking,
     )
 
@@ -957,6 +974,8 @@ def main(argv):
     dataset.compute_stats(residual_steps=FLAGS.tau_max)
   else:
     assert FLAGS.stepper == 'out'
+    assert FLAGS.tau_max == 0
+    assert FLAGS.fractional is False
     dataset.compute_stats()
 
   # Read the checkpoint
@@ -994,6 +1013,8 @@ def main(argv):
   schedule_tau_max = True
   if (FLAGS.tau_max == 1):
     schedule_tau_max = False
+  if not dataset.time_dependent:
+    schedule_tau_max = False
 
   # Split the epochs
   if schedule_tau_max:
@@ -1016,14 +1037,24 @@ def main(argv):
       x_out=dataset.sample._x,
       domain=np.array(dataset.metadata.domain_x),
     )
-    dummy_inputs = Inputs(
-      u=jnp.ones(shape=(FLAGS.batch_size, 1, *dataset.sample.u.shape[2:])),
-      c=jnp.ones(shape=(FLAGS.batch_size, 1, *dataset.sample.c.shape[2:])) if (dataset.sample.c is not None) else None,
-      x_inp=dataset.sample.x,
-      x_out=dataset.sample.x,
-      t=jnp.zeros(shape=(FLAGS.batch_size, 1)),
-      tau=jnp.ones(shape=(FLAGS.batch_size, 1)),
-    )
+    if dataset.time_dependent:
+      dummy_inputs = Inputs(
+        u=jnp.ones(shape=(FLAGS.batch_size, 1, *dataset.sample.u.shape[2:])),
+        c=jnp.ones(shape=(FLAGS.batch_size, 1, *dataset.sample.c.shape[2:])) if (dataset.sample.c is not None) else None,
+        x_inp=dataset.sample.x,
+        x_out=dataset.sample.x,
+        t=jnp.zeros(shape=(FLAGS.batch_size, 1)),
+        tau=jnp.ones(shape=(FLAGS.batch_size, 1)),
+      )
+    else:
+      dummy_inputs = Inputs(
+        u=jnp.ones(shape=(FLAGS.batch_size, 1, *dataset.sample.c.shape[2:])),
+        c=None,
+        x_inp=dataset.sample.x,
+        x_out=dataset.sample.x,
+        t=None,
+        tau=None,
+      )
     subkey, key = jax.random.split(key)
     variables = jax.jit(model.init)(subkey, inputs=dummy_inputs, graphs=dummy_graphs)
     params = variables['params']
@@ -1034,26 +1065,29 @@ def main(argv):
   ).item()
   logging.info(f'Training a {model.__class__.__name__} with {n_model_parameters} parameters')
 
-  # Train the model
-  epochs_trained = 0
+  # Set transition steps
   num_batches = dataset.nums['train'] // FLAGS.batch_size
-  num_times = dataset.shape[1]
-  num_lead_times = num_times - 1
-  assert num_lead_times > 0
-  num_lead_times_full = max(0, num_times - FLAGS.tau_max)
-  num_lead_times_part = num_lead_times - num_lead_times_full
-  transition_steps = 0
-  for _d in (range(1, FLAGS.tau_max+1) if schedule_tau_max else [FLAGS.tau_max]):
-    num_valid_pairs_d = (
-      num_lead_times_full * _d
-      + (num_lead_times_part * (num_lead_times_part+1) // 2)
-    )
-    if schedule_tau_max:
-      epochs_d = (epochs_dff if (_d == FLAGS.tau_max) else epochs_dxx)
-    else:
-      epochs_d = FLAGS.epochs
-    transition_steps +=  epochs_d * num_batches * num_valid_pairs_d
+  if dataset.time_dependent:
+    num_times = dataset.shape[1]
+    num_lead_times = num_times - 1
+    assert num_lead_times > 0
+    num_lead_times_full = max(0, num_times - FLAGS.tau_max)
+    num_lead_times_part = num_lead_times - num_lead_times_full
+    transition_steps = 0
+    for _d in (range(1, FLAGS.tau_max+1) if schedule_tau_max else [FLAGS.tau_max]):
+      num_valid_pairs_d = (
+        num_lead_times_full * _d
+        + (num_lead_times_part * (num_lead_times_part+1) // 2)
+      )
+      if schedule_tau_max:
+        epochs_d = (epochs_dff if (_d == FLAGS.tau_max) else epochs_dxx)
+      else:
+        epochs_d = FLAGS.epochs
+      transition_steps +=  epochs_d * num_batches * num_valid_pairs_d
+  else:
+    transition_steps = FLAGS.epochs * num_batches
 
+  # Set learning rate and optimizer
   pct_start = .02  # Warmup cosine onecycle
   pct_final = .1   # Final exponential decay
   lr = optax.join_schedules(
@@ -1077,6 +1111,9 @@ def main(argv):
     optax.inject_hyperparams(optax.adamw)(learning_rate=lr, weight_decay=1e-08),
   )
   state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
+
+  # Train the model
+  epochs_trained = 0
 
   # Warm-up epochs
   if schedule_tau_max:
@@ -1130,7 +1167,6 @@ def main(argv):
       epochs_before=epochs_trained,
     )
     epochs_trained += epochs_with_unrolling
-
   else:
     # Train without unrolling
     state = train(

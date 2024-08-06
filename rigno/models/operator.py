@@ -11,7 +11,7 @@ class Inputs(NamedTuple):
   x_inp: Array
   x_out: Array
   t: Union[Array, None]
-  tau: Union[float, int, None]
+  tau: Union[float, None]
 
 class AbstractOperator(nn.Module):
   def setup(self):

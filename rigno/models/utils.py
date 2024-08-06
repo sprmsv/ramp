@@ -44,7 +44,7 @@ class AugmentedMLP(nn.Module):
   activation: Callable
   use_layer_norm: bool = False
   use_conditional_norm: bool = False
-  conditional_norm_latent_size: int = 4
+  cond_norm_hidden_size: int = 4
   concatenate_axis: int = -1
 
   def setup(self):
@@ -63,7 +63,7 @@ class AugmentedMLP(nn.Module):
     self.correction = None
     if self.use_conditional_norm:
       self.correction = ConditionedNorm(
-        latent_size=self.conditional_norm_latent_size,
+        latent_size=self.cond_norm_hidden_size,
         correction_size=self.layer_sizes[-1],
       )
 

@@ -12,7 +12,7 @@ from rigno.utils import Array
 
 class Encoder(nn.Module):
   features: int
-  conditional_norm_latent_size: int
+  cond_norm_hidden_size: int
 
   @nn.compact
   def __call__(self, x, tau):
@@ -21,7 +21,7 @@ class Encoder(nn.Module):
     z1 = nn.Conv(self.features * 2, kernel_size=(7, 7))(z1)
     z1 = nn.LayerNorm()(z1)
     z1 = ConditionedNorm(
-      latent_size=self.conditional_norm_latent_size,
+      latent_size=self.cond_norm_hidden_size,
       correction_size=(self.features * 2),
       convolutional=True,
     )(tau, z1)
@@ -33,7 +33,7 @@ class Encoder(nn.Module):
     z2 = nn.Conv(self.features * 4, kernel_size=(5, 5))(z2)
     z2 = nn.LayerNorm()(z2)
     z2 = ConditionedNorm(
-      latent_size=self.conditional_norm_latent_size,
+      latent_size=self.cond_norm_hidden_size,
       correction_size=(self.features * 4),
       convolutional=True,
     )(tau, z2)
@@ -45,7 +45,7 @@ class Encoder(nn.Module):
     z3 = nn.Conv(self.features * 8, kernel_size=(3, 3))(z3)
     z3 = nn.LayerNorm()(z3)
     z3 = ConditionedNorm(
-      latent_size=self.conditional_norm_latent_size,
+      latent_size=self.cond_norm_hidden_size,
       correction_size=(self.features * 8),
       convolutional=True,
     )(tau, z3)
@@ -59,7 +59,7 @@ class Encoder(nn.Module):
     z4 = nn.Conv(self.features * 16, kernel_size=(3, 3))(z4)
     z4 = nn.LayerNorm()(z4)
     z4 = ConditionedNorm(
-      latent_size=self.conditional_norm_latent_size,
+      latent_size=self.cond_norm_hidden_size,
       correction_size=(self.features * 16),
       convolutional=True,
     )(tau, z4)
@@ -72,7 +72,7 @@ class Encoder(nn.Module):
 class Decoder(nn.Module):
   features: int
   outputs: int
-  conditional_norm_latent_size: int
+  cond_norm_hidden_size: int
 
   @nn.compact
   def __call__(self, z1, z2, z3_dropout, z4_dropout, tau):
@@ -89,7 +89,7 @@ class Decoder(nn.Module):
     z5 = nn.Conv(self.features * 8, kernel_size=(3, 3))(z5)
     z5 = nn.LayerNorm()(z5)
     z5 = ConditionedNorm(
-      latent_size=self.conditional_norm_latent_size,
+      latent_size=self.cond_norm_hidden_size,
       correction_size=(self.features * 8),
       convolutional=True,
     )(tau, z5)
@@ -108,7 +108,7 @@ class Decoder(nn.Module):
     z6 = nn.Conv(self.features * 4, kernel_size=(3, 3))(z6)
     z6 = nn.LayerNorm()(z6)
     z6 = ConditionedNorm(
-      latent_size=self.conditional_norm_latent_size,
+      latent_size=self.cond_norm_hidden_size,
       correction_size=(self.features * 4),
       convolutional=True,
     )(tau, z6)
@@ -127,7 +127,7 @@ class Decoder(nn.Module):
     z7 = nn.Conv(self.features * 2, kernel_size=(3, 3))(z7)
     z7 = nn.LayerNorm()(z7)
     z7 = ConditionedNorm(
-      latent_size=self.conditional_norm_latent_size,
+      latent_size=self.cond_norm_hidden_size,
       correction_size=(self.features * 2),
       convolutional=True,
     )(tau, z7)
@@ -140,19 +140,19 @@ class Decoder(nn.Module):
 class UNet(AbstractOperator):
   features: int
   outputs: int
-  conditional_norm_latent_size: int
+  cond_norm_hidden_size: int
   concatenate_tau: bool = True
   concatenate_t: bool = True
 
   def setup(self):
     self.encoder = Encoder(
       features=self.features,
-      conditional_norm_latent_size=self.conditional_norm_latent_size,
+      cond_norm_hidden_size=self.cond_norm_hidden_size,
     )
     self.decoder = Decoder(
       features=self.features,
       outputs=self.outputs,
-      conditional_norm_latent_size=self.conditional_norm_latent_size,
+      cond_norm_hidden_size=self.cond_norm_hidden_size,
     )
 
   def call(self,

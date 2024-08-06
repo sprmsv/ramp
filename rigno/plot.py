@@ -166,12 +166,13 @@ def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None
     vmax_inp = np.max(u_inp[:, ivar])
     vmax_gtr = np.max(u_gtr[:, ivar])
     vmax_prd = np.max(u_prd[:, ivar])
-    vmax = max(vmax_inp, vmax_gtr, vmax_prd)
+    vmax_out = max(vmax_gtr, vmax_prd)
     vmin_inp = np.min(u_inp[:, ivar])
     vmin_gtr = np.min(u_gtr[:, ivar])
     vmin_prd = np.min(u_prd[:, ivar])
-    vmin = min(vmin_inp, vmin_gtr, vmin_prd)
-    vmax_abs = max(np.abs(vmax), np.abs(vmin))
+    vmin_out = min(vmin_gtr, vmin_prd)
+    abs_vmax_inp = max(np.abs(vmax_inp), np.abs(vmin_inp))
+    abs_vmax_out = max(np.abs(vmax_out), np.abs(vmin_out))
 
     vmin_gtr = np.min(np.abs(u_gtr[:, ivar]))
 
@@ -180,17 +181,18 @@ def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None
       y=x_inp[:, 1],
       c=u_inp[:, ivar],
       cmap=(CMAP_BWR if symmetric[ivar] else CMAP_WRB),
-      vmax=(vmax_abs if symmetric[ivar] else vmax),
-      vmin=(-vmax_abs if symmetric[ivar] else vmin),
+      vmax=(abs_vmax_inp if symmetric[ivar] else vmax_inp),
+      vmin=(-abs_vmax_inp if symmetric[ivar] else vmin_inp),
       **SCATTER_SETTINGS,
     )
+    plt.colorbar(h, ax=axs[ivar, 0], fraction=.1)
     h = axs[ivar, 1].scatter(
       x=x_out[:, 0],
       y=x_out[:, 1],
       c=u_gtr[:, ivar],
       cmap=(CMAP_BWR if symmetric[ivar] else CMAP_WRB),
-      vmax=(vmax_abs if symmetric[ivar] else vmax),
-      vmin=(-vmax_abs if symmetric[ivar] else vmin),
+      vmax=(abs_vmax_out if symmetric[ivar] else vmax_out),
+      vmin=(-abs_vmax_out if symmetric[ivar] else vmin_out),
       **SCATTER_SETTINGS,
     )
     h = axs[ivar, 2].scatter(
@@ -198,11 +200,11 @@ def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None
       y=x_out[:, 1],
       c=u_prd[:, ivar],
       cmap=(CMAP_BWR if symmetric[ivar] else CMAP_WRB),
-      vmax=(vmax_abs if symmetric[ivar] else vmax),
-      vmin=(-vmax_abs if symmetric[ivar] else vmin),
+      vmax=(abs_vmax_out if symmetric[ivar] else vmax_out),
+      vmin=(-abs_vmax_out if symmetric[ivar] else vmin_out),
       **SCATTER_SETTINGS,
     )
-    plt.colorbar(h, ax=axs[ivar, 0:3], fraction=.1)
+    plt.colorbar(h, ax=axs[ivar, 1:3], fraction=.1)
     h = axs[ivar, 3].scatter(
       x=x_out[:, 0],
       y=x_out[:, 1],

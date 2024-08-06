@@ -22,8 +22,14 @@ class Stepper(ABC):
       c_nrm = normalize(inputs.c, shift=stats['c']['mean'], scale=stats['c']['std'])
     x_inp_nrm = 2 * ((inputs.x_inp - stats['x']['min']) / (stats['x']['max'] - stats['x']['min'])) - 1
     x_out_nrm = 2 * ((inputs.x_out - stats['x']['min']) / (stats['x']['max'] - stats['x']['min'])) - 1
-    t_nrm = (inputs.t - stats['t']['min']) / (stats['t']['max'] - stats['t']['min'])
-    tau_nrm = (inputs.tau) / (stats['t']['max'] - stats['t']['min'])
+    if inputs.t is None:
+      t_nrm = None
+    else:
+      t_nrm = (inputs.t - stats['t']['min']) / (stats['t']['max'] - stats['t']['min'])
+    if inputs.tau is None:
+      tau_nrm = None
+    else:
+      tau_nrm = (inputs.tau) / (stats['t']['max'] - stats['t']['min'])
 
     inputs_nrm = Inputs(
       u=u_nrm,

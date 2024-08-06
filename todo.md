@@ -1,5 +1,7 @@
 # Project Updates
 
+- RIGNO v2.0 is ready: fully unstructured mesh now + discretization invariant
+
 - Results with full grids can be reproduced with the new UNSTRUCTURED scheme
 
 - Results with partial grids are comparable with structured
