@@ -782,12 +782,16 @@ class RIGNO(AbstractOperator):
     if self.concatenate_t:
       assert inputs.t is not None
       t_inp = jnp.array(inputs.t, dtype=jnp.float32)
+      if t_inp.ndim == 4:
+        t_inp = t_inp[:, :, 0, 0]
       if t_inp.size == 1:
         t_inp = jnp.tile(t_inp.reshape(1, 1), reps=(batch_size, 1))
     # Prepare the time difference channel
     if self.concatenate_tau:
       assert inputs.tau is not None
       tau = jnp.array(inputs.tau, dtype=jnp.float32)
+      if tau.ndim == 4:
+        tau = tau[:, :, 0, 0]
       if tau.size == 1:
         tau = jnp.tile(tau.reshape(1, 1), reps=(batch_size, 1))
     else:

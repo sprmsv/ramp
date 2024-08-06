@@ -10,8 +10,8 @@ class Inputs(NamedTuple):
   c: Union[Array, None]
   x_inp: Array
   x_out: Array
-  t: Union[Array, None]
-  tau: Union[float, None]
+  t: Union[Array, float, None]
+  tau: Union[Array, float, None]
 
 class AbstractOperator(nn.Module):
   def setup(self):

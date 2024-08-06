@@ -1,12 +1,17 @@
 # Project Updates
 
-- RIGNO v2.0 is ready: fully unstructured mesh now + discretization invariant
+- RIGNO v2.0 is ready: fully unstructured mesh now + discretization invariant + time-independent
 
+(E401)
 - Results with full grids can be reproduced with the new UNSTRUCTURED scheme
-
 - Results with partial grids are comparable with structured
 
+(E402)
 - Wave equation with derivative stepping and known parameters works
+- Wave equation with TAU_MAX ?
+
+(E403)
+- Poisson equation results
 
 ## Paper details
 
@@ -36,9 +41,11 @@
 
 # NEXT STEPS
 
-- Launch long trainigs
-
 - Update all visualizations
+
+- Why does it take the same time for poisson and brownian_bridge !!?
+    - It is a GPU thing
+    - 
 
 - Update test script
     - Build a graph for each discretization
