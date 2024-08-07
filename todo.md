@@ -8,7 +8,7 @@
 
 (E402)
 - Wave equation with derivative stepping and known parameters works
-- Wave equation with TAU_MAX ?
+- Wave equation with TAU_MAX works
 
 (E403)
 - Poisson equation results
@@ -41,11 +41,7 @@
 
 # NEXT STEPS
 
-- Update all visualizations
-
-- Why does it take the same time for poisson and brownian_bridge !!?
-    - It is a GPU thing
-    - 
+- Update slides
 
 - Update test script
     - Build a graph for each discretization

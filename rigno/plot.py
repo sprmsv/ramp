@@ -31,11 +31,12 @@ CMAP_WRB = matplotlib.colors.LinearSegmentedColormap.from_list(
   N=200,
 )
 
-SCATTER_SETTINGS = dict(marker='s', s=4, alpha=.9)
+plt.rcParams['font.family'] = 'serif'
+SCATTER_SETTINGS = dict(marker='s', s=4, alpha=1)
 
 # TODO: Update
 def animate(trajs, idx_traj=0, symmetric=True, cmaps=CMAP_BBR, vertical=True):
-
+  return
   if not isinstance(trajs, list):
     trajs = [trajs]
   n_trjs = len(trajs)
@@ -92,77 +93,144 @@ def animate(trajs, idx_traj=0, symmetric=True, cmaps=CMAP_BBR, vertical=True):
 
   return ani, (fig, axs)
 
-def plot_grid_trajectory(traj, idx_time, idx_traj=0, symmetric=True, ylabels=None):
+def plot_trajectory(u, x, t, idx_t, idx_s=0, symmetric=True, ylabels=None):
 
-  _HEIGHT_PER_ROW = 1.5
-  _HEIGHT_MARGIN = .2
   _WIDTH_PER_COL = 1.5
+  _HEIGHT_PER_ROW = 1.5
   _WIDTH_MARGIN = .2
+  _HEIGHT_MARGIN = .2
 
-  n_vars = traj.shape[-1]
+  # Arrange the inputs
+  n_vars = u.shape[-1]
   if isinstance(symmetric, bool):
     symmetric = [symmetric] * n_vars
 
-  fig, axs = plt.subplots(
-    nrows=n_vars, ncols=len(idx_time),
-    figsize=(_WIDTH_PER_COL*len(idx_time)+_WIDTH_MARGIN, _HEIGHT_PER_ROW*n_vars+_HEIGHT_MARGIN),
-    sharex=True, sharey=True,
+  # Create the figure and the gridspec
+  figsize=(_WIDTH_PER_COL*len(idx_t)+_WIDTH_MARGIN, _HEIGHT_PER_ROW*n_vars+_HEIGHT_MARGIN)
+  fig = plt.figure(figsize=figsize,)
+  g = fig.add_gridspec(
+    nrows=n_vars,
+    ncols=len(idx_t)+1,
+    width_ratios=([1]*len(idx_t) + [.1]),
+    wspace=0.05,
+    hspace=0.05,
   )
-  if (n_vars == 1) and len(idx_time) == 1:
-    axs = np.array(axs)
-  axs = axs.reshape(n_vars, len(idx_time))
+  # Add all axes
+  axs = []
+  for r in range(n_vars):
+    row = []
+    for c in range(len(idx_t)):
+      row.append(fig.add_subplot(g[r, c]))
+    axs.append(row)
+  axs = np.array(axs)
+  # Settings
+  for ax in axs.flatten():
+    ax: plt.Axes
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_xlim([0, 1])
+    ax.set_ylim([0, 1])
 
-  for ivar in range(n_vars):
-    if symmetric[ivar]:
+  # Loop over variables
+  for r in range(n_vars):
+    # Set cmap and colorbar range
+    if symmetric[r]:
       cmap = CMAP_BWR
-      vmax = np.max(np.abs(traj[idx_traj, idx_time, ..., ivar]))
+      vmax = np.max(np.abs(u[idx_s, idx_t, ..., r]))
       vmin = -vmax
     else:
       cmap = CMAP_WRB
-      vmax = np.max(traj[idx_traj, idx_time, ..., ivar])
-      vmin = np.min(traj[idx_traj, idx_time, ..., ivar])
+      vmax = np.max(u[idx_s, idx_t, ..., r])
+      vmin = np.min(u[idx_s, idx_t, ..., r])
 
-    for icol in range(len(idx_time)):
-      h = axs[ivar, icol].imshow(
-        traj[idx_traj, idx_time[icol], ..., ivar],
+    # Loop over columns
+    for icol in range(len(idx_t)):
+      h = axs[r, icol].scatter(
+        x=x[idx_s, idx_t[icol], ..., 0],
+        y=x[idx_s, idx_t[icol], ..., 1],
+        c=u[idx_s, idx_t[icol], ..., r],
         cmap=cmap,
         vmin=vmin,
         vmax=vmax,
+        **SCATTER_SETTINGS,
       )
-      if ivar == 0:
-        axs[ivar, icol].set(title=f'$t=t_{{{idx_time[icol]}}}$')
+      if r == 0:
+        axs[r, icol].set(title=f'$t=t_{{{idx_t[icol]}}}$')
 
-    plt.colorbar(h, ax=axs[ivar, :], fraction=.02)
+    # Add colorbar
+    ax_cb = fig.add_subplot(g[r, -1])
+    ax_cb.tick_params(labelsize=8)
+    plt.colorbar(h, cax=ax_cb)
 
-  for ivar in range(n_vars):
-    label = ylabels[ivar] if ylabels else f'Variable {ivar:02d}'
-    axs[ivar, 0].set(ylabel=label);
-
-  for ax in axs.flatten():
-    ax.set_xticks([])
-    ax.set_yticks([])
+  # Add ylabels
+  for r in range(n_vars):
+    label = ylabels[r] if ylabels else f'Variable {r:02d}'
+    axs[r, 0].set(ylabel=label);
 
   return fig, axs
 
 def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None):
 
-  _HEIGHT_PER_ROW = 2.5
+  _HEIGHT_PER_ROW = 2
   _HEIGHT_MARGIN = .2
 
   n_vars = u_gtr.shape[-1]
   if isinstance(symmetric, bool):
     symmetric = [symmetric] * n_vars
 
-  fig, axs = plt.subplots(
-    nrows=n_vars, ncols=4,
-    figsize=(12, _HEIGHT_PER_ROW*n_vars+_HEIGHT_MARGIN),
-    sharex=True, sharey=True,
+  # Create the figure and the gridspec
+  figsize=(8.6, _HEIGHT_PER_ROW*n_vars+_HEIGHT_MARGIN)
+  fig = plt.figure(figsize=figsize)
+  g_fig = fig.add_gridspec(
+    nrows=n_vars,
+    ncols=1,
+    wspace=0,
+    hspace=0,
   )
-  axs = axs.reshape(n_vars, 4)
 
+  figs = []
+  for ivar in range(n_vars):
+    figs.append(fig.add_subfigure(g_fig[ivar]))
+  # Add axes
+  axs_inp = []
+  axs_gtr = []
+  axs_prd = []
+  axs_err = []
+  axs_cb_inp = []
+  axs_cb_out = []
+  axs_cb_err = []
+  for ivar in range(n_vars):
+    g = figs[ivar].add_gridspec(
+      nrows=2,
+      ncols=4,
+      height_ratios=[1, .05],
+      wspace=0.05,
+      hspace=0.05,
+    )
+    axs_inp.append(figs[ivar].add_subplot(g[0, 0]))
+    axs_gtr.append(figs[ivar].add_subplot(g[0, 1]))
+    axs_prd.append(figs[ivar].add_subplot(g[0, 2]))
+    axs_err.append(figs[ivar].add_subplot(g[0, 3]))
+    axs_cb_inp.append(figs[ivar].add_subplot(g[1, 0]))
+    axs_cb_out.append(figs[ivar].add_subplot(g[1, 1:3]))
+    axs_cb_err.append(figs[ivar].add_subplot(g[1, 3]))
+  # Settings
+  for ax in [ax for axs in [axs_inp, axs_gtr, axs_prd, axs_err] for ax in axs]:
+    ax: plt.Axes
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_xlim([0, 1])
+    ax.set_ylim([0, 1])
+  for ax in [ax for axs in [axs_cb_inp, axs_cb_out, axs_cb_err] for ax in axs]:
+    ax: plt.Axes
+    ax.tick_params(labelsize=8)
+
+  # Get prediction error
   u_err = (u_gtr - u_prd)
 
+  # Loop over variables
   for ivar in range(n_vars):
+    # Get ranges
     vmax_inp = np.max(u_inp[:, ivar])
     vmax_gtr = np.max(u_gtr[:, ivar])
     vmax_prd = np.max(u_prd[:, ivar])
@@ -174,9 +242,8 @@ def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None
     abs_vmax_inp = max(np.abs(vmax_inp), np.abs(vmin_inp))
     abs_vmax_out = max(np.abs(vmax_out), np.abs(vmin_out))
 
-    vmin_gtr = np.min(np.abs(u_gtr[:, ivar]))
-
-    h = axs[ivar, 0].scatter(
+    # Plot input
+    h = axs_inp[ivar].scatter(
       x=x_inp[:, 0],
       y=x_inp[:, 1],
       c=u_inp[:, ivar],
@@ -185,8 +252,9 @@ def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None
       vmin=(-abs_vmax_inp if symmetric[ivar] else vmin_inp),
       **SCATTER_SETTINGS,
     )
-    plt.colorbar(h, ax=axs[ivar, 0], fraction=.1)
-    h = axs[ivar, 1].scatter(
+    plt.colorbar(h, cax=axs_cb_inp[ivar], orientation='horizontal')
+    # Plot ground truth
+    h = axs_gtr[ivar].scatter(
       x=x_out[:, 0],
       y=x_out[:, 1],
       c=u_gtr[:, ivar],
@@ -195,7 +263,8 @@ def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None
       vmin=(-abs_vmax_out if symmetric[ivar] else vmin_out),
       **SCATTER_SETTINGS,
     )
-    h = axs[ivar, 2].scatter(
+    # Plot estimate
+    h = axs_prd[ivar].scatter(
       x=x_out[:, 0],
       y=x_out[:, 1],
       c=u_prd[:, ivar],
@@ -204,8 +273,9 @@ def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None
       vmin=(-abs_vmax_out if symmetric[ivar] else vmin_out),
       **SCATTER_SETTINGS,
     )
-    plt.colorbar(h, ax=axs[ivar, 1:3], fraction=.1)
-    h = axs[ivar, 3].scatter(
+    plt.colorbar(h, cax=axs_cb_out[ivar], orientation='horizontal')
+    # Plot error
+    h = axs_err[ivar].scatter(
       x=x_out[:, 0],
       y=x_out[:, 1],
       c=np.abs(u_err[:, ivar]),
@@ -214,94 +284,140 @@ def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None
       vmax=np.max(np.abs(u_err[:, ivar])),
       **SCATTER_SETTINGS,
     )
-    plt.colorbar(h, ax=axs[ivar, 3], fraction=.1)
+    plt.colorbar(h, cax=axs_cb_err[ivar], orientation='horizontal')
 
-  axs[0, 0].set(title='Input');
-  axs[0, 1].set(title='Ground-truth');
-  axs[0, 2].set(title='Model estimate');
-  axs[0, 3].set(title='Absolute error');
+  # Set titles
+  axs_inp[0].set(title='Input');
+  axs_gtr[0].set(title='Ground-truth');
+  axs_prd[0].set(title='Model estimate');
+  axs_err[0].set(title='Absolute error');
 
-  if n_vars > 1:
-    for ivar in range(n_vars):
-      label = names[ivar] if names else f'Variable {ivar:02d}'
-      axs[ivar, 0].set(ylabel=label);
+  # Set variable names
+  for ivar in range(n_vars):
+    label = names[ivar] if names else f'Variable {ivar:02d}'
+    axs_inp[ivar].set(ylabel=label);
 
-  for ax in axs.flatten():
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.set(xlim=[0, 1])
-    ax.set(ylim=[0, 1])
+  # Rotate colorbar tick labels
+  for ax in [ax for axs in [axs_cb_inp, axs_cb_out, axs_cb_err] for ax in axs]:
+    ax: plt.Axes
+    ticklabels = ax.get_xticklabels()
+    ax.set_xticklabels(ticklabels[:-1], rotation=-45)
 
-  return fig, axs
+  return fig
 
-def plot_ensemble(u_gtr, u_ens, x, symmetric=True, names=None):
+def plot_ensemble(u_gtr, u_ens, x, idx_t, idx_s: int = 0, symmetric=True, names=None):
 
   _HEIGHT_PER_ROW = 2.5
   _HEIGHT_MARGIN = .2
 
-  n_vars = u_ens.shape[-1]
+  n_vars = u_gtr.shape[-1]
   if isinstance(symmetric, bool):
     symmetric = [symmetric] * n_vars
 
-  fig, axs = plt.subplots(
-    nrows=n_vars, ncols=3,
-    figsize=(10, _HEIGHT_PER_ROW*n_vars+_HEIGHT_MARGIN),
-    sharex=True, sharey=True,
+  # Create the figure and the gridspec
+  figsize=(8.6, _HEIGHT_PER_ROW*n_vars+_HEIGHT_MARGIN)
+  fig = plt.figure(figsize=figsize)
+  g_fig = fig.add_gridspec(
+    nrows=n_vars,
+    ncols=1,
+    wspace=0,
+    hspace=0,
   )
-  axs = axs.reshape(n_vars, 3)
 
-  u_ens_mean = np.mean(u_ens, axis=0)
-  u_ens_std = np.std(u_ens, axis=0)
-  u_err = (u_gtr - u_ens_mean)
-
+  figs = []
   for ivar in range(n_vars):
-    vmax = np.max(np.abs(u_gtr[:, ivar]))
-
-    h = axs[ivar, 0].scatter(
-      x=x[:, 0],
-      y=x[:, 1],
-      c=u_ens_mean[:, ivar],
-      cmap=(CMAP_BWR if symmetric[ivar] else CMAP_WRB),
-      vmax=(vmax if symmetric[ivar] else None),
-      vmin=(-vmax if symmetric[ivar] else None),
-      **SCATTER_SETTINGS,
+    figs.append(fig.add_subfigure(g_fig[ivar]))
+  # Add axes
+  axs_avg = []
+  axs_err = []
+  axs_std = []
+  axs_cb_avg = []
+  axs_cb_err = []
+  axs_cb_std = []
+  for ivar in range(n_vars):
+    g = figs[ivar].add_gridspec(
+      nrows=2,
+      ncols=3,
+      height_ratios=[1, .05],
+      wspace=0.05,
+      hspace=0.05,
     )
-    plt.colorbar(h, ax=axs[ivar, 0], fraction=.1)
-    h = axs[ivar, 1].scatter(
-      x=x[:, 0],
-      y=x[:, 1],
-      c=u_ens_std[:, ivar],
-      cmap=CMAP_WRB,
-      vmin=0,
-      vmax=None,
-      **SCATTER_SETTINGS,
-    )
-    plt.colorbar(h, ax=axs[ivar, 1], fraction=.1)
-    h = axs[ivar, 2].scatter(
-      x=x[:, 0],
-      y=x[:, 1],
-      c=np.abs(u_err[:, ivar]),
-      cmap=CMAP_WRB,
-      vmin=0,
-      vmax=None,
-      **SCATTER_SETTINGS,
-    )
-    plt.colorbar(h, ax=axs[ivar, 2], fraction=.1)
-
-  axs[0, 0].set(title='Ensemble mean');
-  axs[0, 1].set(title='Ensemble std');
-  axs[0, 2].set(title='Absolute error');
-
-  if n_vars > 1:
-    for ivar in range(n_vars):
-      label = names[ivar] if names else f'Variable {ivar:02d}'
-      axs[ivar, 0].set(ylabel=label);
-
-  for ax in axs.flatten():
+    axs_avg.append(figs[ivar].add_subplot(g[0, 0]))
+    axs_err.append(figs[ivar].add_subplot(g[0, 1]))
+    axs_std.append(figs[ivar].add_subplot(g[0, 2]))
+    axs_cb_avg.append(figs[ivar].add_subplot(g[1, 0]))
+    axs_cb_err.append(figs[ivar].add_subplot(g[1, 1]))
+    axs_cb_std.append(figs[ivar].add_subplot(g[1, 2]))
+  # Settings
+  for ax in [ax for axs in [axs_avg, axs_err, axs_std] for ax in axs]:
+    ax: plt.Axes
     ax.set_xticks([])
     ax.set_yticks([])
+    ax.set_xlim([0, 1])
+    ax.set_ylim([0, 1])
+  for ax in [ax for axs in [axs_cb_avg, axs_cb_err, axs_cb_std] for ax in axs]:
+    ax: plt.Axes
+    ax.tick_params(labelsize=8)
 
-  return fig, axs
+  # Compute statistics and error
+  u_ens_avg = np.mean(u_ens, axis=0)
+  u_ens_std = np.std(u_ens, axis=0)
+  u_err = (u_gtr - u_ens_avg)
+
+  # Loop over variables
+  for ivar in range(n_vars):
+    vmax_gtr = np.max(np.abs(u_gtr[idx_s, idx_t, :, ivar]))
+    # Plot mean
+    h = axs_avg[ivar].scatter(
+      x=x[:, 0],
+      y=x[:, 1],
+      c=u_ens_avg[idx_s, idx_t, :, ivar],
+      cmap=(CMAP_BWR if symmetric[ivar] else CMAP_WRB),
+      vmax=(vmax_gtr if symmetric[ivar] else None),
+      vmin=(-vmax_gtr if symmetric[ivar] else None),
+      **SCATTER_SETTINGS,
+    )
+    plt.colorbar(h, cax=axs_cb_avg[ivar], orientation='horizontal')
+    # Plot error
+    h = axs_err[ivar].scatter(
+      x=x[:, 0],
+      y=x[:, 1],
+      c=u_ens_std[idx_s, idx_t, :, ivar],
+      cmap=CMAP_WRB,
+      vmin=0,
+      vmax=None,
+      **SCATTER_SETTINGS,
+    )
+    plt.colorbar(h, cax=axs_cb_err[ivar], orientation='horizontal')
+    # Plot std
+    h = axs_std[ivar].scatter(
+      x=x[:, 0],
+      y=x[:, 1],
+      c=np.abs(u_err[idx_s, idx_t, :, ivar]),
+      cmap=CMAP_WRB,
+      vmin=0,
+      vmax=None,
+      **SCATTER_SETTINGS,
+    )
+    plt.colorbar(h, cax=axs_cb_std[ivar], orientation='horizontal')
+
+  # Set titles
+  axs_avg[0].set(title='Ensemble mean');
+  axs_err[0].set(title='Absolute error');
+  axs_std[0].set(title='Ensemble std');
+
+  # Set variable names
+  for ivar in range(n_vars):
+    label = names[ivar] if names else f'Variable {ivar:02d}'
+    axs_avg[ivar].set(ylabel=label);
+
+  # Rotate colorbar tick labels
+  for ax in [ax for axs in [axs_cb_avg, axs_cb_err, axs_cb_std] for ax in axs]:
+    ax: plt.Axes
+    ticklabels = ax.get_xticklabels()
+    ax.set_xticklabels(ticklabels[:-1], rotation=-45)
+
+  return fig
 
 def plot_error_vs_time(df: pd.DataFrame, idx_fn: int, variable_title: str = 'variable', palette: str = None) -> sns.FacetGrid:
   g = sns.FacetGrid(
@@ -328,7 +444,7 @@ def plot_error_vs_time(df: pd.DataFrame, idx_fn: int, variable_title: str = 'var
   return g
 
 # TODO: Update
-def plot_intermediates(features, idx_traj: int = 0, idx_time: int = 0, share_cmap: bool = False):
+def plot_intermediates(features, idx_t: int = 0, idx_s: int = 0, share_cmap: bool = False):
   _HEIGHT_PER_ROW = 2
   _HEIGHT_MARGIN = .2
   _WIDTH_PER_COL = 2
@@ -356,12 +472,12 @@ def plot_intermediates(features, idx_traj: int = 0, idx_time: int = 0, share_cma
   for ivar in range(n_vars):
     cmap = CMAP_BWR
     if share_cmap:
-      vmax = np.max(np.abs(features[idx_traj, idx_time, ..., :]))
+      vmax = np.max(np.abs(features[idx_s, idx_t, ..., :]))
     else:
-      vmax = np.max(np.abs(features[idx_traj, idx_time, ..., ivar]))
+      vmax = np.max(np.abs(features[idx_s, idx_t, ..., ivar]))
     vmin = -vmax
     h = axs[ivar].imshow(
-      features[idx_traj, idx_time, ..., ivar],
+      features[idx_s, idx_t, ..., ivar],
       cmap=cmap,
       vmin=vmin,
       vmax=vmax,
