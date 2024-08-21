@@ -42,7 +42,7 @@ class RegionInteractionGraphBuilder:
     self.subsample_factor = subsample_factor
 
     # Domain shifts for periodic BC
-    self._domain_shifts = [
+    self._domain_shifts = np.concatenate([
       np.array([[0., 0.]]),  # C
       np.array([[-2, 0.]]),  # W
       np.array([[-2, +2]]),  # NW
@@ -52,7 +52,7 @@ class RegionInteractionGraphBuilder:
       np.array([[+2, -2]]),  # SE
       np.array([[0., -2]]),  # S
       np.array([[-2, -2]]),  # SW
-    ]
+    ], axis=0)
 
   def _get_supported_points(self,
     centers: Array,
@@ -133,10 +133,7 @@ class RegionInteractionGraphBuilder:
     )
 
     # Define edge features
-    z_ij = np.stack([
-      (x_sen[s] - x_rec[r])
-      for s, r in zip(idx_sen, idx_rec)
-    ], axis=0)
+    z_ij = x_sen[np.array(idx_sen)] - x_rec[np.array(idx_rec)]
     assert np.all(np.abs(z_ij) <= 2.)
     if self.periodic:
       # NOTE: For p2r and r2p, mirror the large relative coordinates
@@ -146,10 +143,7 @@ class RegionInteractionGraphBuilder:
         z_ij = np.where(z_ij >= 1.0, z_ij - 2, z_ij)
       # NOTE: For the r2r multi-mesh, use extended domain indices and shifts
       else:
-        z_ij = np.stack([
-          ((x_sen[s] + shifts[dom_s]) - (x_rec[r] + shifts[dom_r]))
-          for s, r, dom_s, dom_r in zip(idx_sen, idx_rec, domain_sen, domain_rec)
-        ], axis=0)
+        z_ij = (x_sen[np.array(idx_sen)] + shifts[np.array(np.array(domain_sen))]) - (x_rec[np.array(idx_rec)]+shifts[np.array(domain_rec)])
     d_ij = np.linalg.norm(z_ij, axis=-1, keepdims=True)
     # Normalize and concatenate edge features
     assert np.all(np.abs(z_ij) <= max_edge_length), np.max(np.abs(z_ij))
@@ -172,19 +166,21 @@ class RegionInteractionGraphBuilder:
 
   def _compute_minimum_support_radii(self, x: Array) -> Array:
       if self.periodic:
-        x_extended = np.concatenate(
-          [x + self._domain_shifts[idx] for idx in range(len(self._domain_shifts))], axis=0)
+        x_extended = (x[None, :, :] + self._domain_shifts[:, None, :]).reshape(-1, 2)
         tri = Delaunay(points=x_extended)
       else:
         tri = Delaunay(points=x)
 
       medians = _compute_triangulation_medians(tri)
       radii = np.zeros(shape=(x.shape[0],))
-      for s, simplex in enumerate(tri.simplices):
-        for v in range(simplex.shape[0]):
-          if simplex[v] < x.shape[0]:
-            m = medians[s, v]
-            radii[simplex[v]] = max(m, radii[simplex[v]])
+      mask = tri.simplices < x.shape[0] # [N, 3]
+      values = medians[mask]
+      indices  = tri.simplices[mask]
+      sorted_idx = np.argsort(indices)
+      sorted_indices = indices[sorted_idx]
+      sorted_values  = values[sorted_idx]
+      unique_indices, idx_start = np.unique(sorted_indices, return_index=True)
+      radii[unique_indices] = np.maximum.reduceat(sorted_values,idx_start)
 
       return radii
 
@@ -233,36 +229,42 @@ class RegionInteractionGraphBuilder:
       # Sub-sample the rmesh
       _rmesh_size = int(x_rmesh.shape[0] / (self.subsample_factor ** level))
       _x_rmesh = x_rmesh[:_rmesh_size]
+      # Construct a triangulation
       if self.periodic:
         # Repeat the rmesh in periodic directions
-        _x_rmesh_extended = jnp.concatenate(
-          [_x_rmesh + self._domain_shifts[idx] for idx in range(len(self._domain_shifts))], axis=0)
+        _x_rmesh_extended = (_x_rmesh[None, :, :] + self._domain_shifts[:, None, :]).reshape(-1, 2)
         tri = Delaunay(points=_x_rmesh_extended)
       else:
         tri = Delaunay(points=_x_rmesh)
-      # Construct a triangulation and get the edges
+      # Get the relevant edges
       _extended_edges = _get_edges_from_triangulation(tri)
-      # Keep the relevant edges
-      for edge in _extended_edges:
-        domain = tuple([i // _rmesh_size for i in edge])
-        edge = tuple([i % _rmesh_size for i in edge])
-        if (domain == (0, 0)) or (self.periodic and (0 in domain)):
-          if edge not in edges:
-            domains.append(domain)
-            edges.append(edge)
+      domains_level = _extended_edges // _rmesh_size
+      edges_level = _extended_edges % _rmesh_size
+      idx_relevant_edges = np.any(domains_level == 0, axis=1) if self.periodic else np.all(domains_level == 0, axis=1)
+      edges_level = edges_level[idx_relevant_edges]
+      domains_level = domains_level[idx_relevant_edges]
+      edges.append(edges_level)
+      domains.append(domains_level)
+
+    # Remove repeated edges
+    edges = np.concatenate(edges)
+    domains = np.concatenate(domains)
+    _, unique_idx = np.unique(edges, axis=0, return_index=True)
+    edges = edges[unique_idx]
+    domains = domains[unique_idx]
 
     # Set the initial features
     edge_set, rmesh_node_set, _ = self._init_structural_features(
       x_sen=x_rmesh,
       x_rec=x_rmesh,
-      idx_sen=[i for (i, j) in edges],
-      idx_rec=[j for (i, j) in edges],
+      idx_sen=edges[:, 0],
+      idx_rec=edges[:, 1],
       max_edge_length=(2. * jnp.sqrt(x_rmesh.shape[1])),
       feats_sen=radius.reshape(-1, 1),
       feats_rec=radius.reshape(-1, 1),
-      shifts=jnp.array(self._domain_shifts).squeeze(1),
-      domain_sen=[i for (i, j) in domains],
-      domain_rec=[j for (i, j) in domains],
+      shifts=jnp.array(self._domain_shifts),
+      domain_sen=domains[:,0],
+      domain_rec=domains[:,1],
     )
 
     # Construct the graph
@@ -835,10 +837,11 @@ def _subsample_pointset(key, x: Array, factor: float) -> Array:
   return x_shuffled[:int(x.shape[0] / factor)]
 
 def _get_edges_from_triangulation(tri: Delaunay, bidirectional: bool = True):
-  indptr, indices = tri.vertex_neighbor_vertices
-  edges = [(k, l) for k in range(tri.points.shape[0]) for l in indices[indptr[k]:indptr[k+1]]]
+  indptr, cols = tri.vertex_neighbor_vertices
+  rows = np.repeat(np.arange(len(indptr) - 1), np.diff(indptr))
+  edges = np.stack([rows, cols], -1)
   if bidirectional:
-    edges += [(l, k) for (k, l) in edges]
+    edges = np.concatenate([edges, np.flip(edges, axis=-1)], axis=0)
   return edges
 
 def _compute_triangulation_medians(tri: Delaunay) -> Array:
