@@ -3,7 +3,7 @@
 import h5py
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Union, Sequence, NamedTuple
+from typing import Union, Sequence, NamedTuple, Literal
 
 import flax.typing
 import jax
@@ -17,10 +17,12 @@ from rigno.utils import Array, shuffle_arrays
 @dataclass
 class Metadata:
   periodic: bool
-  data_group: str
-  coeff_group: str
-  domain_t: tuple[int, int]
+  group_u: str
+  group_c: str
+  group_x: str
+  type: Literal['poseidon', 'rigno']
   domain_x: tuple[Sequence[int], Sequence[int]]
+  domain_t: tuple[int, int]
   active_variables: Sequence[int]
   target_variables: Sequence[int]
   signed: dict[str, Union[bool, Sequence[bool]]]
@@ -66,10 +68,12 @@ DATASET_METADATA = {
   # incompressible_fluids: [velocity, velocity]
   'incompressible_fluids/brownian_bridge': Metadata(
     periodic=True,
-    data_group='velocity',
-    coeff_group=None,
-    domain_t=(0, 1),
+    group_u='velocity',
+    group_c=None,
+    group_x=None,
+    type='poseidon',
     domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 1),
     active_variables=ACTIVE_VARS_NS,
     target_variables=TARGET_VARS_NS,
     signed=SIGNED_NS,
@@ -77,10 +81,12 @@ DATASET_METADATA = {
   ),
   'incompressible_fluids/gaussians': Metadata(
     periodic=True,
-    data_group='velocity',
-    coeff_group=None,
-    domain_t=(0, 1),
+    group_u='velocity',
+    group_c=None,
+    group_x=None,
+    type='poseidon',
     domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 1),
     active_variables=ACTIVE_VARS_NS,
     target_variables=TARGET_VARS_NS,
     signed=SIGNED_NS,
@@ -88,10 +94,12 @@ DATASET_METADATA = {
   ),
   'incompressible_fluids/pwc': Metadata(
     periodic=True,
-    data_group='velocity',
-    coeff_group=None,
-    domain_t=(0, 1),
+    group_u='velocity',
+    group_c=None,
+    group_x=None,
+    type='poseidon',
     domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 1),
     active_variables=ACTIVE_VARS_NS,
     target_variables=TARGET_VARS_NS,
     signed=SIGNED_NS,
@@ -99,10 +107,12 @@ DATASET_METADATA = {
   ),
   'incompressible_fluids/shear_layer': Metadata(
     periodic=True,
-    data_group='velocity',
-    coeff_group=None,
-    domain_t=(0, 1),
+    group_u='velocity',
+    group_c=None,
+    group_x=None,
+    type='poseidon',
     domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 1),
     active_variables=ACTIVE_VARS_NS,
     target_variables=TARGET_VARS_NS,
     signed=SIGNED_NS,
@@ -110,10 +120,12 @@ DATASET_METADATA = {
   ),
   'incompressible_fluids/sines': Metadata(
     periodic=True,
-    data_group='velocity',
-    coeff_group=None,
-    domain_t=(0, 1),
+    group_u='velocity',
+    group_c=None,
+    group_x=None,
+    type='poseidon',
     domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 1),
     active_variables=ACTIVE_VARS_NS,
     target_variables=TARGET_VARS_NS,
     signed=SIGNED_NS,
@@ -121,10 +133,12 @@ DATASET_METADATA = {
   ),
   'incompressible_fluids/vortex_sheet': Metadata(
     periodic=True,
-    data_group='velocity',
-    coeff_group=None,
-    domain_t=(0, 1),
+    group_u='velocity',
+    group_c=None,
+    group_x=None,
+    type='poseidon',
     domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 1),
     active_variables=ACTIVE_VARS_NS,
     target_variables=TARGET_VARS_NS,
     signed=SIGNED_NS,
@@ -133,10 +147,12 @@ DATASET_METADATA = {
   # compressible_flow: [density, velocity, velocity, pressure, energy]
   'compressible_flow/cloudshock': Metadata(
     periodic=True,
-    data_group='data',
-    coeff_group=None,
-    domain_t=(0, 1),
+    group_u='data',
+    group_c=None,
+    group_x=None,
+    type='poseidon',
     domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 1),
     active_variables=ACTIVE_VARS_CE,
     target_variables=TARGET_VARS_CE,
     signed=SIGNED_CE,
@@ -144,10 +160,12 @@ DATASET_METADATA = {
   ),
   'compressible_flow/gauss': Metadata(
     periodic=True,
-    data_group='data',
-    coeff_group=None,
-    domain_t=(0, 1),
+    group_u='data',
+    group_c=None,
+    group_x=None,
+    type='poseidon',
     domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 1),
     active_variables=ACTIVE_VARS_CE,
     target_variables=TARGET_VARS_CE,
     signed=SIGNED_CE,
@@ -155,10 +173,12 @@ DATASET_METADATA = {
   ),
   'compressible_flow/kh': Metadata(
     periodic=True,
-    data_group='data',
-    coeff_group=None,
-    domain_t=(0, 1),
+    group_u='data',
+    group_c=None,
+    group_x=None,
+    type='poseidon',
     domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 1),
     active_variables=ACTIVE_VARS_CE,
     target_variables=TARGET_VARS_CE,
     signed=SIGNED_CE,
@@ -166,10 +186,12 @@ DATASET_METADATA = {
   ),
   'compressible_flow/richtmyer_meshkov': Metadata(
     periodic=True,
-    data_group='solution',
-    coeff_group=None,
-    domain_t=(0, 2),
+    group_u='solution',
+    group_c=None,
+    group_x=None,
+    type='poseidon',
     domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 2),
     active_variables=ACTIVE_VARS_CE,
     target_variables=TARGET_VARS_CE,
     signed=SIGNED_CE,
@@ -177,10 +199,12 @@ DATASET_METADATA = {
   ),
   'compressible_flow/riemann': Metadata(
     periodic=True,
-    data_group='data',
-    coeff_group=None,
-    domain_t=(0, 1),
+    group_u='data',
+    group_c=None,
+    group_x=None,
+    type='poseidon',
     domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 1),
     active_variables=ACTIVE_VARS_CE,
     target_variables=TARGET_VARS_CE,
     signed=SIGNED_CE,
@@ -188,10 +212,12 @@ DATASET_METADATA = {
   ),
   'compressible_flow/riemann_curved': Metadata(
     periodic=True,
-    data_group='data',
-    coeff_group=None,
-    domain_t=(0, 1),
+    group_u='data',
+    group_c=None,
+    group_x=None,
+    type='poseidon',
     domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 1),
     active_variables=ACTIVE_VARS_CE,
     target_variables=TARGET_VARS_CE,
     signed=SIGNED_CE,
@@ -199,10 +225,12 @@ DATASET_METADATA = {
   ),
   'compressible_flow/riemann_kh': Metadata(
     periodic=True,
-    data_group='data',
-    coeff_group=None,
-    domain_t=(0, 1),
+    group_u='data',
+    group_c=None,
+    group_x=None,
+    type='poseidon',
     domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 1),
     active_variables=ACTIVE_VARS_CE,
     target_variables=TARGET_VARS_CE,
     signed=SIGNED_CE,
@@ -210,10 +238,12 @@ DATASET_METADATA = {
   ),
   'compressible_flow/gravity/blast': Metadata(
     periodic=True,
-    data_group='solution',
-    coeff_group=None,
-    domain_t=(0, 1),
+    group_u='solution',
+    group_c=None,
+    group_x=None,
+    type='poseidon',
     domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 1),
     # CHECK: Where is the gravitational field?
     active_variables=ACTIVE_VARS_CE,
     target_variables=TARGET_VARS_CE,
@@ -222,10 +252,12 @@ DATASET_METADATA = {
   ),
   'compressible_flow/gravity/rayleigh_taylor': Metadata(
     periodic=True,
-    data_group='solution',
-    coeff_group=None,
-    domain_t=(0, 5),
+    group_u='solution',
+    group_c=None,
+    group_x=None,
+    type='poseidon',
     domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 5),
     active_variables=ACTIVE_VARS_GCE,
     target_variables=TARGET_VARS_GCE,
     signed=SIGNED_GCE,
@@ -234,10 +266,12 @@ DATASET_METADATA = {
   # reaction_diffusion
   'reaction_diffusion/allen_cahn': Metadata(
     periodic=False,
-    data_group='solution',
-    coeff_group=None,
-    domain_t=(0, 0.0002),
+    group_u='solution',
+    group_c=None,
+    group_x=None,
+    type='poseidon',
     domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 0.0002),
     active_variables=ACTIVE_VARS_RD,
     target_variables=TARGET_VARS_RD,
     signed=SIGNED_RD,
@@ -246,10 +280,12 @@ DATASET_METADATA = {
   # wave_equation
   'wave_equation/seismic_20step': Metadata(
     periodic=False,
-    data_group='solution',
-    coeff_group='c',
-    domain_t=(0, 1),
+    group_u='solution',
+    group_c='c',
+    group_x=None,
+    type='poseidon',
     domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 1),
     active_variables=ACTIVE_VARS_WE,
     target_variables=TARGET_VARS_WE,
     signed=SIGNED_WE,
@@ -257,10 +293,12 @@ DATASET_METADATA = {
   ),
   'wave_equation/gaussians_15step': Metadata(
     periodic=False,
-    data_group='solution',
-    coeff_group='c',
-    domain_t=(0, 1),
+    group_u='solution',
+    group_c='c',
+    group_x=None,
+    type='poseidon',
     domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 1),
     active_variables=ACTIVE_VARS_WE,
     target_variables=TARGET_VARS_WE,
     signed=SIGNED_WE,
@@ -269,10 +307,12 @@ DATASET_METADATA = {
   # poisson_equation
   'poisson_equation/sines': Metadata(
     periodic=False,
-    data_group='solution',
-    coeff_group='source',
-    domain_t=None,
+    group_u='solution',
+    group_c='source',
+    group_x=None,
+    type='poseidon',
     domain_x=([0, 0], [1, 1]),
+    domain_t=None,
     active_variables=ACTIVE_VARS_PE,
     target_variables=TARGET_VARS_PE,
     signed=SIGNED_PE,
@@ -280,10 +320,12 @@ DATASET_METADATA = {
   ),
   'poisson_equation/chebyshev': Metadata(
     periodic=False,
-    data_group='solution',
-    coeff_group='source',
-    domain_t=None,
+    group_u='solution',
+    group_c='source',
+    group_x=None,
+    type='poseidon',
     domain_x=([0, 0], [1, 1]),
+    domain_t=None,
     active_variables=ACTIVE_VARS_PE,
     target_variables=TARGET_VARS_PE,
     signed=SIGNED_PE,
@@ -291,10 +333,12 @@ DATASET_METADATA = {
   ),
   'poisson_equation/pwc': Metadata(
     periodic=False,
-    data_group='solution',
-    coeff_group='source',
-    domain_t=None,
+    group_u='solution',
+    group_c='source',
+    group_x=None,
+    type='poseidon',
     domain_x=([0, 0], [1, 1]),
+    domain_t=None,
     active_variables=ACTIVE_VARS_PE,
     target_variables=TARGET_VARS_PE,
     signed=SIGNED_PE,
@@ -302,15 +346,31 @@ DATASET_METADATA = {
   ),
   'poisson_equation/gaussians': Metadata(
     periodic=False,
-    data_group='solution',
-    coeff_group='source',
-    domain_t=None,
+    group_u='solution',
+    group_c='source',
+    group_x=None,
+    type='poseidon',
     domain_x=([0, 0], [1, 1]),
+    domain_t=None,
     active_variables=ACTIVE_VARS_PE,
     target_variables=TARGET_VARS_PE,
     signed=SIGNED_PE,
     names=NAMES_PE,
   ),
+  # unstructured
+  'unstructured/airfoil_li': Metadata(
+    periodic=False,
+    group_u='u',
+    group_c='c',
+    group_x='x',
+    type='rigno',
+    domain_x=([-1, -1], [2, 1]),
+    domain_t=None,
+    active_variables=[4],  # Only the Mach number
+    target_variables=[4],
+    signed={'u': [False, True, True, False, False], 'c': [False]},
+    names={'u': ['$\\rho$', '$v_x$', '$v_y$', '$p$', '$Ma$'], 'c': ['$d$']},
+  )
 }
 
 class Batch(NamedTuple):
@@ -343,7 +403,6 @@ class Dataset:
     time_cutoff_idx: int = None,
     time_downsample_factor: int = 1,
     space_downsample_factor: int = 1,
-    unstructured: bool = False,
     n_train: int = 0,
     n_valid: int = 0,
     n_test: int = 0,
@@ -358,25 +417,24 @@ class Dataset:
     self.concatenate_coeffs = concatenate_coeffs
     self.time_cutoff_idx = time_cutoff_idx
     self.time_downsample_factor = time_downsample_factor
-    self.unstructured = unstructured
     self.space_downsample_factor = space_downsample_factor
 
     # Modify metadata
     if not include_passive_variables:
       self.metadata.names['u'] = [self.metadata.names['u'][v] for v in self.metadata.active_variables]
       self.metadata.signed['u'] = [self.metadata.signed['u'][v] for v in self.metadata.active_variables]
-    if self.concatenate_coeffs and self.metadata.coeff_group:
+    if self.concatenate_coeffs and self.metadata.group_c:
       self.metadata.names['u'] += self.metadata.names['c']
       self.metadata.signed['u'] += self.metadata.signed['c']
 
     # Set data attributes
-    self.data_group = self.metadata.data_group
-    self.coeff_group = self.metadata.coeff_group
+    self.data_group = self.metadata.group_u
+    self.coeff_group = self.metadata.group_c
+    self.coords_group = self.metadata.group_x
     self.reader = h5py.File(Path(datadir) / f'{datapath}.nc', 'r')
     self.idx_vars = (None if include_passive_variables
       else self.metadata.active_variables)
-    self.data = None
-    self.coeff = None
+    self.u, self.c, self.x, self.t = None, None, None, None
     self.length = ((n_train + n_valid + n_test) if self.preload
       else self.reader[self.data_group].shape[0])
     self.sample = self._fetch(0)
@@ -422,15 +480,20 @@ class Dataset:
     # Load the data
     if self.preload:
       _len_dataset = self.reader[self.data_group].shape[0]
-      train_data = self.reader[self.data_group][np.arange(n_train)]
-      valid_data = self.reader[self.data_group][np.arange(n_train, (n_train + n_valid))]
-      test_data = self.reader[self.data_group][np.arange((_len_dataset - n_test), (_len_dataset))]
-      self.data = np.concatenate([train_data, valid_data, test_data], axis=0)
+      u_trn = self.reader[self.data_group][np.arange(n_train)]
+      u_val = self.reader[self.data_group][np.arange(n_train, (n_train + n_valid))]
+      u_tst = self.reader[self.data_group][np.arange((_len_dataset - n_test), (_len_dataset))]
+      self.u = np.concatenate([u_trn, u_val, u_tst], axis=0)
       if self.coeff_group is not None:
-        train_coeff = self.reader[self.coeff_group][np.arange(n_train)]
-        valid_coeff = self.reader[self.coeff_group][np.arange(n_train, (n_train + n_valid))]
-        test_coeff = self.reader[self.coeff_group][np.arange((_len_dataset - n_test), (_len_dataset))]
-        self.coeff = np.concatenate([train_coeff, valid_coeff, test_coeff], axis=0)
+        c_trn = self.reader[self.coeff_group][np.arange(n_train)]
+        c_val = self.reader[self.coeff_group][np.arange(n_train, (n_train + n_valid))]
+        c_tst = self.reader[self.coeff_group][np.arange((_len_dataset - n_test), (_len_dataset))]
+        self.c = np.concatenate([c_trn, c_val, c_tst], axis=0)
+      if self.coords_group is not None:
+        x_trn = self.reader[self.coords_group][np.arange(n_train)]
+        x_val = self.reader[self.coords_group][np.arange(n_train, (n_train + n_valid))]
+        x_tst = self.reader[self.coords_group][np.arange((_len_dataset - n_test), (_len_dataset))]
+        self.x = np.concatenate([x_trn, x_val, x_tst], axis=0)
 
   @property
   def time_dependent(self):
@@ -477,66 +540,84 @@ class Dataset:
     if isinstance(idx, int):
       idx = [idx]
 
-    # Get trajectories
-    if self.data is not None:
-      u = self.data[np.sort(idx)]
+    # Get u
+    if self.u is not None:
+      u = self.u[np.sort(idx)]
     else:
       u = self.reader[self.data_group][np.sort(idx)]
 
-    # Move axes
-    if len(u.shape) == 5:  # NOTE: Multi-variable datasets
-      u = np.moveaxis(u, source=(2, 3, 4), destination=(4, 2, 3))
-    elif len(u.shape) == 4:  # NOTE: Single-variable datasets
-      u = np.expand_dims(u, axis=-1)
-    elif len(u.shape) == 3:  # NOTE: Single-variable time-independent datasets
-      u = np.expand_dims(u, axis=(1, -1))
-
-    # Select variables
-    if self.idx_vars is not None:
-      u = u[..., self.idx_vars]
-
-    # Read coefficients
+    # Get c
     if self.coeff_group is not None:
-      # Get the coefficients
-      if self.coeff is not None:
-        c = self.coeff[np.sort(idx)]
+      if self.c is not None:
+        c = self.c[np.sort(idx)]
       else:
         c = self.reader[self.coeff_group][np.sort(idx)]
-      c = np.expand_dims(c, axis=(1, 4))
-      c = np.tile(c, reps=(1, u.shape[1], 1, 1, 1))
     else:
       c = None
 
-    # Downsample the spatial grid
-    if not self.unstructured:
-      u = u[:, :, ::self.space_downsample_factor, ::self.space_downsample_factor]
+    if self.metadata.type == 'poseidon':
+      # Re-arrange u
+      if len(u.shape) == 5:  # NOTE: Multi-variable datasets
+        u = np.moveaxis(u, source=(2, 3, 4), destination=(4, 2, 3))
+      elif len(u.shape) == 4:  # NOTE: Single-variable datasets
+        u = np.expand_dims(u, axis=-1)
+      elif len(u.shape) == 3:  # NOTE: Single-variable time-independent datasets
+        u = np.expand_dims(u, axis=(1, -1))
+      # Re-arrange c
       if c is not None:
-        c = c[:, :, ::self.space_downsample_factor, ::self.space_downsample_factor]
+        c = np.expand_dims(c, axis=(1, 4))
+        c = np.tile(c, reps=(1, u.shape[1], 1, 1, 1))
 
-    # Define spatial coordinates
-    _xv = np.linspace(self.metadata.domain_x[0][0], self.metadata.domain_x[1][0], u.shape[2], endpoint=(not self.metadata.periodic))
-    _yv = np.linspace(self.metadata.domain_x[0][1], self.metadata.domain_x[1][1], u.shape[3], endpoint=(not self.metadata.periodic))
-    _x, _y = np.meshgrid(_xv, _yv)
-    # Align the dimensions
-    _x = _x.reshape(1, 1, -1, 1)
-    _y = _y.reshape(1, 1, -1, 1)
-    # Concatenate the coordinates
-    x = np.concatenate([_x, _y], axis=3)
-    # Repeat along sample and time axes
-    x = np.tile(x, reps=(u.shape[0], u.shape[1], 1, 1))
-    # Flatten the trajectory
-    u = u.reshape(u.shape[0], u.shape[1], (u.shape[2] * u.shape[3]), -1)
-    if c is not None:
-      c = c.reshape(u.shape[0], u.shape[1], (u.shape[2] * u.shape[3]), -1)
+      # Define spatial coordinates
+      assert self.coords_group is None
+      _xv = np.linspace(self.metadata.domain_x[0][0], self.metadata.domain_x[1][0], u.shape[2], endpoint=(not self.metadata.periodic))
+      _yv = np.linspace(self.metadata.domain_x[0][1], self.metadata.domain_x[1][1], u.shape[3], endpoint=(not self.metadata.periodic))
+      _x, _y = np.meshgrid(_xv, _yv)
+      # Align the dimensions
+      _x = _x.reshape(1, 1, -1, 1)
+      _y = _y.reshape(1, 1, -1, 1)
+      # Concatenate the coordinates
+      x = np.concatenate([_x, _y], axis=3)
+      # Repeat along sample and time axes
+      x = np.tile(x, reps=(u.shape[0], u.shape[1], 1, 1))
 
-    # Define temporal coordinates
-    if self.metadata.domain_t is not None:
-      t = np.linspace(*self.metadata.domain_t, u.shape[1], endpoint=True)
-      t = t.reshape(1, -1, 1, 1)
-      # Repeat along sample trajectory
-      t = np.tile(t, reps=(u.shape[0], 1, 1, 1))
+      # Flatten the trajectory
+      u = u.reshape(u.shape[0], u.shape[1], (u.shape[2] * u.shape[3]), -1)
+      if c is not None:
+        c = c.reshape(u.shape[0], u.shape[1], (u.shape[2] * u.shape[3]), -1)
+
+      # Define temporal coordinates
+      if self.metadata.domain_t is not None:
+        t = np.linspace(*self.metadata.domain_t, u.shape[1], endpoint=True)
+        t = t.reshape(1, -1, 1, 1)
+        # Repeat along sample trajectory
+        t = np.tile(t, reps=(u.shape[0], 1, 1, 1))
+      else:
+        t = None
+
+    elif self.metadata.type == 'rigno':
+      # Read spatial coordinates
+      assert self.coords_group is not None
+      if self.x is not None:
+        x = self.x[np.sort(idx)]
+      else:
+        x = self.reader[self.coords_group][np.sort(idx)]
+
+      # Define temporal coordinates
+      if self.metadata.domain_t is not None:
+        t = np.linspace(*self.metadata.domain_t, u.shape[1], endpoint=True)
+        t = t.reshape(1, -1, 1, 1)
+        # Repeat along sample trajectory
+        t = np.tile(t, reps=(u.shape[0], 1, 1, 1))
+      else:
+        t = None
+
     else:
-      t = None
+      raise ValueError
+
+    # Only Keep the desired variables
+    if self.idx_vars is not None:
+      u = u[..., self.idx_vars]
 
     # Cut the time axis
     if self.time_dependent and self.time_cutoff_idx:
@@ -553,7 +634,7 @@ class Dataset:
       x = x[:, ::self.time_downsample_factor]
 
     # Downsample the space coordinates randomly
-    if self.unstructured:
+    if self.space_downsample_factor > 1:
       permutation = jax.random.permutation(self.key, u.shape[2])
       # NOTE: Same discretization for all snapshots
       u = u[:, :, permutation]

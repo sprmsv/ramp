@@ -1,17 +1,18 @@
 # Project Updates
 
-- RIGNO v2.0 is ready: fully unstructured mesh now + discretization invariant + time-independent
+# NEXT STEPS
 
-(E401)
-- Results with full grids can be reproduced with the new UNSTRUCTURED scheme
-- Results with partial grids are comparable with structured
+- Register the Elasticity dataset (first encode the geometry of the whole somehow)
 
-(E402)
-- Wave equation with derivative stepping and known parameters works
-- Wave equation with TAU_MAX works
+- Adopt train.py for variable mesh per sample
+- Run experiments
 
-(E403)
-- Poisson equation results
+- Update slides
+
+- Update test script
+    - Build a graph for each discretization
+    - Instead of resolutions, test with multiple space_subsample_factor's
+
 
 ## Paper details
 
@@ -39,13 +40,6 @@
 
 - Does it really outperform FNO on 1D problems?
 
-# NEXT STEPS
-
-- Update slides
-
-- Update test script
-    - Build a graph for each discretization
-    - Instead of resolutions, test with multiple space_subsample_factor's
 
 # Future work
 
@@ -98,8 +92,6 @@
     - Number of parameters
     - FLOPs / MADD
     - Inference time (improve your benchmarking)
-
-
 
 ## General Boundary Conditions
 - Extend for general boundary conditions (e.g., open, Robin)
@@ -156,7 +148,6 @@
 
 
 # Code and Performance
-
 
 - Get rid of the NVIDIA driver compatiblity message: parallel compilation possibly faster
 

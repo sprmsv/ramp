@@ -980,7 +980,6 @@ def main(argv):
     time_cutoff_idx=(IDX_FN + 1),
     time_downsample_factor=FLAGS.time_downsample_factor,
     space_downsample_factor=FLAGS.space_downsample_factor,
-    unstructured=False,
     n_train=FLAGS.n_train,
     n_valid=FLAGS.n_valid,
     n_test=FLAGS.n_test,
