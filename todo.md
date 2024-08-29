@@ -2,19 +2,17 @@
 
 # NEXT STEPS
 
-- Add batch axis to the initial graphs:
-    - Adopt train.py for variable mesh per sample
-        - evaluate
-        - train
-    - Run experiments with airfoil_li on the server
-
+- Run experiments with unstructured datasets on the server
+- Run experiments with some other datasets to validate
 - Experiment with the Cartesian airfoil dataset + visualization
 - Visualize Poisson-Gauss
+
 - Register the Elasticity dataset (first encode the geometry of the hole somehow)
 
 - Describe RIGNO v2.0 in the thesis (or a new document)
 
 - Update test script
+    - Separate test from train
     - Build a graph for each discretization
     - Instead of resolutions, test with multiple space_subsample_factor's
 

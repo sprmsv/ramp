@@ -144,7 +144,6 @@ def get_direct_estimations(
   step: Stepper.apply,
   variables,
   stats,
-  graphs: RegionInteractionGraphSet,
   batch: Batch,
   tau: float,
   time_downsample_factor: int = 1,  # TMP REMOVE?
@@ -171,8 +170,8 @@ def get_direct_estimations(
     inputs = Inputs(
       u=u_inp[idx],
       c=(batch.c[:, [idx]] if (batch.c is not None) else None),
-      x_inp=batch._x,
-      x_out=batch._x,
+      x_inp=batch.x,
+      x_out=batch.x,
       t=(t_inp[idx] / time_downsample_factor),
       tau=tau,
     )
@@ -180,7 +179,7 @@ def get_direct_estimations(
       variables=variables,
       stats=stats,
       inputs=inputs,
-      graphs=graphs,
+      graphs=batch.g,
       key=key,
     )
     carry += 1

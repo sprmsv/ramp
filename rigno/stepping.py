@@ -378,8 +378,8 @@ class AutoregressiveStepper:
     key: flax.typing.PRNGKey = None,
     **kwargs,
   ) -> Array:
-    # NOTE: Assuming constant x  # TODO: Support variable x
-    # NOTE: Assuming constant c  # TODO: Support variable c
+    # NOTE: Assuming constant x in time  # TODO: Support variable x
+    # NOTE: Assuming constant c in time  # TODO: Support variable c
 
     assert inputs.tau is None
     u_inp = inputs.u

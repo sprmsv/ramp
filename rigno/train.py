@@ -8,6 +8,7 @@ from typing import Tuple, Any, Mapping, Iterable, Callable, Union
 import flax.typing
 import jax
 import jax.numpy as jnp
+import jax.tree_util as tree
 import numpy as np
 import optax
 import orbax.checkpoint
@@ -25,7 +26,7 @@ from rigno.metrics import rel_lp_loss, mse_loss
 from rigno.metrics import mse_error, rel_lp_error_per_var, rel_lp_error_norm
 from rigno.models.operator import AbstractOperator, Inputs
 from rigno.models.rigno import RIGNO
-from rigno.models.rigno import RegionInteractionGraphBuilder, RegionInteractionGraphs
+from rigno.models.rigno import RegionInteractionGraphBuilder
 from rigno.stepping import AutoregressiveStepper
 from rigno.stepping import TimeDerivativeStepper
 from rigno.stepping import ResidualStepper
@@ -195,7 +196,8 @@ def train(
   if dataset.time_dependent:
     autoregressive = AutoregressiveStepper(stepper=stepper, dt=dataset.dt)
 
-  # Define the graph builder
+  # Construct the graphs
+  logging.info('Constructing the graphs for all dataset samples...')
   builder = RegionInteractionGraphBuilder(
     periodic=dataset.metadata.periodic,
     rmesh_levels=FLAGS.rmesh_levels,
@@ -204,15 +206,8 @@ def train(
     overlap_factor_r2p=FLAGS.overlap_factor_r2p,
     node_coordinate_freqs=FLAGS.node_coordinate_freqs,
   )
-
-  # Construct the graphs
-  # NOTE: Assuming fix mesh for all batches
-  graphs = builder.build(
-    x_inp=dataset.sample._x,
-    x_out=dataset.sample._x,
-    domain=np.array(dataset.metadata.domain_x),
-    key=None,
-  )
+  dataset.build_graphs(builder=builder)
+  logging.info(f'Constructed {len(dataset.rigs)} graphs.')
 
   # Set the normalization statistics
   stats = {
@@ -227,14 +222,12 @@ def train(
   # NOTE: Internally uses jax.device_put_replicate
   state = replicate(state)
   stats = replicate(stats)
-  graphs = replicate(graphs)
 
   @functools.partial(jax.pmap, axis_name='device')
   def _train_one_batch(
     key: flax.typing.PRNGKey,
     state: TrainState,
     stats: dict,
-    graphs: RegionInteractionGraphs,
     batch: Batch,
   ) -> Tuple[TrainState, Array, Array]:
     """Loads a batch, normalizes it, updates the state based on it, and returns it."""
@@ -297,7 +290,7 @@ def train(
             stats=stats,
             u_tgt=u_tgt,
             inputs=inputs,
-            graphs=graphs,
+            graphs=batch.g,
             key=subkey,
           )
 
@@ -322,7 +315,7 @@ def train(
             variables={'params': params},
             stats=stats,
             inputs=inputs,
-            graphs=graphs,
+            graphs=batch.g,
             key=subkey,
           )
           c_int = c_inp  # TODO: Approximate c_int
@@ -525,12 +518,13 @@ def train(
         c=shard(batch.c),
         x=shard(batch.x),
         t=shard(batch.t),
+        g=shard(batch.g),
       )
 
       # Get loss and updated state
       subkey, key = jax.random.split(key)
       subkey = shard_prng_key(subkey)
-      state, loss, grads = _train_one_batch(subkey, state, stats, graphs, batch)
+      state, loss, grads = _train_one_batch(subkey, state, stats, batch)
       # NOTE: Using the first element of replicated loss and grads
       loss_epoch += loss[0] * FLAGS.batch_size / num_samples_trn
       grad_epoch += np.mean(jax.tree_util.tree_flatten(
@@ -543,7 +537,6 @@ def train(
     tau_ratio: Union[None, float, int],
     state: TrainState,
     stats,
-    graphs: RegionInteractionGraphs,
     batch: Batch
   ) -> Mapping:
 
@@ -561,7 +554,6 @@ def train(
       step=step,
       variables={'params': state.params},
       stats=stats,
-      graphs=graphs,
       batch=batch,
       tau=(_tau_ratio * dataset.dt),
       time_downsample_factor=1,
@@ -580,7 +572,6 @@ def train(
   def _evaluate_rollout_prediction(
     state: TrainState,
     stats,
-    graphs: RegionInteractionGraphs,
     batch: Batch
   ) -> Mapping:
     """
@@ -594,8 +585,8 @@ def train(
     inputs = Inputs(
       u=batch.u[:, :1],
       c=(batch.c[:, :1] if (batch.c is not None) else None),
-      x_inp=batch._x,
-      x_out=batch._x,
+      x_inp=batch.x,
+      x_out=batch.x,
       t=batch.t[:, :1],
       tau=None,
     )
@@ -608,7 +599,7 @@ def train(
       stats=stats,
       num_steps=num_times,
       inputs=inputs,
-      graphs=graphs,
+      graphs=batch.g,
     )
 
     # Calculate the errors
@@ -624,7 +615,6 @@ def train(
   def _evaluate_final_prediction(
     state: TrainState,
     stats,
-    graphs: RegionInteractionGraphs,
     batch: Batch
   ) -> Mapping:
 
@@ -636,8 +626,8 @@ def train(
       inputs = Inputs(
         u=batch.u[:, :1],
         c=(batch.c[:, :1] if (batch.c is not None) else None),
-        x_inp=batch._x,
-        x_out=batch._x,
+        x_inp=batch.x,
+        x_out=batch.x,
         t=batch.t[:, :1],
         tau=None,
       )
@@ -652,15 +642,15 @@ def train(
         stats=stats,
         num_jumps=_num_jumps,
         inputs=inputs,
-        graphs=graphs,
+        graphs=batch.g,
       )
       if _num_direct_steps:
         _num_dt_jumped = _num_jumps * _predictor.num_steps_direct
         inputs = Inputs(
           u=u_prd,
           c=(batch.c[:, [_num_dt_jumped]] if (batch.c is not None) else None),
-          x_inp=batch._x,
-          x_out=batch._x,
+          x_inp=batch.x,
+          x_out=batch.x,
           t=(batch.t[:, :1] + _num_dt_jumped * _predictor.dt),
           tau=None,
         )
@@ -669,7 +659,7 @@ def train(
           stats=stats,
           num_steps=_num_direct_steps,
           inputs=inputs,
-          graphs=graphs,
+          graphs=batch.g,
         )
 
     else:
@@ -680,12 +670,12 @@ def train(
         inputs=Inputs(
           u=batch.c[:, [0]],
           c=None,
-          x_inp=batch._x,
-          x_out=batch._x,
+          x_inp=batch.x,
+          x_out=batch.x,
           t=None,
           tau=None,
         ),
-        graphs=graphs,
+        graphs=batch.g,
       )
 
     # Calculate the errors
@@ -725,12 +715,13 @@ def train(
         c=shard(batch.c),
         x=shard(batch.x),
         t=shard(batch.t),
+        g=shard(batch.g),
       )
 
       # Evaluate direct prediction
       if direct:
         # tau = .5*dt
-        batch_metrics_direct_tau_frac = _evaluate_direct_prediction(.5, state, stats, graphs, batch)
+        batch_metrics_direct_tau_frac = _evaluate_direct_prediction(.5, state, stats, batch)
         batch_metrics_direct_tau_frac = BatchMetrics(**batch_metrics_direct_tau_frac)
         # Re-arrange the sub-batches gotten from each device
         batch_metrics_direct_tau_frac.reshape(shape=(batch_size_per_device * NUM_DEVICES, 1))
@@ -738,7 +729,7 @@ def train(
         metrics_direct_tau_frac.append(batch_metrics_direct_tau_frac)
 
         # tau = dt
-        batch_metrics_direct_tau_min = _evaluate_direct_prediction(1, state, stats, graphs, batch)
+        batch_metrics_direct_tau_min = _evaluate_direct_prediction(1, state, stats, batch)
         batch_metrics_direct_tau_min = BatchMetrics(**batch_metrics_direct_tau_min)
         # Re-arrange the sub-batches gotten from each device
         batch_metrics_direct_tau_min.reshape(shape=(batch_size_per_device * NUM_DEVICES, 1))
@@ -746,7 +737,7 @@ def train(
         metrics_direct_tau_min.append(batch_metrics_direct_tau_min)
 
         # tau = tau_max
-        batch_metrics_direct_tau_max = _evaluate_direct_prediction(FLAGS.tau_max, state, stats, graphs, batch)
+        batch_metrics_direct_tau_max = _evaluate_direct_prediction(FLAGS.tau_max, state, stats, batch)
         batch_metrics_direct_tau_max = BatchMetrics(**batch_metrics_direct_tau_max)
         # Re-arrange the sub-batches gotten from each device
         batch_metrics_direct_tau_max.reshape(shape=(batch_size_per_device * NUM_DEVICES, 1))
@@ -755,7 +746,7 @@ def train(
 
       # Evaluate rollout prediction
       if rollout:
-        batch_metrics_rollout = _evaluate_rollout_prediction(state, stats, graphs, batch)
+        batch_metrics_rollout = _evaluate_rollout_prediction(state, stats, batch)
         batch_metrics_rollout = BatchMetrics(**batch_metrics_rollout)
         # Re-arrange the sub-batches gotten from each device
         batch_metrics_rollout.reshape(shape=(batch_size_per_device * NUM_DEVICES, 1))
@@ -765,7 +756,7 @@ def train(
       # Evaluate final prediction
       if final:
         if dataset.time_dependent: assert (IDX_FN // FLAGS.time_downsample_factor) < batch.u.shape[2]
-        batch_metrics_final = _evaluate_final_prediction(state, stats, graphs, batch)
+        batch_metrics_final = _evaluate_final_prediction(state, stats, batch)
         batch_metrics_final = BatchMetrics(**batch_metrics_final)
         # Re-arrange the sub-batches gotten from each device
         batch_metrics_final.reshape(shape=(batch_size_per_device * NUM_DEVICES, 1))
@@ -1049,10 +1040,11 @@ def main(argv):
       node_coordinate_freqs=FLAGS.node_coordinate_freqs,
     )
     dummy_graphs = dummy_graph_builder.build(
-      x_inp=dataset.sample._x,
-      x_out=dataset.sample._x,
+      x_inp=dataset.sample.x[0, 0],
+      x_out=dataset.sample.x[0, 0],
       domain=np.array(dataset.metadata.domain_x),
     )
+    dummy_graphs = tree.tree_map(lambda v: jnp.repeat(v, repeats=FLAGS.batch_size, axis=0), dummy_graphs)
     if dataset.time_dependent:
       dummy_inputs = Inputs(
         u=jnp.ones(shape=(FLAGS.batch_size, 1, *dataset.sample.u.shape[2:])),

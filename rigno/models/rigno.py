@@ -20,9 +20,12 @@ class RegionInteractionGraphSet(NamedTuple):
   r2r: TypedGraph
   r2p: TypedGraph
 
+  def __len__(self) -> int:
+    return self.p2r.nodes['pnodes'].n_node.shape[0]
+
 class RegionInteractionGraphBuilder:
 
-# TMP TODO: Build graphs all together (instead of looping on them)
+# TODO: Build graphs all together (instead of looping on them)
 
   def __init__(self,
     periodic: bool,

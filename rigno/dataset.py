@@ -430,10 +430,6 @@ class Batch(NamedTuple):
   def unravel(self) -> tuple:
     return (self.u, self.c, self.x, self.t)
 
-  @property
-  def _x(self) -> Array:  # TMP TODO: REMOVE ALL USAGES
-    return self.x[0, 0]
-
   def __len__(self) -> int:
     return self.shape[0]
 
@@ -586,8 +582,11 @@ class Dataset:
     # Build graphs with potentially different number of edges
     rig_sets = []
     for mode in ['train', 'valid', 'test']:
-      batch = self.train(np.arange(self.nums[mode]))
+      if not self.nums[mode] > 0:
+        continue
+      batch = self._fetch_mode(idx=np.arange(self.nums[mode]), mode=mode)
       # Loop over all coordinates in the batch
+      # NOTE: Assuming constant x in time
       for x in batch.x[:, 0]:
         rig_set = builder.build(x_inp=x, x_out=x, domain=np.array(self.metadata.domain_x), key=None)
         rig_sets.append(rig_set)

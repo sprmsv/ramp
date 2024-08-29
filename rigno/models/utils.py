@@ -97,6 +97,8 @@ class ConditionedNorm(nn.Module):
     if self.convolutional:
       x = x.reshape(shape[0], -1, shape[3])
       x = x.swapaxes(0, 1)
+    scale = jnp.expand_dims(scale, axis=1)
+    bias = jnp.expand_dims(bias, axis=1)
     x = x * scale + bias
     if self.convolutional:
       x = x.swapaxes(0, 1)

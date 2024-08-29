@@ -33,6 +33,7 @@ CMAP_WRB = matplotlib.colors.LinearSegmentedColormap.from_list(
 
 plt.rcParams['font.family'] = 'serif'
 SCATTER_SETTINGS = dict(marker='s', s=1, alpha=1)
+HATCH_SETTINGS = dict(facecolor='none', hatch='//////', edgecolor='#4f4f4f', linewidth=.0)
 
 # TODO: Update
 def animate(trajs, idx_traj=0, symmetric=True, cmaps=CMAP_BBR, vertical=True):
@@ -136,7 +137,7 @@ def plot_trajectory(u, x, t, idx_t, idx_s=0, symmetric=True, ylabels=None, domai
   for ax in axs.flatten():
     ax.fill_between(
       x=[domain[0][0], domain[1][0]], y1=domain[0][1], y2=domain[1][1],
-      facecolor='none', hatch='//////', edgecolor='#4f4f4f', linewidth=.0,
+      **HATCH_SETTINGS,
     )
 
   # Loop over variables
@@ -177,7 +178,7 @@ def plot_trajectory(u, x, t, idx_t, idx_s=0, symmetric=True, ylabels=None, domai
 
   return fig, axs
 
-def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None):
+def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None, domain=([0, 0], [1, 1])):
 
   _HEIGHT_PER_ROW = 2
   _HEIGHT_MARGIN = .2
@@ -227,8 +228,12 @@ def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None
     ax: plt.Axes
     ax.set_xticks([])
     ax.set_yticks([])
-    ax.set_xlim([0, 1])
-    ax.set_ylim([0, 1])
+    ax.set_xlim([domain[0][0], domain[1][0]])
+    ax.set_ylim([domain[0][1], domain[1][1]])
+    ax.fill_between(
+      x=[domain[0][0], domain[1][0]], y1=domain[0][1], y2=domain[1][1],
+      **HATCH_SETTINGS,
+    )
   for ax in [ax for axs in [axs_cb_inp, axs_cb_out, axs_cb_err] for ax in axs]:
     ax: plt.Axes
     ax.tick_params(labelsize=8)
