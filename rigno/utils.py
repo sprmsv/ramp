@@ -5,6 +5,7 @@ from typing import Union, Sequence, Callable
 import flax.typing
 import jax
 import jax.numpy as jnp
+import jax.tree_util as tree
 import numpy as np
 
 
@@ -34,14 +35,23 @@ def profile(f: Callable, kwargs: dict, repeats: int = 1):
     _ = f(**kwargs)
   return (time() - t_0)
 
-def shuffle_arrays(key: flax.typing.PRNGKey, arrays: Sequence[Array]) -> Sequence[Array]:
-  """Shuffles a set of arrays with the same random permutation along the first axis."""
+def shuffle_arrays(key: flax.typing.PRNGKey, arrays: Sequence[Array], axis: int = 0) -> Sequence[Array]:
+  """Shuffles a set of arrays with the same random permutation along the leading axis."""
 
+  # Move the desired axis to the leading axis
+  arrays = tree.tree_map(lambda v: jnp.moveaxis(v, axis, 0), arrays)
+
+  # Get permutation
   length = arrays[0].shape[0]
-  assert all([arr.shape[0] == length for arr in arrays])
+  assert all(tree.tree_map(lambda v: v.shape[0] == length, arrays))
   permutation = jax.random.permutation(key, length)
 
-  return [arr[permutation] for arr in arrays]
+  # Permute along the leading axis
+  arrays = tree.tree_map(lambda v: v[permutation], arrays)
+  # Move back the leading axis to its place
+  arrays = tree.tree_map(lambda v: jnp.moveaxis(v, 0, axis), arrays)
+
+  return arrays
 
 def split_arrays(arrays: Sequence[Array], size: int) -> Sequence[Array]:
 
@@ -58,9 +68,3 @@ def normalize(arr: Array, shift: Array, scale: Array):
 def unnormalize(arr: Array, mean: Array, std: Array):
   arr = std * arr + mean
   return arr
-
-def calculate_fd_derivative(arr, axes):
-  grads = []
-  for ax in axes:
-    grads.append((jnp.roll(arr, axis=ax, shift=-1) - jnp.roll(arr, axis=ax, shift=1)) / 2)
-  return (*grads,)

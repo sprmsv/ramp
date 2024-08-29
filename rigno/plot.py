@@ -32,7 +32,7 @@ CMAP_WRB = matplotlib.colors.LinearSegmentedColormap.from_list(
 )
 
 plt.rcParams['font.family'] = 'serif'
-SCATTER_SETTINGS = dict(marker='s', s=4, alpha=1)
+SCATTER_SETTINGS = dict(marker='s', s=1, alpha=1)
 
 # TODO: Update
 def animate(trajs, idx_traj=0, symmetric=True, cmaps=CMAP_BBR, vertical=True):
@@ -93,7 +93,7 @@ def animate(trajs, idx_traj=0, symmetric=True, cmaps=CMAP_BBR, vertical=True):
 
   return ani, (fig, axs)
 
-def plot_trajectory(u, x, t, idx_t, idx_s=0, symmetric=True, ylabels=None):
+def plot_trajectory(u, x, t, idx_t, idx_s=0, symmetric=True, ylabels=None, domain=([0, 0], [1, 1])):
 
   _WIDTH_PER_COL = 1.5
   _HEIGHT_PER_ROW = 1.5
@@ -128,8 +128,16 @@ def plot_trajectory(u, x, t, idx_t, idx_s=0, symmetric=True, ylabels=None):
     ax: plt.Axes
     ax.set_xticks([])
     ax.set_yticks([])
-    ax.set_xlim([0, 1])
-    ax.set_ylim([0, 1])
+    ax.set_xlim([domain[0][0], domain[1][0]])
+    ax.set_ylim([domain[0][1], domain[1][1]])
+
+  # Add hatch to the background
+  print([np.min(x[..., 0]), np.max(x[..., 0])])
+  for ax in axs.flatten():
+    ax.fill_between(
+      x=[domain[0][0], domain[1][0]], y1=domain[0][1], y2=domain[1][1],
+      facecolor='none', hatch='//////', edgecolor='#4f4f4f', linewidth=.0,
+    )
 
   # Loop over variables
   for r in range(n_vars):
@@ -154,7 +162,7 @@ def plot_trajectory(u, x, t, idx_t, idx_s=0, symmetric=True, ylabels=None):
         vmax=vmax,
         **SCATTER_SETTINGS,
       )
-      if r == 0:
+      if (r == 0) and (len(idx_t) > 1):
         axs[r, icol].set(title=f'$t=t_{{{idx_t[icol]}}}$')
 
     # Add colorbar

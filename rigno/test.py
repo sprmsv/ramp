@@ -19,7 +19,7 @@ from rigno.dataset import Dataset, Batch
 from rigno.experiments import DIR_EXPERIMENTS
 from rigno.metrics import rel_lp_error_norm
 from rigno.models.operator import AbstractOperator, Inputs
-from rigno.models.rigno import RIGNO, RegionInteractionGraphs, RegionInteractionGraphBuilder
+from rigno.models.rigno import RIGNO, RegionInteractionGraphSet, RegionInteractionGraphBuilder
 from rigno.models.unet import UNet
 from rigno.plot import plot_estimates, plot_ensemble, plot_error_vs_time
 from rigno.stepping import Stepper, TimeDerivativeStepper, ResidualStepper, OutputStepper
@@ -69,7 +69,7 @@ def change_discretization(u: Array):
 
 def profile_inferrence(
   dataset: Dataset,
-  graphs: RegionInteractionGraphs,
+  graphs: RegionInteractionGraphSet,
   model: AbstractOperator,
   stepping: Type[Stepper],
   state: dict,
@@ -144,7 +144,7 @@ def get_direct_estimations(
   step: Stepper.apply,
   variables,
   stats,
-  graphs: RegionInteractionGraphs,
+  graphs: RegionInteractionGraphSet,
   batch: Batch,
   tau: float,
   time_downsample_factor: int = 1,  # TMP REMOVE?

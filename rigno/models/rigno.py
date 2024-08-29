@@ -15,14 +15,14 @@ from rigno.models.operator import AbstractOperator, Inputs
 from rigno.utils import Array, shuffle_arrays
 
 
-class RegionInteractionGraphs(NamedTuple):
+class RegionInteractionGraphSet(NamedTuple):
   p2r: TypedGraph
   r2r: TypedGraph
   r2p: TypedGraph
 
 class RegionInteractionGraphBuilder:
 
-  # TODO: Optimize by avoiding for loops
+# TMP TODO: Build graphs all together (instead of looping on them)
 
   def __init__(self,
     periodic: bool,
@@ -90,6 +90,7 @@ class RegionInteractionGraphBuilder:
     domain_sen: list[int] = None,
     domain_rec: list[int] = None,
     shifts: list[Array] = None,
+    add_dummy_node: bool = False,
   ) -> Tuple[EdgeSet, NodeSet, NodeSet]:
 
     # Get number of nodes and the edges
@@ -122,14 +123,21 @@ class RegionInteractionGraphBuilder:
     if feats_rec is not None:
       receiver_node_feats = np.concatenate([receiver_node_feats, feats_rec], axis=-1)
 
+    # Add dummy node
+    if add_dummy_node:
+      sender_node_feats = jnp.concatenate([sender_node_feats, jnp.zeros(shape=(1, sender_node_feats.shape[-1]))], axis=0)
+      receiver_node_feats = jnp.concatenate([receiver_node_feats, jnp.zeros(shape=(1, receiver_node_feats.shape[-1]))], axis=0)
+      num_sen += 1
+      num_rec += 1
+
     # Build node sets
     sender_node_set = NodeSet(
-      n_node=jnp.array([num_sen]),
-      features=jnp.array(sender_node_feats)
+      n_node=jnp.expand_dims(jnp.array([num_sen]), axis=0),
+      features=jnp.expand_dims(jnp.array(sender_node_feats), axis=0),
     )
     receiver_node_set = NodeSet(
-      n_node=jnp.array([num_rec]),
-      features=jnp.array(receiver_node_feats)
+      n_node=jnp.expand_dims(jnp.array([num_rec]), axis=0),
+      features=jnp.expand_dims(jnp.array(receiver_node_feats), axis=0),
     )
 
     # Define edge features
@@ -154,12 +162,12 @@ class RegionInteractionGraphBuilder:
 
     # Build edge set
     edge_set = EdgeSet(
-      n_edge=jnp.array([num_edg]),
+      n_edge=jnp.expand_dims(jnp.array([num_edg]), axis=0),
       indices=EdgesIndices(
-        senders=jnp.array(idx_sen),
-        receivers=jnp.array(idx_rec)
+        senders=jnp.expand_dims(jnp.array(idx_sen), axis=0),
+        receivers=jnp.expand_dims(jnp.array(idx_rec), axis=0),
       ),
-      features=jnp.array(edge_feats),
+      features=jnp.expand_dims(jnp.array(edge_feats), axis=0),
     )
 
     return edge_set, sender_node_set, receiver_node_set
@@ -205,11 +213,12 @@ class RegionInteractionGraphBuilder:
       idx_rec=idx_nodes[:, 1],
       max_edge_length=(2. * jnp.sqrt(x_rmesh.shape[1])),
       feats_rec=radius.reshape(-1, 1),
+      add_dummy_node=True,
     )
 
     # Construct the graph
     graph = TypedGraph(
-      context=Context(n_graph=jnp.array([1]), features=()),
+      context=Context(n_graph=jnp.expand_dims(jnp.array([1]), axis=0), features=()),
       nodes={'pnodes': pmesh_node_set, 'rnodes': rmesh_node_set},
       edges={EdgeSetKey('p2r', ('pnodes', 'rnodes')): edge_set},
     )
@@ -265,11 +274,12 @@ class RegionInteractionGraphBuilder:
       shifts=jnp.array(self._domain_shifts),
       domain_sen=domains[:,0],
       domain_rec=domains[:,1],
+      add_dummy_node=True,
     )
 
     # Construct the graph
     graph = TypedGraph(
-      context=Context(n_graph=jnp.array([1]), features=()),
+      context=Context(n_graph=jnp.expand_dims(jnp.array([1]), axis=0), features=()),
       nodes={'rnodes': rmesh_node_set},
       edges={EdgeSetKey('r2r', ('rnodes', 'rnodes')): edge_set},
     )
@@ -297,18 +307,19 @@ class RegionInteractionGraphBuilder:
       idx_rec=idx_nodes[:, 0],
       max_edge_length=(2. * jnp.sqrt(x_rmesh.shape[1])),
       feats_sen=radius.reshape(-1, 1),
+      add_dummy_node=True,
     )
 
     # Construct the graph
     graph = TypedGraph(
-      context=Context(n_graph=jnp.array([1]), features=()),
+      context=Context(n_graph=jnp.expand_dims(jnp.array([1]), axis=0), features=()),
       nodes={'pnodes': pmesh_node_set, 'rnodes': rmesh_node_set},
       edges={EdgeSetKey('r2p', ('rnodes', 'pnodes')): edge_set},
     )
 
     return graph
 
-  def build(self, x_inp: Array, x_out: Array, domain: Array, key: Union[flax.typing.PRNGKey, None] = None) -> RegionInteractionGraphs:
+  def build(self, x_inp: Array, x_out: Array, domain: Array, key: Union[flax.typing.PRNGKey, None] = None) -> RegionInteractionGraphSet:
 
     # Normalize coordinates in [-1, +1)
     x_inp = 2 * (x_inp - domain[0]) / (domain[1] - domain[0]) - 1
@@ -330,7 +341,7 @@ class RegionInteractionGraphBuilder:
     r_min = self._compute_minimum_support_radii(x_rmesh)
 
     # Build the graphs
-    graphs = RegionInteractionGraphs(
+    graphs = RegionInteractionGraphSet(
       p2r=self._build_p2r_graph(x_inp, x_rmesh, r_min),
       r2r=self._build_r2r_graph(x_rmesh, r_min),
       r2p=self._build_r2p_graph(x_out, x_rmesh, r_min),
@@ -376,29 +387,23 @@ class Encoder(nn.Module):
     """Runs the p2r GNN, extracting latent physical and regional nodes."""
 
     # Get batch size
-    batch_size = pnode_features.shape[1]
+    batch_size = pnode_features.shape[0]
 
     # Concatenate node structural features with input features
     pnodes = graph.nodes['pnodes']
     rnodes = graph.nodes['rnodes']
     new_pnodes = pnodes._replace(
-      features=jnp.concatenate([
-        pnode_features,
-        _add_batch_second_axis(pnodes.features.astype(pnode_features.dtype), batch_size)
-      ], axis=-1)
+      features=jnp.concatenate([pnode_features, pnodes.features], axis=-1)
     )
+    # CHECK: Is this necessary?
     # To make sure capacity of the embedded is identical for the physical nodes and
     # the regional nodes, we also append some dummy zero input features for the
     # regional nodes.
     dummy_rnode_features = jnp.zeros(
-        (rnodes.features.shape[0],) + pnode_features.shape[1:],
+        rnodes.features.shape[:2] + (pnode_features.shape[-1],),
         dtype=pnode_features.dtype)
     new_rnodes = rnodes._replace(
-      features=jnp.concatenate([
-        dummy_rnode_features,
-        _add_batch_second_axis(
-          rnodes.features.astype(dummy_rnode_features.dtype), batch_size)
-      ], axis=-1)
+      features=jnp.concatenate([dummy_rnode_features, rnodes.features], axis=-1)
     )
 
     # Get edges
@@ -406,24 +411,22 @@ class Encoder(nn.Module):
     edges = graph.edges[p2r_edges_key]
     # Drop out edges randomly with the given probability
     if key is not None:
-      n_edges_after = int((1 - self.p_edge_masking) * edges.features.shape[0])
+      n_edges_after = int((1 - self.p_edge_masking) * edges.features.shape[1])
       [new_edge_features, new_edge_senders, new_edge_receivers] = shuffle_arrays(
-        key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers])
-      new_edge_features = new_edge_features[:n_edges_after]
-      new_edge_senders = new_edge_senders[:n_edges_after]
-      new_edge_receivers = new_edge_receivers[:n_edges_after]
+        key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers], axis=1)
+      new_edge_features = new_edge_features[:, :n_edges_after]
+      new_edge_senders = new_edge_senders[:, :n_edges_after]
+      new_edge_receivers = new_edge_receivers[:, :n_edges_after]
     else:
-      n_edges_after = edges.features.shape[0]
+      n_edges_after = edges.features.shape[1]
       new_edge_features = edges.features
       new_edge_senders = edges.indices.senders
       new_edge_receivers = edges.indices.receivers
     # Change edge feature dtype
     new_edge_features = new_edge_features.astype(dummy_rnode_features.dtype)
-    # Broadcast edge structural features to the required batch size
-    new_edge_features = _add_batch_second_axis(new_edge_features, batch_size)
     # Build new edge set
     new_edges = EdgeSet(
-      n_edge=jnp.array([n_edges_after]),
+      n_edge=jnp.tile(jnp.array([n_edges_after]), reps=(batch_size, 1)),
       indices=EdgesIndices(
         senders=new_edge_senders,
         receivers=new_edge_receivers,
@@ -484,7 +487,7 @@ class Processor(nn.Module):
     """Runs the r2r GNN, extracting updated latent regional nodes."""
 
     # Get batch size
-    batch_size = rnode_features.shape[1]
+    batch_size = rnode_features.shape[0]
 
     # Replace the node features
     # NOTE: We don't need to add the structural node features, because these are
@@ -503,24 +506,22 @@ class Processor(nn.Module):
     # NOTE: We need the structural edge features, because it is the first
     # time we are seeing this particular set of edges.
     if key is not None:
-      n_edges_after = int((1 - self.p_edge_masking) * edges.features.shape[0])
+      n_edges_after = int((1 - self.p_edge_masking) * edges.features.shape[1])
       [new_edge_features, new_edge_senders, new_edge_receivers] = shuffle_arrays(
-        key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers])
-      new_edge_features = new_edge_features[:n_edges_after]
-      new_edge_senders = new_edge_senders[:n_edges_after]
-      new_edge_receivers = new_edge_receivers[:n_edges_after]
+        key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers], axis=1)
+      new_edge_features = new_edge_features[:, :n_edges_after]
+      new_edge_senders = new_edge_senders[:, :n_edges_after]
+      new_edge_receivers = new_edge_receivers[:, :n_edges_after]
     else:
-      n_edges_after = edges.features.shape[0]
+      n_edges_after = edges.features.shape[1]
       new_edge_features = edges.features
       new_edge_senders = edges.indices.senders
       new_edge_receivers = edges.indices.receivers
     # Change edge feature dtype
     new_edge_features = new_edge_features.astype(rnode_features.dtype)
-    # Broadcast edge structural features to the required batch size
-    new_edge_features = _add_batch_second_axis(new_edge_features, batch_size)
     # Build new edge set
     new_edges = EdgeSet(
-      n_edge=jnp.array([n_edges_after]),
+      n_edge=jnp.tile(jnp.array([n_edges_after]), reps=(batch_size, 1)),
       indices=EdgesIndices(
         senders=new_edge_senders,
         receivers=new_edge_receivers,
@@ -585,7 +586,7 @@ class Decoder(nn.Module):
     """Runs the r2p GNN, extracting the output physical nodes."""
 
     # Get batch size
-    batch_size = rnode_features.shape[1]
+    batch_size = rnode_features.shape[0]
 
     # NOTE: We don't need to add the structural node features, because these are
     # already part of the latent state, via the original p2r gnn.
@@ -596,7 +597,7 @@ class Decoder(nn.Module):
       # NOTE: We can't use latent pnodes of the input mesh for the output mesh
       # TRY: Make sure that this does not harm the performance with fixed mesh
       # If it works, change the architecture, flowcharts, etc.
-      new_pnodes = pnodes._replace(features=_add_batch_second_axis(pnodes.features, batch_size))
+      new_pnodes = pnodes._replace(features=pnodes.features)
     else:
       new_pnodes = pnodes._replace(features=pnode_features)
 
@@ -605,24 +606,22 @@ class Decoder(nn.Module):
     edges = graph.edges[r2p_edges_key]
     # Drop out edges randomly with the given probability
     if key is not None:
-      n_edges_after = int((1 - self.p_edge_masking) * edges.features.shape[0])
+      n_edges_after = int((1 - self.p_edge_masking) * edges.features.shape[1])
       [new_edge_features, new_edge_senders, new_edge_receivers] = shuffle_arrays(
-        key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers])
-      new_edge_features = new_edge_features[:n_edges_after]
-      new_edge_senders = new_edge_senders[:n_edges_after]
-      new_edge_receivers = new_edge_receivers[:n_edges_after]
+        key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers], axis=1)
+      new_edge_features = new_edge_features[:, :n_edges_after]
+      new_edge_senders = new_edge_senders[:, :n_edges_after]
+      new_edge_receivers = new_edge_receivers[:, :n_edges_after]
     else:
-      n_edges_after = edges.features.shape[0]
+      n_edges_after = edges.features.shape[1]
       new_edge_features = edges.features
       new_edge_senders = edges.indices.senders
       new_edge_receivers = edges.indices.receivers
     # Change edge feature dtype
     new_edge_features = new_edge_features.astype(pnode_features.dtype)
-    # Broadcast edge structural features to the required batch size
-    new_edge_features = _add_batch_second_axis(new_edge_features, batch_size)
     # Build new edge set
     new_edges = EdgeSet(
-      n_edge=jnp.array([n_edges_after]),
+      n_edge=jnp.tile(jnp.array([n_edges_after]), reps=(batch_size, 1)),
       indices=EdgesIndices(
         senders=new_edge_senders,
         receivers=new_edge_receivers,
@@ -715,56 +714,61 @@ class RIGNO(AbstractOperator):
     )
 
   @staticmethod
-  def _reorder_features(feats: Array, num_nodes: int) -> Array:
-    batch_size = feats.shape[1]
-    num_feats = feats.shape[-1]
-    feats = feats.reshape(num_nodes, batch_size, 1, num_feats)
-    output = jnp.moveaxis(feats, source=(0, 1, 2), destination=(2, 0, 1))
-    return output
+  def _prepare_features(feats: Array) -> Array:
+    # Expand time axis
+    feats = jnp.expand_dims(feats, axis=1)
+    return feats
 
   def _encode_process_decode(self,
-    graphs: RegionInteractionGraphs,
+    graphs: RegionInteractionGraphSet,
     pnode_features: Array,
     tau: Union[None, float],
     key: flax.typing.PRNGKey = None,
   ) -> Array:
 
+    # Add dummy node features
+    dummy_pnode_features = jnp.zeros(shape=(pnode_features.shape[0], 1, pnode_features.shape[2]))
+    pnode_features = jnp.concatenate([pnode_features, dummy_pnode_features], axis=1)
+
     # Transfer data for the physical mesh to the regional mesh
-    # -> [num_nodes, batch_size, latent_size]
+    # -> [batch_size, num_nodes, latent_size]
     subkey, key = jax.random.split(key) if (key is not None) else (None, None)
     (latent_rnodes, latent_pnodes) = self.encoder(graphs.p2r, pnode_features, tau, key=subkey)
     self.sow(
       col='intermediates', name='pnodes_encoded',
-      value=self._reorder_features(latent_pnodes, graphs.p2r.nodes['pnodes'].features.shape[0])
+      value=self._prepare_features(latent_pnodes[:, :-1])
     )
     self.sow(
       col='intermediates', name='rnodes_encoded',
-      value=self._reorder_features(latent_rnodes, graphs.p2r.nodes['rnodes'].features.shape[0])
+      value=self._prepare_features(latent_rnodes[:, :-1])
     )
 
     # Run message-passing in the regional mesh
-    # -> [num_rnodes, batch_size, latent_size]
+    # -> [batch_size, num_rnodes, latent_size]
     subkey, key = jax.random.split(key) if (key is not None) else (None, None)
     updated_latent_rnodes = self.processor(graphs.r2r, latent_rnodes, tau, key=subkey)
     self.sow(
       col='intermediates', name='rnodes_processed',
-      value=self._reorder_features(updated_latent_rnodes, graphs.r2r.nodes['rnodes'].features.shape[0])
+      value=self._prepare_features(updated_latent_rnodes[:, :-1])
     )
 
     # Transfer data from the regional mesh to the physical mesh
-    # -> [num_pnodes_out, batch_size, latent_size]
+    # -> [batch_size, num_pnodes_out, latent_size]
     subkey, key = jax.random.split(key) if (key is not None) else (None, None)
     output_pnodes = self.decoder(graphs.r2p, updated_latent_rnodes, latent_pnodes, tau, key=subkey)
     self.sow(
       col='intermediates', name='pnodes_decoded',
-      value=self._reorder_features(output_pnodes, graphs.r2p.nodes['pnodes'].features.shape[0])
+      value=self._prepare_features(output_pnodes[:, :-1])
     )
+
+    # Remove dummy node features
+    output_pnodes = output_pnodes[:, :-1, :]
 
     return output_pnodes
 
   def call(self,
     inputs: Inputs,
-    graphs: RegionInteractionGraphs,
+    graphs: RegionInteractionGraphSet,
     key: flax.typing.PRNGKey = None,
   ) -> Array:
     """Inputs must be of shape [batch_size, 1, num_physical_nodes, num_inputs]"""
@@ -806,17 +810,17 @@ class RIGNO(AbstractOperator):
       u_inp = jnp.concatenate([inputs.u, inputs.c], axis=-1)
 
     # Prepare the physical node features
-    # u -> [num_pnodes_inp, batch_size, num_inputs]
+    # u -> [batch_size, num_pnodes_inp, num_inputs]
     pnode_features = jnp.moveaxis(u_inp,
-      source=(0, 1, 2, 3), destination=(1, 3, 0, 2)
+      source=(0, 1, 2, 3), destination=(0, 3, 1, 2)
     ).squeeze(axis=3)
 
     # Concatente with forced features
     pnode_features_forced = []
-    if self.concatenate_tau:
-      pnode_features_forced.append(jnp.tile(tau, reps=(num_pnodes_inp, 1, 1)))
     if self.concatenate_t:
-      pnode_features_forced.append(jnp.tile(t_inp, reps=(num_pnodes_inp, 1, 1)))
+      pnode_features_forced.append(jnp.tile(jnp.expand_dims(t_inp, axis=1), reps=(1, num_pnodes_inp, 1)))
+    if self.concatenate_tau:
+      pnode_features_forced.append(jnp.tile(jnp.expand_dims(tau, axis=1), reps=(1, num_pnodes_inp, 1)))
     pnode_features = jnp.concatenate([pnode_features, *pnode_features_forced], axis=-1)
 
     # Run the GNNs
@@ -824,9 +828,9 @@ class RIGNO(AbstractOperator):
     output_pnodes = self._encode_process_decode(
       graphs=graphs, pnode_features=pnode_features, tau=tau, key=subkey)
 
-    # Reshape the output to [batch_size, 1, num_pnodes_out, num_outputs]
-    # [num_pnodes_out, batch_size, num_outputs] -> u
-    output = self._reorder_features(output_pnodes, num_pnodes_out)
+    # Reshape the output to u
+    # [batch_size, num_pnodes_out, num_outputs] -> [batch_size, 1, num_pnodes_out, num_outputs]
+    output = self._prepare_features(output_pnodes)
     self._check_function(output, x=inputs.x_out)
 
     return output
@@ -857,15 +861,3 @@ def _compute_triangulation_medians(tri: Delaunay) -> Array:
     medians[:, i] = .67 * np.sqrt((2 * np.sum(np.power(np.delete(edges, i, axis=1), 2), axis=1) - np.power(edges[:, i], 2)) / 4)
 
   return medians
-
-def _add_batch_second_axis(data: Array, batch_size: int) -> Array:
-  """
-  Adds a batch axis by repeating the input
-
-  input: [leading_dim, trailing_dim]
-  output: [leading_dim, batch, trailing_dim]
-  """
-
-  assert data.ndim == 2
-  ones = jnp.ones([batch_size, 1], dtype=data.dtype)
-  return data[:, None] * ones

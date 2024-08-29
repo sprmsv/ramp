@@ -3,15 +3,19 @@
 import h5py
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Union, Sequence, NamedTuple, Literal
+from typing import Union, Sequence, NamedTuple, Literal, Mapping
+from copy import deepcopy
 
 import flax.typing
 import jax
 import jax.lax
 import jax.numpy as jnp
+import jax.tree_util as tree
 import numpy as np
 
 from rigno.utils import Array, shuffle_arrays
+from rigno.graph.typed_graph import TypedGraph
+from rigno.models.rigno import RegionInteractionGraphSet, RegionInteractionGraphBuilder
 
 
 @dataclass
@@ -370,14 +374,54 @@ DATASET_METADATA = {
     target_variables=[4],
     signed={'u': [False, True, True, False, False], 'c': [False]},
     names={'u': ['$\\rho$', '$v_x$', '$v_y$', '$p$', '$Ma$'], 'c': ['$d$']},
-  )
+  ),
+  'unstructured/poisson_c_sines': Metadata(
+    periodic=False,
+    group_u='u',
+    group_c='c',
+    group_x='x',
+    type='rigno',
+    domain_x=([-.5, -.5], [1.5, 1.5]),
+    domain_t=None,
+    active_variables=[0],
+    target_variables=[0],
+    signed={'u': [True], 'c': [True]},
+    names={'u': ['$u$'], 'c': ['$f$']},
+  ),
+  'unstructured/wave_c_sines': Metadata(
+    periodic=False,
+    group_u='u',
+    group_c=None,
+    group_x='x',
+    type='rigno',
+    domain_x=([-.5, -.5], [1.5, 1.5]),
+    domain_t=(0, 0.1),
+    active_variables=[0],
+    target_variables=[0],
+    signed={'u': [True], 'c': None},
+    names={'u': ['$u$'], 'c': None},
+  ),
+  'unstructured/heat_l_sines': Metadata(
+    periodic=False,
+    group_u='u',
+    group_c=None,
+    group_x='x',
+    type='rigno',
+    domain_x=([0., 0.], [1., 1.]),
+    domain_t=(0, 0.002),
+    active_variables=[0],
+    target_variables=[0],
+    signed={'u': [True], 'c': None},
+    names={'u': ['$u$'], 'c': None},
+  ),
 }
 
 class Batch(NamedTuple):
   u: Array
-  c: Union[Array, None]
-  t: Union[Array, None]
+  c: Union[None, Array]
   x: Array
+  t: Union[None, Array]
+  g: Union[None, Sequence[RegionInteractionGraphSet]]
 
   @property
   def shape(self) -> tuple:
@@ -387,7 +431,7 @@ class Batch(NamedTuple):
     return (self.u, self.c, self.x, self.t)
 
   @property
-  def _x(self) -> Array:
+  def _x(self) -> Array:  # TMP TODO: REMOVE ALL USAGES
     return self.x[0, 0]
 
   def __len__(self) -> int:
@@ -412,7 +456,7 @@ class Dataset:
 
     # Set attributes
     self.key = key if (key is not None) else jax.random.PRNGKey(0)
-    self.metadata = DATASET_METADATA[datapath]
+    self.metadata = deepcopy(DATASET_METADATA[datapath])
     self.preload = preload
     self.concatenate_coeffs = concatenate_coeffs
     self.time_cutoff_idx = time_cutoff_idx
@@ -428,13 +472,14 @@ class Dataset:
       self.metadata.signed['u'] += self.metadata.signed['c']
 
     # Set data attributes
+    self.u, self.c, self.x, self.t = None, None, None, None
+    self.rigs: RegionInteractionGraphSet = None
     self.data_group = self.metadata.group_u
     self.coeff_group = self.metadata.group_c
     self.coords_group = self.metadata.group_x
     self.reader = h5py.File(Path(datadir) / f'{datapath}.nc', 'r')
     self.idx_vars = (None if include_passive_variables
       else self.metadata.active_variables)
-    self.u, self.c, self.x, self.t = None, None, None, None
     self.length = ((n_train + n_valid + n_test) if self.preload
       else self.reader[self.data_group].shape[0])
     self.sample = self._fetch(0)
@@ -533,6 +578,71 @@ class Dataset:
       self.stats['der']['mean'] = np.mean(derivatives, axis=(0, 1, 2), keepdims=True)
       self.stats['der']['std'] = np.std(derivatives, axis=(0, 1, 2), keepdims=True)
 
+  def build_graphs(self, builder: RegionInteractionGraphBuilder) -> None:
+    """Builds RIGNO graphs for all samples and stores them in the class."""
+    # NOTE: Each graph takes about 3 to 20 MB and 2 seconds to build.
+    # It can cause memory issues for large datasets.
+
+    # Build graphs with potentially different number of edges
+    rig_sets = []
+    for mode in ['train', 'valid', 'test']:
+      batch = self.train(np.arange(self.nums[mode]))
+      # Loop over all coordinates in the batch
+      for x in batch.x[:, 0]:
+        rig_set = builder.build(x_inp=x, x_out=x, domain=np.array(self.metadata.domain_x), key=None)
+        rig_sets.append(rig_set)
+
+    # Get maximum number of edges per edge type
+    num_of_edges: Mapping[str, Mapping[str, int]] = {}
+    for g_name in RegionInteractionGraphSet.__annotations__.keys():
+      g: TypedGraph = rig_sets[0].__getattribute__(g_name)
+      num_of_edges[g_name] = {
+        edge_set_key.name: edges.n_edge.item()
+        for edge_set_key, edges in g.edges.items()
+      }
+    for rig_set in rig_sets:
+      for g_name in RegionInteractionGraphSet.__annotations__.keys():
+        g: TypedGraph = rig_set.__getattribute__(g_name)
+        for edge_set_key, edge_set in g.edges.items():
+          old_val = num_of_edges[g_name][edge_set_key.name]
+          num_of_edges[g_name][edge_set_key.name] = max(edge_set.n_edge.item(), old_val)
+
+    # Pad the edge sets using dummy nodes
+    padded_rig_sets = []
+    for rig_set in rig_sets:
+      new_gs = {}
+      for g_name in RegionInteractionGraphSet.__annotations__.keys():
+        g: TypedGraph = rig_set.__getattribute__(g_name)
+        # Pad all edge sets
+        new_edges = {}
+        for edge_set_key, edge_set in g.edges.items():
+          num_dummy_edges = num_of_edges[g_name][edge_set_key.name] - edge_set.n_edge.item()
+          if num_dummy_edges > 0:
+            idx_dummy_sen = g.nodes[edge_set_key.node_sets[0]].n_node - 1
+            idx_dummy_rec = g.nodes[edge_set_key.node_sets[1]].n_node - 1
+            n_edge = edge_set.features.shape[0]
+            dummy_edge_features = jnp.zeros(shape=(n_edge, num_dummy_edges, edge_set.features.shape[-1]))
+            dummy_sender_indices = jnp.tile(idx_dummy_sen, reps=(n_edge, num_dummy_edges))
+            dummy_receiver_indices = jnp.tile(idx_dummy_rec, reps=(n_edge, num_dummy_edges))
+            new_edge_set = edge_set._replace(
+              n_edge=(edge_set.n_edge + num_dummy_edges),
+              indices=edge_set.indices._replace(
+                senders=jnp.concatenate([edge_set.indices.senders, dummy_sender_indices], axis=1),
+                receivers=jnp.concatenate([edge_set.indices.receivers, dummy_receiver_indices], axis=1),
+              ),
+              features=jnp.concatenate([edge_set.features, dummy_edge_features], axis=1)
+            )
+          else:
+            new_edge_set = edge_set
+          new_edges[edge_set_key] = new_edge_set
+        # Replace the edge sets
+        new_gs[g_name] = g._replace(edges=new_edges)
+      # Append the padded rig_set
+      padded_rig_sets.append(RegionInteractionGraphSet(**new_gs))
+
+    # Concatenate all padded graph sets and store them
+    self.rigs = tree.tree_map(lambda *v: jnp.concatenate(v), *padded_rig_sets)
+
   def _fetch(self, idx: Union[int, Sequence]) -> Batch:
     """Fetches a sample from the dataset, given its global index."""
 
@@ -554,6 +664,12 @@ class Dataset:
         c = self.reader[self.coeff_group][np.sort(idx)]
     else:
       c = None
+
+    # Get graphs
+    if self.rigs is not None:
+      g = tree.tree_map(lambda v: v[np.sort(idx)], self.rigs)
+    else:
+      g = None
 
     if self.metadata.type == 'poseidon':
       # Re-arrange u
@@ -602,6 +718,8 @@ class Dataset:
         x = self.x[np.sort(idx)]
       else:
         x = self.reader[self.coords_group][np.sort(idx)]
+      # repeat along the time axis
+      x = np.tile(x, reps=(1, u.shape[1], 1, 1))
 
       # Define temporal coordinates
       if self.metadata.domain_t is not None:
@@ -650,7 +768,7 @@ class Dataset:
       u = np.concatenate([u, c], axis=-1)
       c = None
 
-    batch = Batch(u=u, c=c, t=t, x=x)
+    batch = Batch(u=u, c=c, x=x, t=t, g=g)
 
     return batch
 

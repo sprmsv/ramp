@@ -2,12 +2,17 @@
 
 # NEXT STEPS
 
-- Register the Elasticity dataset (first encode the geometry of the whole somehow)
+- Add batch axis to the initial graphs:
+    - Adopt train.py for variable mesh per sample
+        - evaluate
+        - train
+    - Run experiments with airfoil_li on the server
 
-- Adopt train.py for variable mesh per sample
-- Run experiments
+- Experiment with the Cartesian airfoil dataset + visualization
+- Visualize Poisson-Gauss
+- Register the Elasticity dataset (first encode the geometry of the hole somehow)
 
-- Update slides
+- Describe RIGNO v2.0 in the thesis (or a new document)
 
 - Update test script
     - Build a graph for each discretization
@@ -18,7 +23,7 @@
 
 - The whole unstructured mesh handling
 
-- Lp metrics for unstructured meshes
+- New metrics for unstructured meshes
 
 - added support radius to the structural regional node features
 
@@ -52,8 +57,6 @@
     4. Trained on grid, validated on unstructured mesh
     5. Different x_inp and x_out (not supported currently)
 
-- Trained with partial grid vs. trained with full grid
-
 ## Literature
 
 - Quick overview of the recent literature
@@ -79,14 +82,10 @@
 - Inspect uncertainty with extrapolation
 
 
-## Data Augmentation
-
-- Try shifting first (approved)
-- Try repeating (physically incorrect)
-
 ## Benchmarks
 
-- GNO, brandstetter, MeshGraphNets, (scOT), (FNO), (U-Net), (CNO), (GNOT)
+- GNO, MeshGraphNets, (GNOT)
+- (scOT), (FNO), (CNO)
 
 - Compare model size
     - Number of parameters
@@ -96,6 +95,11 @@
 ## General Boundary Conditions
 - Extend for general boundary conditions (e.g., open, Robin)
 - Impose Dirichlet boundary conditions differently
+
+## Data Augmentation
+
+- Try shifting first (approved)
+- Try repeating (physically incorrect)
 
 ## Variable known parameters
 

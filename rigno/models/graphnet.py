@@ -182,7 +182,7 @@ class DeepTypedGraphNet(nn.Module):
 
     # Create `num_message_passing_steps` graph networks with unshared parameters
     # that update the node and edge latent features.
-    # Note that we can use `modules.InteractionNetwork` because
+    # Note that we can use `InteractionNetwork` because
     # it also outputs the messages as updated edge latent features.
     self._processor_networks = [
       InteractionNetwork(
