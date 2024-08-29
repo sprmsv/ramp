@@ -32,8 +32,8 @@ import jax.numpy as jnp
 import flax.linen as nn
 import jraph
 
-from rigno.graph.typed_graph import TypedGraph
-from rigno.graph.typed_graph_net import GraphMapFeatures, InteractionNetwork
+from rigno.graph.entities import TypedGraph
+from rigno.graph.networks import GraphMapFeatures, InteractionNetwork
 from rigno.models.utils import AugmentedMLP
 
 

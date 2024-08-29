@@ -14,7 +14,7 @@ import jax.tree_util as tree
 import numpy as np
 
 from rigno.utils import Array, shuffle_arrays
-from rigno.graph.typed_graph import TypedGraph
+from rigno.graph.entities import TypedGraph
 from rigno.models.rigno import RegionInteractionGraphSet, RegionInteractionGraphBuilder
 
 

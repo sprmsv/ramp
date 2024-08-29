@@ -15,12 +15,10 @@ class NodeSet(NamedTuple):
   n_node: ArrayLike  # [bsz, 1]
   features: ArrayLikeTree  # [bsz, n_node, n_feats]
 
-
 class EdgesIndices(NamedTuple):
   """Represents indices to nodes adjacent to the edges."""
   senders: ArrayLike  # [bsz, n_edge]
   receivers: ArrayLike  # [bsz, n_edge]
-
 
 class EdgeSet(NamedTuple):
   """Represents a set of edges."""
@@ -28,20 +26,17 @@ class EdgeSet(NamedTuple):
   indices: EdgesIndices
   features: ArrayLikeTree  # [bsz, n_edge, n_feats]
 
-
 class Context(NamedTuple):
   # `n_graph` always contains ones but it is useful to query the leading shape
   # in case of graphs without any nodes or edges sets.
   n_graph: ArrayLike  # [bsz, 1]
   features: ArrayLikeTree  # [bsz, n_feats]
 
-
 class EdgeSetKey(NamedTuple):
   # Name of the EdgeSet
   name: str
   # Sender node set name and receiver node set name connected by the edge set
   node_sets: Tuple[str, str]
-
 
 class TypedGraph(NamedTuple):
   """A graph with typed nodes and edges.

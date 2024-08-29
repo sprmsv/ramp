@@ -10,7 +10,7 @@ import jax.numpy as jnp
 import jax.tree_util as tree
 import jraph
 
-from rigno.graph.typed_graph import (
+from rigno.graph.entities import (
     TypedGraph, EdgesIndices, EdgeSetKey,
     EdgeSet, NodeSet, Context)
 

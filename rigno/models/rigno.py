@@ -7,7 +7,7 @@ import numpy as np
 from flax import linen as nn
 from scipy.spatial import Delaunay
 
-from rigno.graph.typed_graph import (
+from rigno.graph.entities import (
     TypedGraph, EdgeSet, EdgeSetKey,
     EdgesIndices, NodeSet, Context)
 from rigno.models.graphnet import DeepTypedGraphNet
