@@ -361,8 +361,22 @@ DATASET_METADATA = {
     signed=SIGNED_PE,
     names=NAMES_PE,
   ),
+  # steady Euler
+  'rigno-unstructured/airfoil_grid': Metadata(
+    periodic=False,
+    group_u='u',
+    group_c='c',
+    group_x=None,
+    type='poseidon',
+    domain_x=([-.75, -.75], [1.75, 1.75]),
+    domain_t=None,
+    active_variables=[0],
+    target_variables=[0],
+    signed={'u': [False], 'c': [False]},
+    names={'u': ['$\\rho$'], 'c': ['$d$']},
+  ),
   # unstructured
-  'unstructured/airfoil_li': Metadata(
+  'rigno-unstructured/airfoil_li': Metadata(
     periodic=False,
     group_u='u',
     group_c='c',
@@ -375,7 +389,7 @@ DATASET_METADATA = {
     signed={'u': [False, True, True, False, False], 'c': [False]},
     names={'u': ['$\\rho$', '$v_x$', '$v_y$', '$p$', '$Ma$'], 'c': ['$d$']},
   ),
-  'unstructured/poisson_c_sines': Metadata(
+  'rigno-unstructured/poisson_c_sines': Metadata(
     periodic=False,
     group_u='u',
     group_c='c',
@@ -388,7 +402,7 @@ DATASET_METADATA = {
     signed={'u': [True], 'c': [True]},
     names={'u': ['$u$'], 'c': ['$f$']},
   ),
-  'unstructured/wave_c_sines': Metadata(
+  'rigno-unstructured/wave_c_sines': Metadata(
     periodic=False,
     group_u='u',
     group_c=None,
@@ -401,7 +415,7 @@ DATASET_METADATA = {
     signed={'u': [True], 'c': None},
     names={'u': ['$u$'], 'c': None},
   ),
-  'unstructured/heat_l_sines': Metadata(
+  'rigno-unstructured/heat_l_sines': Metadata(
     periodic=False,
     group_u='u',
     group_c=None,
