@@ -290,7 +290,7 @@ def train(
             stats=stats,
             u_tgt=u_tgt,
             inputs=inputs,
-            graphs=batch.g,
+            graphs=builder.build_graphs(batch.g),
             key=subkey,
           )
 
@@ -315,7 +315,7 @@ def train(
             variables={'params': params},
             stats=stats,
             inputs=inputs,
-            graphs=batch.g,
+            graphs=builder.build_graphs(batch.g),
             key=subkey,
           )
           c_int = c_inp  # TODO: Approximate c_int
@@ -555,6 +555,7 @@ def train(
       variables={'params': state.params},
       stats=stats,
       batch=batch,
+      builder=builder,
       tau=(_tau_ratio * dataset.dt),
       time_downsample_factor=1,
     )
@@ -599,7 +600,7 @@ def train(
       stats=stats,
       num_steps=num_times,
       inputs=inputs,
-      graphs=batch.g,
+      graphs=builder.build_graphs(batch.g),
     )
 
     # Calculate the errors
@@ -642,7 +643,7 @@ def train(
         stats=stats,
         num_jumps=_num_jumps,
         inputs=inputs,
-        graphs=batch.g,
+        graphs=builder.build_graphs(batch.g),
       )
       if _num_direct_steps:
         _num_dt_jumped = _num_jumps * _predictor.num_steps_direct
@@ -659,7 +660,7 @@ def train(
           stats=stats,
           num_steps=_num_direct_steps,
           inputs=inputs,
-          graphs=batch.g,
+          graphs=builder.build_graphs(batch.g),
         )
 
     else:
@@ -675,7 +676,7 @@ def train(
           t=None,
           tau=None,
         ),
-        graphs=batch.g,
+        graphs=builder.build_graphs(batch.g),
       )
 
     # Calculate the errors
@@ -1039,10 +1040,12 @@ def main(argv):
       overlap_factor_r2p=.01,
       node_coordinate_freqs=FLAGS.node_coordinate_freqs,
     )
-    dummy_graphs = dummy_graph_builder.build(
-      x_inp=dataset.sample.x[0, 0],
-      x_out=dataset.sample.x[0, 0],
-      domain=np.array(dataset.metadata.domain_x),
+    dummy_graphs = dummy_graph_builder.build_graphs(
+        dummy_graph_builder.build_metadata(
+        x_inp=dataset.sample.x[0, 0],
+        x_out=dataset.sample.x[0, 0],
+        domain=np.array(dataset.metadata.domain_x),
+      )
     )
     dummy_graphs = tree.tree_map(lambda v: jnp.repeat(v, repeats=FLAGS.batch_size, axis=0), dummy_graphs)
     if dataset.time_dependent:

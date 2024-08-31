@@ -145,6 +145,7 @@ def get_direct_estimations(
   variables,
   stats,
   batch: Batch,
+  builder: RegionInteractionGraphBuilder,
   tau: float,
   time_downsample_factor: int = 1,  # TMP REMOVE?
   key = None,
@@ -179,7 +180,7 @@ def get_direct_estimations(
       variables=variables,
       stats=stats,
       inputs=inputs,
-      graphs=batch.g,
+      graphs=builder.build_graphs(batch.g),
       key=key,
     )
     carry += 1

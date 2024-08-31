@@ -23,9 +23,22 @@ class RegionInteractionGraphSet(NamedTuple):
   def __len__(self) -> int:
     return self.p2r.nodes['pnodes'].n_node.shape[0]
 
-class RegionInteractionGraphBuilder:
+class RegionInteractionGraphMetadata(NamedTuple):
+  """Light-weight class for storing graph metadata."""
 
-# TODO: Build graphs all together (instead of looping on them)
+  x_pnodes_inp: Array
+  x_pnodes_out: Array
+  x_rnodes: Array
+  r_rnodes: Array
+  p2r_edge_indices: Array
+  r2r_edge_indices: Array
+  r2r_edge_domains: Array
+  r2p_edge_indices: Array
+
+  def __len__(self) -> int:
+    return self.x_pnodes_inp.shape[0]
+
+class RegionInteractionGraphBuilder:
 
   def __init__(self,
     periodic: bool,
@@ -45,25 +58,52 @@ class RegionInteractionGraphBuilder:
     self.subsample_factor = subsample_factor
 
     # Domain shifts for periodic BC
-    self._domain_shifts = np.concatenate([
-      np.array([[0., 0.]]),  # C
-      np.array([[-2, 0.]]),  # W
-      np.array([[-2, +2]]),  # NW
-      np.array([[0., +2]]),  # N
-      np.array([[+2, +2]]),  # NE
-      np.array([[+2, 0.]]),  # E
-      np.array([[+2, -2]]),  # SE
-      np.array([[0., -2]]),  # S
-      np.array([[-2, -2]]),  # SW
+    self._domain_shifts = jnp.concatenate([
+      jnp.array([[0., 0.]]),  # C
+      jnp.array([[-2, 0.]]),  # W
+      jnp.array([[-2, +2]]),  # NW
+      jnp.array([[0., +2]]),  # N
+      jnp.array([[+2, +2]]),  # NE
+      jnp.array([[+2, 0.]]),  # E
+      jnp.array([[+2, -2]]),  # SE
+      jnp.array([[0., -2]]),  # S
+      jnp.array([[-2, -2]]),  # SW
     ], axis=0)
 
-  def _get_supported_points(self,
+  def _compute_minimum_support_radius(self, x: Array) -> Array:
+      # NOTE: This function is not jittable because of the Delaunay triangulation
+
+      if self.periodic:
+        x_extended = (x[None, :, :] + self._domain_shifts[:, None, :]).reshape(-1, 2)
+        tri = Delaunay(points=x_extended)
+      else:
+        tri = Delaunay(points=x)
+
+      medians = _compute_triangulation_medians(tri)
+      radii = np.zeros(shape=(x.shape[0],))
+      mask = tri.simplices < x.shape[0] # [N, 3]
+      values = medians[mask]
+      indices = tri.simplices[mask]
+      sorted_idx = np.argsort(indices)
+      sorted_indices = indices[sorted_idx]
+      sorted_values = values[sorted_idx]
+      unique_indices, idx_start = np.unique(sorted_indices, return_index=True)
+      radii[unique_indices] = np.maximum.reduceat(sorted_values, idx_start)
+
+      return radii
+
+  def _get_supported_pnodes_by_rnodes(self,
     centers: Array,
     points: Array,
     radii: Array,
     ord_distance: int = 2,
   ) -> Array:
     """ord_distance can be 1, 2, or np.inf"""
+
+    # Replace large radiuses
+    # NOTE: Makeshift solution for peculiar geometries
+    # TODO: Instead, remove out-of-domain mesh edges in order to avoid large radiuses
+    radii = np.where(radii < .5, radii, .2)
 
     # Get relative coordinates
     rel = points[:, None] - centers
@@ -82,157 +122,8 @@ class RegionInteractionGraphBuilder:
 
     return idx_nodes
 
-  def _init_structural_features(self,
-    x_sen: Array,
-    x_rec: Array,
-    idx_sen: list[int],
-    idx_rec: list[int],
-    max_edge_length: float,
-    feats_sen: Array = None,
-    feats_rec: Array = None,
-    domain_sen: list[int] = None,
-    domain_rec: list[int] = None,
-    shifts: list[Array] = None,
-    add_dummy_node: bool = False,
-  ) -> Tuple[EdgeSet, NodeSet, NodeSet]:
-
-    # Get number of nodes and the edges
-    num_sen = x_sen.shape[0]
-    num_rec = x_rec.shape[0]
-    assert len(idx_sen) == len(idx_rec)
-    num_edg = len(idx_sen)
-
-    # Process coordinates
-    phi_sen = np.pi * (x_sen + 1)  # [0, 2pi]
-    phi_rec = np.pi * (x_rec + 1)  # [0, 2pi]
-
-    # Define node features
-    # NOTE: Sinusoidal features don't need normalization
-    if self.periodic:
-      sender_node_feats = np.concatenate([
-          np.concatenate([np.sin((k+1) * phi_sen), np.cos((k+1) * phi_sen)], axis=-1)
-          for k in range(self.node_coordinate_freqs)
-        ], axis=-1)
-      receiver_node_feats = np.concatenate([
-          np.concatenate([np.sin((k+1) * phi_rec), np.cos((k+1) * phi_rec)], axis=-1)
-          for k in range(self.node_coordinate_freqs)
-        ], axis=-1)
-    else:
-      sender_node_feats = np.concatenate([x_sen], axis=-1)
-      receiver_node_feats = np.concatenate([x_rec], axis=-1)
-    # Concatenate with forced features
-    if feats_sen is not None:
-      sender_node_feats = np.concatenate([sender_node_feats, feats_sen], axis=-1)
-    if feats_rec is not None:
-      receiver_node_feats = np.concatenate([receiver_node_feats, feats_rec], axis=-1)
-
-    # Add dummy node
-    if add_dummy_node:
-      sender_node_feats = jnp.concatenate([sender_node_feats, jnp.zeros(shape=(1, sender_node_feats.shape[-1]))], axis=0)
-      receiver_node_feats = jnp.concatenate([receiver_node_feats, jnp.zeros(shape=(1, receiver_node_feats.shape[-1]))], axis=0)
-      num_sen += 1
-      num_rec += 1
-
-    # Build node sets
-    sender_node_set = NodeSet(
-      n_node=jnp.expand_dims(jnp.array([num_sen]), axis=0),
-      features=jnp.expand_dims(jnp.array(sender_node_feats), axis=0),
-    )
-    receiver_node_set = NodeSet(
-      n_node=jnp.expand_dims(jnp.array([num_rec]), axis=0),
-      features=jnp.expand_dims(jnp.array(receiver_node_feats), axis=0),
-    )
-
-    # Define edge features
-    z_ij = x_sen[np.array(idx_sen)] - x_rec[np.array(idx_rec)]
-    assert np.all(np.abs(z_ij) <= 2.)
-    if self.periodic:
-      # NOTE: For p2r and r2p, mirror the large relative coordinates
-      # MODIFY: Unify the mirroring with the below method in r2r
-      if shifts is None:
-        z_ij = np.where(z_ij < -1.0, z_ij + 2, z_ij)
-        z_ij = np.where(z_ij >= 1.0, z_ij - 2, z_ij)
-      # NOTE: For the r2r multi-mesh, use extended domain indices and shifts
-      else:
-        z_ij = (x_sen[np.array(idx_sen)] + shifts[np.array(np.array(domain_sen))]) - (x_rec[np.array(idx_rec)]+shifts[np.array(domain_rec)])
-    d_ij = np.linalg.norm(z_ij, axis=-1, keepdims=True)
-    # Normalize and concatenate edge features
-    assert np.all(np.abs(z_ij) <= max_edge_length), np.max(np.abs(z_ij))
-    assert np.all(np.abs(d_ij) <= max_edge_length), np.max(np.abs(d_ij))
-    z_ij = z_ij / max_edge_length
-    d_ij = d_ij / max_edge_length
-    edge_feats = np.concatenate([z_ij, d_ij], axis=-1)
-
-    # Build edge set
-    edge_set = EdgeSet(
-      n_edge=jnp.expand_dims(jnp.array([num_edg]), axis=0),
-      indices=EdgesIndices(
-        senders=jnp.expand_dims(jnp.array(idx_sen), axis=0),
-        receivers=jnp.expand_dims(jnp.array(idx_rec), axis=0),
-      ),
-      features=jnp.expand_dims(jnp.array(edge_feats), axis=0),
-    )
-
-    return edge_set, sender_node_set, receiver_node_set
-
-  def _compute_minimum_support_radii(self, x: Array) -> Array:
-      if self.periodic:
-        x_extended = (x[None, :, :] + self._domain_shifts[:, None, :]).reshape(-1, 2)
-        tri = Delaunay(points=x_extended)
-      else:
-        tri = Delaunay(points=x)
-
-      medians = _compute_triangulation_medians(tri)
-      radii = np.zeros(shape=(x.shape[0],))
-      mask = tri.simplices < x.shape[0] # [N, 3]
-      values = medians[mask]
-      indices  = tri.simplices[mask]
-      sorted_idx = np.argsort(indices)
-      sorted_indices = indices[sorted_idx]
-      sorted_values  = values[sorted_idx]
-      unique_indices, idx_start = np.unique(sorted_indices, return_index=True)
-      radii[unique_indices] = np.maximum.reduceat(sorted_values,idx_start)
-
-      return radii
-
-  def _build_p2r_graph(self, x_inp: Array, x_rmesh: Array, r_min: Array) -> TypedGraph:
-    """Constructrs the encoder graph (pmesh to rmesh)"""
-
-    # Set the sub-region radii
-    radius = self.overlap_factor_p2r * r_min
-
-    # Get indices of supported points
-    idx_nodes = self._get_supported_points(
-      centers=x_rmesh,
-      points=x_inp,
-      radii=radius,
-    )
-
-    # Get the initial features
-    edge_set, pmesh_node_set, rmesh_node_set = self._init_structural_features(
-      x_sen=x_inp,
-      x_rec=x_rmesh,
-      idx_sen=idx_nodes[:, 0],
-      idx_rec=idx_nodes[:, 1],
-      max_edge_length=(2. * jnp.sqrt(x_rmesh.shape[1])),
-      feats_rec=radius.reshape(-1, 1),
-      add_dummy_node=True,
-    )
-
-    # Construct the graph
-    graph = TypedGraph(
-      context=Context(n_graph=jnp.expand_dims(jnp.array([1]), axis=0), features=()),
-      nodes={'pnodes': pmesh_node_set, 'rnodes': rmesh_node_set},
-      edges={EdgeSetKey('p2r', ('pnodes', 'rnodes')): edge_set},
-    )
-
-    return graph
-
-  def _build_r2r_graph(self, x_rmesh: Array, r_min: Array) -> TypedGraph:
+  def _get_r2r_edges(self, x_rmesh: Array) -> Tuple[Array, Array]:
     """Constructrs the processor graph (rmesh to rmesh)"""
-
-    # Set the sub-region radii
-    radius = self.overlap_factor_p2r * r_min
 
     # Define edges and their corresponding -extended- domain
     edges = []
@@ -259,70 +150,16 @@ class RegionInteractionGraphBuilder:
       domains.append(domains_level)
 
     # Remove repeated edges
-    edges = np.concatenate(edges)
-    domains = np.concatenate(domains)
-    _, unique_idx = np.unique(edges, axis=0, return_index=True)
+    edges = jnp.concatenate(edges)
+    domains = jnp.concatenate(domains)
+    _, unique_idx = jnp.unique(edges, axis=0, return_index=True)
     edges = edges[unique_idx]
     domains = domains[unique_idx]
 
-    # Set the initial features
-    edge_set, rmesh_node_set, _ = self._init_structural_features(
-      x_sen=x_rmesh,
-      x_rec=x_rmesh,
-      idx_sen=edges[:, 0],
-      idx_rec=edges[:, 1],
-      max_edge_length=(2. * jnp.sqrt(x_rmesh.shape[1])),
-      feats_sen=radius.reshape(-1, 1),
-      feats_rec=radius.reshape(-1, 1),
-      shifts=jnp.array(self._domain_shifts),
-      domain_sen=domains[:,0],
-      domain_rec=domains[:,1],
-      add_dummy_node=True,
-    )
+    return edges, domains
 
-    # Construct the graph
-    graph = TypedGraph(
-      context=Context(n_graph=jnp.expand_dims(jnp.array([1]), axis=0), features=()),
-      nodes={'rnodes': rmesh_node_set},
-      edges={EdgeSetKey('r2r', ('rnodes', 'rnodes')): edge_set},
-    )
-
-    return graph
-
-  def _build_r2p_graph(self, x_out: Array, x_rmesh: Array, r_min: Array) -> TypedGraph:
-    """Constructrs the decoder graph (rmesh to pmesh)"""
-
-    # Set the sub-region radii
-    radius = self.overlap_factor_r2p * r_min
-
-    # Get indices of supported points
-    idx_nodes = self._get_supported_points(
-      centers=x_rmesh,
-      points=x_out,
-      radii=radius,
-    )
-
-    # Get the initial features
-    edge_set, rmesh_node_set, pmesh_node_set = self._init_structural_features(
-      x_sen=x_rmesh,
-      x_rec=x_out,
-      idx_sen=idx_nodes[:, 1],
-      idx_rec=idx_nodes[:, 0],
-      max_edge_length=(2. * jnp.sqrt(x_rmesh.shape[1])),
-      feats_sen=radius.reshape(-1, 1),
-      add_dummy_node=True,
-    )
-
-    # Construct the graph
-    graph = TypedGraph(
-      context=Context(n_graph=jnp.expand_dims(jnp.array([1]), axis=0), features=()),
-      nodes={'pnodes': pmesh_node_set, 'rnodes': rmesh_node_set},
-      edges={EdgeSetKey('r2p', ('rnodes', 'pnodes')): edge_set},
-    )
-
-    return graph
-
-  def build(self, x_inp: Array, x_out: Array, domain: Array, key: Union[flax.typing.PRNGKey, None] = None) -> RegionInteractionGraphSet:
+  # TODO: Build multiple graphs at the same time in a vectorial way
+  def build_metadata(self, x_inp: Array, x_out: Array, domain: Array, key: Union[flax.typing.PRNGKey, None] = None) -> RegionInteractionGraphMetadata:
 
     # Normalize coordinates in [-1, +1)
     x_inp = 2 * (x_inp - domain[0]) / (domain[1] - domain[0]) - 1
@@ -331,23 +168,245 @@ class RegionInteractionGraphBuilder:
     # Randomly sub-sample pmesh to get rmesh
     if key is None: key = jax.random.PRNGKey(0)
     if self.periodic:
-      x_rmesh = _subsample_pointset(key=key, x=x_inp, factor=self.subsample_factor)
+      x_rnodes = _subsample_pointset(key=key, x=x_inp, factor=self.subsample_factor)
     else:
       # NOTE: Always keep boundary nodes for non-periodic BC
       idx_bound = np.where((x_inp[:, 0] == -1) | (x_inp[:, 0] == +1) | (x_inp[:, 1] == -1) | (x_inp[:, 1] == +1))
       x_boundary = x_inp[idx_bound]
       x_internal = np.delete(x_inp, idx_bound, axis=0)
       x_rmesh_internal = _subsample_pointset(key=key, x=x_internal, factor=self.subsample_factor)
-      x_rmesh, = shuffle_arrays(key=key, arrays=(jnp.concatenate([x_boundary, x_rmesh_internal]),))
+      x_rnodes, = shuffle_arrays(key=key, arrays=(jnp.concatenate([x_boundary, x_rmesh_internal]),))
 
     # Compute minimum support radius of each rmesh node
-    r_min = self._compute_minimum_support_radii(x_rmesh)
+    r_rnodes = self._compute_minimum_support_radius(x_rnodes)
+
+    # Get edge indices
+    p2r_edge_indices = self._get_supported_pnodes_by_rnodes(
+      centers=x_rnodes,
+      points=x_inp,
+      radii=(self.overlap_factor_p2r * r_rnodes),
+    )
+    r2r_edge_indices, r2r_edge_domains = self._get_r2r_edges(x_rnodes)
+    r2p_edge_indices = self._get_supported_pnodes_by_rnodes(
+      centers=x_rnodes,
+      points=x_inp,
+      radii=(self.overlap_factor_r2p * r_rnodes),
+    )
+    r2p_edge_indices = jnp.flip(r2p_edge_indices, axis=-1)
+
+    # Add dummy nodes and edges
+    p2r_edge_indices = jnp.concatenate([p2r_edge_indices, jnp.array([[x_inp.shape[0], x_rnodes.shape[0]]])], axis=0)
+    r2r_edge_indices = jnp.concatenate([r2r_edge_indices, jnp.array([[x_rnodes.shape[0], x_rnodes.shape[0]]])], axis=0)
+    r2r_edge_domains = jnp.concatenate([r2r_edge_domains, jnp.array([[0, 0]])], axis=0)
+    r2p_edge_indices = jnp.concatenate([r2p_edge_indices, jnp.array([[x_rnodes.shape[0], x_out.shape[0]]])], axis=0)
+    x_inp = jnp.concatenate([x_inp, jnp.zeros(shape=(1, x_inp.shape[-1]))], axis=0)
+    x_out = jnp.concatenate([x_out, jnp.zeros(shape=(1, x_out.shape[-1]))], axis=0)
+    x_rnodes = jnp.concatenate([x_rnodes, jnp.zeros(shape=(1, x_rnodes.shape[-1]))], axis=0)
+    r_rnodes = jnp.concatenate([r_rnodes, jnp.zeros(shape=(1,))], axis=0)
+
+    # Convert dtypes to save memory
+    r2r_edge_domains = r2r_edge_domains.astype(jnp.uint8)
+    if (max(x_inp.shape[0], x_out.shape[0]) < jnp.iinfo(jnp.uint16).max):
+      p2r_edge_indices=p2r_edge_indices.astype(jnp.uint16)
+      r2r_edge_indices=r2r_edge_indices.astype(jnp.uint16)
+      r2p_edge_indices=r2p_edge_indices.astype(jnp.uint16)
+    # Ommit storing duplicated edge indices
+    if self.overlap_factor_p2r == self.overlap_factor_r2p:
+      # NOTE: it will be the inverse of p2r edges
+      r2p_edge_indices = None
+
+    # Store the graph data
+    graph_metadata = RegionInteractionGraphMetadata(
+      x_pnodes_inp=jnp.expand_dims(x_inp, axis=0),
+      x_pnodes_out=jnp.expand_dims(x_out, axis=0),
+      x_rnodes=jnp.expand_dims(x_rnodes, axis=0),
+      r_rnodes=jnp.expand_dims(r_rnodes, axis=0),
+      p2r_edge_indices=jnp.expand_dims(p2r_edge_indices, axis=0),
+      r2r_edge_indices=jnp.expand_dims(r2r_edge_indices, axis=0),
+      r2r_edge_domains=jnp.expand_dims(r2r_edge_domains, axis=0),
+      r2p_edge_indices=(jnp.expand_dims(r2p_edge_indices, axis=0) if (r2p_edge_indices is not None) else None),
+    )
+
+    return graph_metadata
+
+  def _init_structural_features(self,
+    x_sen: Array,
+    x_rec: Array,
+    idx_sen: Array,
+    idx_rec: Array,
+    max_edge_length: float,
+    feats_sen: Array = None,
+    feats_rec: Array = None,
+    shift: bool = False,
+    domain_sen: Array = None,
+    domain_rec: Array = None,
+  ) -> Tuple[EdgeSet, NodeSet, NodeSet]:
+
+    # Get number of nodes and the edges
+    batch_size = x_sen.shape[0]
+    num_sen = x_sen.shape[1]
+    num_rec = x_rec.shape[1]
+    assert idx_sen.shape[1] == idx_rec.shape[1]
+    num_edg = idx_sen.shape[1]
+
+    # Process coordinates
+    phi_sen = jnp.pi * (x_sen + 1)  # [0, 2pi]
+    phi_rec = jnp.pi * (x_rec + 1)  # [0, 2pi]
+
+    # Define node features
+    # NOTE: Sinusoidal features don't need normalization
+    if self.periodic:
+      sender_node_feats = jnp.concatenate([
+          jnp.concatenate([jnp.sin((k+1) * phi_sen), jnp.cos((k+1) * phi_sen)], axis=-1)
+          for k in range(self.node_coordinate_freqs)
+        ], axis=-1)
+      receiver_node_feats = jnp.concatenate([
+          jnp.concatenate([jnp.sin((k+1) * phi_rec), jnp.cos((k+1) * phi_rec)], axis=-1)
+          for k in range(self.node_coordinate_freqs)
+        ], axis=-1)
+    else:
+      sender_node_feats = jnp.concatenate([x_sen], axis=-1)
+      receiver_node_feats = jnp.concatenate([x_rec], axis=-1)
+    # Concatenate with forced features
+    if feats_sen is not None:
+      sender_node_feats = jnp.concatenate([sender_node_feats, feats_sen], axis=-1)
+    if feats_rec is not None:
+      receiver_node_feats = jnp.concatenate([receiver_node_feats, feats_rec], axis=-1)
+
+    # Build node sets
+    sender_node_set = NodeSet(
+      n_node=jnp.tile(jnp.array([num_sen]), reps=(batch_size, 1)),
+      features=sender_node_feats,
+    )
+    receiver_node_set = NodeSet(
+      n_node=jnp.tile(jnp.array([num_rec]), reps=(batch_size, 1)),
+      features=receiver_node_feats,
+    )
+
+    # Define edge features
+    batched_index = jax.vmap(lambda f, idx: f[idx])
+    batched_index_single = jax.vmap(lambda f, idx: f[idx], in_axes=(None, 0))
+    z_ij = batched_index(x_sen, idx_sen) - batched_index(x_rec, idx_rec)
+    if self.periodic:
+      # NOTE: For p2r and r2p, mirror the large relative coordinates
+      # MODIFY: Unify the mirroring with the below method in r2r
+      if not shift:
+        z_ij = jnp.where(z_ij < -1.0, z_ij + 2, z_ij)
+        z_ij = jnp.where(z_ij >= 1.0, z_ij - 2, z_ij)
+      # NOTE: For the r2r multi-mesh, use extended domain indices and shifts
+      else:
+        z_ij = (
+          (batched_index(x_sen, idx_sen) + batched_index_single(self._domain_shifts, domain_sen))
+          - (batched_index(x_rec, idx_rec) + batched_index_single(self._domain_shifts, domain_rec))
+        )
+    d_ij = jnp.linalg.norm(z_ij, axis=-1, keepdims=True)
+    # Normalize and concatenate edge features
+    z_ij = z_ij / max_edge_length
+    d_ij = d_ij / max_edge_length
+    edge_feats = jnp.concatenate([z_ij, d_ij], axis=-1)
+
+    # Build edge set
+    edge_set = EdgeSet(
+      n_edge=jnp.tile(jnp.array([num_edg]), reps=(batch_size, 1)),
+      indices=EdgesIndices(
+        senders=idx_sen,
+        receivers=idx_rec,
+      ),
+      features=edge_feats,
+    )
+
+    return edge_set, sender_node_set, receiver_node_set
+
+  def _build_p2r_graph(self, x_pnodes: Array, x_rnodes: Array, idx_edges: Array, r_rmesh: Array) -> TypedGraph:
+    """Constructs the encoder graph (pmesh to rmesh)"""
+
+    # Get the initial features
+    edge_set, pmesh_node_set, rmesh_node_set = self._init_structural_features(
+      x_sen=x_pnodes,
+      x_rec=x_rnodes,
+      idx_sen=idx_edges[..., 0],
+      idx_rec=idx_edges[..., 1],
+      max_edge_length=(2. * jnp.sqrt(x_rnodes.shape[-1])),
+      feats_rec=jnp.expand_dims(self.overlap_factor_p2r * r_rmesh, axis=-1),
+    )
+
+    # Construct the graph
+    graph = TypedGraph(
+      context=Context(n_graph=jnp.tile(jnp.array([1]), reps=(x_rnodes.shape[0], 1)), features=()),
+      nodes={'pnodes': pmesh_node_set, 'rnodes': rmesh_node_set},
+      edges={EdgeSetKey('p2r', ('pnodes', 'rnodes')): edge_set},
+    )
+
+    return graph
+
+  def _build_r2r_graph(self, x_rnodes: Array, idx_edges: Array, idx_domains: Array, r_rmesh: Array) -> TypedGraph:
+    """Constructs the processor graph (rmesh to rmesh)"""
+
+    # Set the initial features
+    edge_set, rmesh_node_set, _ = self._init_structural_features(
+      x_sen=x_rnodes,
+      x_rec=x_rnodes,
+      idx_sen=idx_edges[..., 0],
+      idx_rec=idx_edges[..., 1],
+      max_edge_length=(2. * jnp.sqrt(x_rnodes.shape[-1])),
+      feats_sen=jnp.expand_dims(self.overlap_factor_p2r * r_rmesh, axis=-1),
+      feats_rec=jnp.expand_dims(self.overlap_factor_r2p * r_rmesh, axis=-1),
+      shift=True,
+      domain_sen=idx_domains[..., 0],
+      domain_rec=idx_domains[..., 1],
+    )
+
+    # Construct the graph
+    graph = TypedGraph(
+      context=Context(n_graph=jnp.tile(jnp.array([1]), reps=(x_rnodes.shape[0], 1)), features=()),
+      nodes={'rnodes': rmesh_node_set},
+      edges={EdgeSetKey('r2r', ('rnodes', 'rnodes')): edge_set},
+    )
+
+    return graph
+
+  def _build_r2p_graph(self, x_pnodes: Array, x_rnodes: Array, idx_edges: Array, r_rmesh: Array) -> TypedGraph:
+    """Constructs the decoder graph (rmesh to pmesh)"""
+
+    # Get the initial features
+    edge_set, rmesh_node_set, pmesh_node_set = self._init_structural_features(
+      x_sen=x_rnodes,
+      x_rec=x_pnodes,
+      idx_sen=idx_edges[..., 0],
+      idx_rec=idx_edges[..., 1],
+      max_edge_length=(2. * jnp.sqrt(x_rnodes.shape[-1])),
+      feats_sen=jnp.expand_dims(self.overlap_factor_r2p * r_rmesh, axis=-1),
+    )
+
+    # Construct the graph
+    graph = TypedGraph(
+      context=Context(n_graph=jnp.tile(jnp.array([1]), reps=(x_rnodes.shape[0], 1)), features=()),
+      nodes={'pnodes': pmesh_node_set, 'rnodes': rmesh_node_set},
+      edges={EdgeSetKey('r2p', ('rnodes', 'pnodes')): edge_set},
+    )
+
+    return graph
+
+  def build_graphs(self, metadata: RegionInteractionGraphMetadata) -> RegionInteractionGraphSet:
+
+    # Unwrap the attributes
+    x_pnodes_inp = metadata.x_pnodes_inp
+    x_pnodes_out = metadata.x_pnodes_out
+    x_rnodes = metadata.x_rnodes
+    r_rnodes = metadata.r_rnodes
+    p2r_edge_indices = metadata.p2r_edge_indices
+    r2r_edge_indices = metadata.r2r_edge_indices
+    r2r_edge_domains = metadata.r2r_edge_domains
+    r2p_edge_indices = metadata.r2p_edge_indices
+    # Flip p2r indices if r2p is None
+    if r2p_edge_indices is None:
+      r2p_edge_indices = jnp.flip(metadata.p2r_edge_indices, axis=-1)
 
     # Build the graphs
     graphs = RegionInteractionGraphSet(
-      p2r=self._build_p2r_graph(x_inp, x_rmesh, r_min),
-      r2r=self._build_r2r_graph(x_rmesh, r_min),
-      r2p=self._build_r2p_graph(x_out, x_rmesh, r_min),
+      p2r=self._build_p2r_graph(x_pnodes_inp, x_rnodes, p2r_edge_indices, r_rnodes),
+      r2r=self._build_r2r_graph(x_rnodes, r2r_edge_indices, r2r_edge_domains, r_rnodes),
+      r2p=self._build_r2p_graph(x_pnodes_out, x_rnodes, r2p_edge_indices, r_rnodes),
     )
 
     return graphs

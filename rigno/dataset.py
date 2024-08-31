@@ -15,7 +15,10 @@ import numpy as np
 
 from rigno.utils import Array, shuffle_arrays
 from rigno.graph.entities import TypedGraph
-from rigno.models.rigno import RegionInteractionGraphSet, RegionInteractionGraphBuilder
+from rigno.models.rigno import (
+  RegionInteractionGraphMetadata,
+  RegionInteractionGraphSet,
+  RegionInteractionGraphBuilder)
 
 
 @dataclass
@@ -375,7 +378,7 @@ DATASET_METADATA = {
     signed={'u': [False], 'c': [False]},
     names={'u': ['$\\rho$'], 'c': ['$d$']},
   ),
-  # unstructured
+  # rigno-unstructured
   'rigno-unstructured/airfoil_li': Metadata(
     periodic=False,
     group_u='u',
@@ -427,6 +430,19 @@ DATASET_METADATA = {
     target_variables=[0],
     signed={'u': [True], 'c': None},
     names={'u': ['$u$'], 'c': None},
+  ),
+  'rigno-unstructured/Poisson-Gauss': Metadata(
+    periodic=False,
+    group_u='u',
+    group_c='c',
+    group_x='x',
+    type='rigno',
+    domain_x=([0, 0], [1, 1]),
+    domain_t=None,
+    active_variables=ACTIVE_VARS_PE,
+    target_variables=TARGET_VARS_PE,
+    signed=SIGNED_PE,
+    names=NAMES_PE,
   ),
 }
 
@@ -483,7 +499,7 @@ class Dataset:
 
     # Set data attributes
     self.u, self.c, self.x, self.t = None, None, None, None
-    self.rigs: RegionInteractionGraphSet = None
+    self.rigs: RegionInteractionGraphMetadata = None
     self.data_group = self.metadata.group_u
     self.coeff_group = self.metadata.group_c
     self.coords_group = self.metadata.group_x
@@ -589,12 +605,16 @@ class Dataset:
       self.stats['der']['std'] = np.std(derivatives, axis=(0, 1, 2), keepdims=True)
 
   def build_graphs(self, builder: RegionInteractionGraphBuilder) -> None:
-    """Builds RIGNO graphs for all samples and stores them in the class."""
-    # NOTE: Each graph takes about 3 to 20 MB and 2 seconds to build.
+    """Builds RIGNO graphs for all samples and stores them in the object."""
+    # NOTE: Each graph takes about 3 MB and 2 seconds to build.
     # It can cause memory issues for large datasets.
 
-    # Build graphs with potentially different number of edges
-    rig_sets = []
+    # Build graph metadata with potentially different number of edges
+    # NOTE: Stores all graphs in memory one by one
+    metadata = []
+    num_p2r_edges = 0
+    num_r2r_edges = 0
+    num_r2p_edges = 0
     for mode in ['train', 'valid', 'test']:
       if not self.nums[mode] > 0:
         continue
@@ -602,59 +622,31 @@ class Dataset:
       # Loop over all coordinates in the batch
       # NOTE: Assuming constant x in time
       for x in batch.x[:, 0]:
-        rig_set = builder.build(x_inp=x, x_out=x, domain=np.array(self.metadata.domain_x), key=None)
-        rig_sets.append(rig_set)
-
-    # Get maximum number of edges per edge type
-    num_of_edges: Mapping[str, Mapping[str, int]] = {}
-    for g_name in RegionInteractionGraphSet.__annotations__.keys():
-      g: TypedGraph = rig_sets[0].__getattribute__(g_name)
-      num_of_edges[g_name] = {
-        edge_set_key.name: edges.n_edge.item()
-        for edge_set_key, edges in g.edges.items()
-      }
-    for rig_set in rig_sets:
-      for g_name in RegionInteractionGraphSet.__annotations__.keys():
-        g: TypedGraph = rig_set.__getattribute__(g_name)
-        for edge_set_key, edge_set in g.edges.items():
-          old_val = num_of_edges[g_name][edge_set_key.name]
-          num_of_edges[g_name][edge_set_key.name] = max(edge_set.n_edge.item(), old_val)
+        m = builder.build_metadata(x_inp=x, x_out=x, domain=np.array(self.metadata.domain_x), key=None)
+        metadata.append(m)
+        # Store the maximum number of edges
+        num_p2r_edges = max(num_p2r_edges, m.p2r_edge_indices.shape[1])
+        num_r2r_edges = max(num_r2r_edges, m.r2r_edge_indices.shape[1])
+        if m.r2p_edge_indices is not None:
+          num_r2p_edges = max(num_r2p_edges, m.r2p_edge_indices.shape[1])
 
     # Pad the edge sets using dummy nodes
-    padded_rig_sets = []
-    for rig_set in rig_sets:
-      new_gs = {}
-      for g_name in RegionInteractionGraphSet.__annotations__.keys():
-        g: TypedGraph = rig_set.__getattribute__(g_name)
-        # Pad all edge sets
-        new_edges = {}
-        for edge_set_key, edge_set in g.edges.items():
-          num_dummy_edges = num_of_edges[g_name][edge_set_key.name] - edge_set.n_edge.item()
-          if num_dummy_edges > 0:
-            idx_dummy_sen = g.nodes[edge_set_key.node_sets[0]].n_node - 1
-            idx_dummy_rec = g.nodes[edge_set_key.node_sets[1]].n_node - 1
-            n_edge = edge_set.features.shape[0]
-            dummy_edge_features = jnp.zeros(shape=(n_edge, num_dummy_edges, edge_set.features.shape[-1]))
-            dummy_sender_indices = jnp.tile(idx_dummy_sen, reps=(n_edge, num_dummy_edges))
-            dummy_receiver_indices = jnp.tile(idx_dummy_rec, reps=(n_edge, num_dummy_edges))
-            new_edge_set = edge_set._replace(
-              n_edge=(edge_set.n_edge + num_dummy_edges),
-              indices=edge_set.indices._replace(
-                senders=jnp.concatenate([edge_set.indices.senders, dummy_sender_indices], axis=1),
-                receivers=jnp.concatenate([edge_set.indices.receivers, dummy_receiver_indices], axis=1),
-              ),
-              features=jnp.concatenate([edge_set.features, dummy_edge_features], axis=1)
-            )
-          else:
-            new_edge_set = edge_set
-          new_edges[edge_set_key] = new_edge_set
-        # Replace the edge sets
-        new_gs[g_name] = g._replace(edges=new_edges)
-      # Append the padded rig_set
-      padded_rig_sets.append(RegionInteractionGraphSet(**new_gs))
+    # NOTE: Exploiting jax' behavior for out-of-dimension indexing
+    for i, m in enumerate(metadata):
+      m: RegionInteractionGraphMetadata
+      metadata[i] = RegionInteractionGraphMetadata(
+        x_pnodes_inp=m.x_pnodes_inp,
+        x_pnodes_out=m.x_pnodes_out,
+        x_rnodes=m.x_rnodes,
+        r_rnodes=m.r_rnodes,
+        p2r_edge_indices=m.p2r_edge_indices[:, jnp.arange(num_p2r_edges), :],
+        r2r_edge_indices=m.r2r_edge_indices[:, jnp.arange(num_r2r_edges), :],
+        r2r_edge_domains=m.r2r_edge_domains[:, jnp.arange(num_r2r_edges), :],
+        r2p_edge_indices=m.r2p_edge_indices[:, jnp.arange(num_r2p_edges), :] if (m.r2p_edge_indices is not None) else None,
+      )
 
     # Concatenate all padded graph sets and store them
-    self.rigs = tree.tree_map(lambda *v: jnp.concatenate(v), *padded_rig_sets)
+    self.rigs = tree.tree_map(lambda *v: jnp.concatenate(v), *metadata)
 
   def _fetch(self, idx: Union[int, Sequence]) -> Batch:
     """Fetches a sample from the dataset, given its global index."""
