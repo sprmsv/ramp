@@ -146,6 +146,7 @@ def train(
   model: AbstractOperator,
   state: TrainState,
   dataset: Dataset,
+  graph_builder: RegionInteractionGraphBuilder,
   tau_max: int,
   unroll: bool,
   epochs: int,
@@ -195,19 +196,6 @@ def train(
     raise ValueError
   if dataset.time_dependent:
     autoregressive = AutoregressiveStepper(stepper=stepper, dt=dataset.dt)
-
-  # Construct the graphs
-  logging.info('Constructing the graphs for all dataset samples...')
-  builder = RegionInteractionGraphBuilder(
-    periodic=dataset.metadata.periodic,
-    rmesh_levels=FLAGS.rmesh_levels,
-    subsample_factor=FLAGS.mesh_subsample_factor,
-    overlap_factor_p2r=FLAGS.overlap_factor_p2r,
-    overlap_factor_r2p=FLAGS.overlap_factor_r2p,
-    node_coordinate_freqs=FLAGS.node_coordinate_freqs,
-  )
-  dataset.build_graphs(builder=builder)
-  logging.info(f'Constructed {len(dataset.rigs)} graphs.')
 
   # Set the normalization statistics
   stats = {
@@ -290,7 +278,7 @@ def train(
             stats=stats,
             u_tgt=u_tgt,
             inputs=inputs,
-            graphs=builder.build_graphs(batch.g),
+            graphs=graph_builder.build_graphs(batch.g),
             key=subkey,
           )
 
@@ -315,7 +303,7 @@ def train(
             variables={'params': params},
             stats=stats,
             inputs=inputs,
-            graphs=builder.build_graphs(batch.g),
+            graphs=graph_builder.build_graphs(batch.g),
             key=subkey,
           )
           c_int = c_inp  # TODO: Approximate c_int
@@ -555,7 +543,7 @@ def train(
       variables={'params': state.params},
       stats=stats,
       batch=batch,
-      builder=builder,
+      builder=graph_builder,
       tau=(_tau_ratio * dataset.dt),
       time_downsample_factor=1,
     )
@@ -600,7 +588,7 @@ def train(
       stats=stats,
       num_steps=num_times,
       inputs=inputs,
-      graphs=builder.build_graphs(batch.g),
+      graphs=graph_builder.build_graphs(batch.g),
     )
 
     # Calculate the errors
@@ -643,7 +631,7 @@ def train(
         stats=stats,
         num_jumps=_num_jumps,
         inputs=inputs,
-        graphs=builder.build_graphs(batch.g),
+        graphs=graph_builder.build_graphs(batch.g),
       )
       if _num_direct_steps:
         _num_dt_jumped = _num_jumps * _predictor.num_steps_direct
@@ -660,7 +648,7 @@ def train(
           stats=stats,
           num_steps=_num_direct_steps,
           inputs=inputs,
-          graphs=builder.build_graphs(batch.g),
+          graphs=graph_builder.build_graphs(batch.g),
         )
 
     else:
@@ -676,7 +664,7 @@ def train(
           t=None,
           tau=None,
         ),
-        graphs=builder.build_graphs(batch.g),
+        graphs=graph_builder.build_graphs(batch.g),
       )
 
     # Calculate the errors
@@ -1018,6 +1006,19 @@ def main(argv):
   with open(DIR / 'stats.pkl', 'wb') as f:
     pickle.dump(file=f, obj=dataset.stats)
 
+  # Construct the graphs
+  logging.info('Constructing the graphs for all dataset samples...')
+  graph_builder = RegionInteractionGraphBuilder(
+    periodic=dataset.metadata.periodic,
+    rmesh_levels=FLAGS.rmesh_levels,
+    subsample_factor=FLAGS.mesh_subsample_factor,
+    overlap_factor_p2r=FLAGS.overlap_factor_p2r,
+    overlap_factor_r2p=FLAGS.overlap_factor_r2p,
+    node_coordinate_freqs=FLAGS.node_coordinate_freqs,
+  )
+  dataset.build_graphs(builder=graph_builder)
+  logging.info(f'Constructed {len(dataset.rigs)} graphs.')
+
   schedule_tau_max = True
   if (FLAGS.tau_max == 1):
     schedule_tau_max = False
@@ -1135,6 +1136,7 @@ def main(argv):
         model=model,
         state=state,
         dataset=dataset,
+        graph_builder=graph_builder,
         tau_max=_d,
         unroll=False,
         epochs=epochs_dxx,
@@ -1157,6 +1159,7 @@ def main(argv):
       model=model,
       state=state,
       dataset=dataset,
+      graph_builder=graph_builder,
       tau_max=FLAGS.tau_max,
       unroll=False,
       epochs=epochs_without_unrolling,
@@ -1172,6 +1175,7 @@ def main(argv):
       model=model,
       state=state,
       dataset=dataset,
+      graph_builder=graph_builder,
       tau_max=FLAGS.tau_max,
       unroll=True,
       epochs=epochs_with_unrolling,
@@ -1185,6 +1189,7 @@ def main(argv):
       model=model,
       state=state,
       dataset=dataset,
+      graph_builder=graph_builder,
       tau_max=FLAGS.tau_max,
       unroll=False,
       epochs=epochs_rest,

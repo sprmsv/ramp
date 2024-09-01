@@ -431,6 +431,110 @@ DATASET_METADATA = {
     signed={'u': [True], 'c': None},
     names={'u': ['$u$'], 'c': None},
   ),
+  'rigno-unstructured/NS-Gauss': Metadata(
+    periodic=True,
+    group_u='u',
+    group_c=None,
+    group_x='x',
+    type='rigno',
+    domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 1),
+    active_variables=ACTIVE_VARS_NS,
+    target_variables=TARGET_VARS_NS,
+    signed=SIGNED_NS,
+    names=NAMES_NS,
+  ),
+  'rigno-unstructured/NS-PwC': Metadata(
+    periodic=True,
+    group_u='u',
+    group_c=None,
+    group_x='x',
+    type='rigno',
+    domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 1),
+    active_variables=ACTIVE_VARS_NS,
+    target_variables=TARGET_VARS_NS,
+    signed=SIGNED_NS,
+    names=NAMES_NS,
+  ),
+  'rigno-unstructured/NS-SL': Metadata(
+    periodic=True,
+    group_u='u',
+    group_c=None,
+    group_x='x',
+    type='rigno',
+    domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 1),
+    active_variables=ACTIVE_VARS_NS,
+    target_variables=TARGET_VARS_NS,
+    signed=SIGNED_NS,
+    names=NAMES_NS,
+  ),
+  'rigno-unstructured/NS-SVS': Metadata(
+    periodic=True,
+    group_u='u',
+    group_c=None,
+    group_x='x',
+    type='rigno',
+    domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 1),
+    active_variables=ACTIVE_VARS_NS,
+    target_variables=TARGET_VARS_NS,
+    signed=SIGNED_NS,
+    names=NAMES_NS,
+  ),
+  'rigno-unstructured/CE-Gauss': Metadata(
+    periodic=True,
+    group_u='u',
+    group_c=None,
+    group_x='x',
+    type='rigno',
+    domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 1),
+    active_variables=ACTIVE_VARS_CE,
+    target_variables=TARGET_VARS_CE,
+    signed=SIGNED_CE,
+    names=NAMES_CE,
+  ),
+  'rigno-unstructured/CE-RP': Metadata(
+    periodic=True,
+    group_u='u',
+    group_c=None,
+    group_x='x',
+    type='rigno',
+    domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 1),
+    active_variables=ACTIVE_VARS_CE,
+    target_variables=TARGET_VARS_CE,
+    signed=SIGNED_CE,
+    names=NAMES_CE,
+  ),
+  'rigno-unstructured/ACE': Metadata(
+    periodic=False,
+    group_u='u',
+    group_c=None,
+    group_x='x',
+    type='rigno',
+    domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 0.0002),
+    active_variables=ACTIVE_VARS_RD,
+    target_variables=TARGET_VARS_RD,
+    signed=SIGNED_RD,
+    names=NAMES_RD,
+  ),
+  'rigno-unstructured/Wave-Layer': Metadata(
+    periodic=False,
+    group_u='u',
+    group_c='c',
+    group_x='x',
+    type='rigno',
+    domain_x=([0, 0], [1, 1]),
+    domain_t=(0, 1),
+    active_variables=ACTIVE_VARS_WE,
+    target_variables=TARGET_VARS_WE,
+    signed=SIGNED_WE,
+    names=NAMES_WE,
+  ),
   'rigno-unstructured/Poisson-Gauss': Metadata(
     periodic=False,
     group_u='u',
@@ -646,6 +750,9 @@ class Dataset:
       )
 
     # Concatenate all padded graph sets and store them
+    # NOTE: This line duplicates the memory needed for storing the graphs
+    # TODO: Make the concatenation memory efficient
+    ## One way is to add another loop and write the graphs one by one in-place in the concatenated array
     self.rigs = tree.tree_map(lambda *v: jnp.concatenate(v), *metadata)
 
   def _fetch(self, idx: Union[int, Sequence]) -> Batch:
@@ -724,6 +831,8 @@ class Dataset:
       else:
         x = self.reader[self.coords_group][np.sort(idx)]
       # repeat along the time axis
+      # NOTE: the coordinates are assumed to be constant in time
+      assert x.shape[1] == 1
       x = np.tile(x, reps=(1, u.shape[1], 1, 1))
 
       # Define temporal coordinates
