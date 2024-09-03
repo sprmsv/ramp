@@ -6,8 +6,6 @@ import flax.linen as nn
 import jax.numpy as jnp
 import jax.tree_util as tree
 
-from rigno.utils import Array
-
 
 def concatenate_args(args, kwargs, axis: int = -1):
   combined_args = tree.tree_flatten(args)[0] + tree.tree_flatten(kwargs)[0]

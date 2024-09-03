@@ -10,7 +10,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import orbax.checkpoint
 import pandas as pd
-import scipy.ndimage
 from absl import app, flags, logging
 from flax.training.common_utils import shard, shard_prng_key
 from flax.jax_utils import replicate
@@ -21,7 +20,7 @@ from rigno.metrics import rel_lp_error_norm
 from rigno.models.operator import AbstractOperator, Inputs
 from rigno.models.rigno import RIGNO, RegionInteractionGraphSet, RegionInteractionGraphBuilder
 from rigno.models.unet import UNet
-from rigno.plot import plot_estimates, plot_ensemble, plot_error_vs_time
+from rigno.plot import plot_ensemble, plot_error_vs_time
 from rigno.stepping import Stepper, TimeDerivativeStepper, ResidualStepper, OutputStepper
 from rigno.stepping import AutoregressiveStepper
 from rigno.utils import Array, disable_logging, profile

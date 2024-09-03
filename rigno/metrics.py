@@ -2,10 +2,11 @@ from copy import copy
 from dataclasses import dataclass
 from typing import Sequence, Union
 
+import jax
 import jax.numpy as jnp
 
 from rigno.utils import Array, ScalarArray
-
+from rigno.dataset import Metadata
 
 EPSILON = 1e-10
 
@@ -14,6 +15,10 @@ class BatchMetrics:
     mse: Array = None
     l1: Array = None
     l2: Array = None
+    # Poseidon's l1-error
+    _l1: float = None
+    # Poseidon's l2-error
+    _l2: float = None
 
     def map(self, f):
         for key in self.__dict__.keys():
@@ -33,6 +38,10 @@ class Metrics:
     mse: float = None
     l1: float = None
     l2: float = None
+    # Poseidon's l1-error
+    _l1: float = None
+    # Poseidon's l2-error
+    _l2: float = None
 
 @dataclass
 class EvalMetrics:
@@ -45,7 +54,7 @@ class EvalMetrics:
   def to_dict(self):
       return {key: val.__dict__ for key, val in self.__dict__.items()}
 
-def lp_norm(arr: Array, p: int = 2, axis: Union[None, Sequence[int]] = None) -> Array:
+def lp_norm(arr: Array, p: int = 2, chunks: Union[None, Sequence[int]] = None, num_chunks: int = None) -> Array:
     """
     Returns the Bochner Lp-norm of an array.
 
@@ -53,24 +62,37 @@ def lp_norm(arr: Array, p: int = 2, axis: Union[None, Sequence[int]] = None) -> 
         arr: Point-wise values on a uniform grid with the dimensions
             [batch, time, space, var]
         p: Order of the norm. Defaults to 2.
-        axis: The axes for to sum over. Defaults to None.
+        chunks: Index of variable chunks for vectorial functions.
+            If None, the entries of the last axis are interpreted as values of
+            independent scalar-valued functions. Defaults to None.
 
     Returns:
         A scalar value for each sample in the batch [batch, *remaining_axes]
     """
 
-    # Set the axis
-    if axis is None:
-        axis = (1, 2, 3)
+    # Set the default chunks
+    if chunks is None:
+        chunks = jnp.arange(arr.shape[-1])
+        num_chunks = arr.shape[-1]
+        keep_var_dim = False
+    else:
+        keep_var_dim = True
 
-    # Sum on timespace (quadrature) and variables
-    abs_pow_sum = jnp.sum(jnp.power(jnp.abs(arr), p), axis=axis)
+    # Compute power of absolute value
+    pow_abs = jnp.power(jnp.abs(arr), p)
+    # Sum on timespace (quadrature)
+    abs_pow_sum_vars = jnp.sum(pow_abs, axis=(1, 2))
+    # Sum on variable chunks
+    abs_pow_sum = jax.vmap(jax.ops.segment_sum, in_axes=(0, None, None))(abs_pow_sum_vars, chunks, num_chunks)
     # Take the p-th root
     pth_root = jnp.power(abs_pow_sum, (1/p))
+    # Squeeze variable axis
+    if not keep_var_dim:
+        pth_root = jnp.squeeze(pth_root, axis=-1)
 
     return pth_root
 
-def rel_lp_error(gtr: Array, prd: Array, p: int = 2, vars: Sequence[int] = None) -> Array:
+def rel_lp_error(gtr: Array, prd: Array, p: int = 2, chunks: Union[None, Sequence[int]] = None, num_chunks: int = None) -> Array:
     """
     Returns the relative Bochner Lp-norm of an array with respect to a ground-truth.
 
@@ -80,47 +102,28 @@ def rel_lp_error(gtr: Array, prd: Array, p: int = 2, vars: Sequence[int] = None)
         prd: Point-wise values of a predicted function on a uniform
             grid with the dimensions [batch, time, space, var]
         p: Order of the norm. Defaults to 2.
-        vars: Index of the variables to use for computing the error. Defaults to None.
+        chunks: Index of variable chunks for vectorial functions.
+            If None, the entries of the last axis are interpreted as values of
+            independent scalar-valued functions. Defaults to None.
 
-    Returns:
-        A scalar value for each sample in the batch [batch,]
-    """
-
-    err = (prd - gtr)
-    if vars is not None:
-        err = err[..., vars]
-    err_norm = lp_norm(err, p=p)
-    gtr_norm = lp_norm(gtr, p=p)
-
-    return (err_norm / (gtr_norm + EPSILON))
-
-def rel_lp_error_per_var(gtr: Array, prd: Array, p: int = 2, vars: Sequence[int] = None) -> Array:
-    """
-    Returns the relative Bochner Lp-norm of an array with respect to a ground-truth.
-    The entries of the last axis are interpreted as values of independent scalar-valued
-    functions.
-
-    Args:
-        gtr: Point-wise values of a ground-truth function on a uniform
-            grid with the dimensions [batch, time, space, var]
-        prd: Point-wise values of a predicted function on a uniform
-            grid with the dimensions [batch, time, space, var]
-        p: Order of the norm. Defaults to 2.
-        vars: Index of the variables to use for computing the error. Defaults to None.
 
     Returns:
         A scalar value for each sample in the batch [batch, var]
     """
 
+    if chunks is None:
+        chunks = jnp.arange(gtr.shape[-1])
+        num_chunks = gtr.shape[-1]
+    else:
+        chunks = jnp.array(chunks)
+
     err = (prd - gtr)
-    if vars is not None:
-        err = err[..., vars]
-    err_norm = lp_norm(err, p=p, axis=(1, 2))
-    gtr_norm = lp_norm(gtr, p=p, axis=(1, 2))
+    err_norm = lp_norm(err, p=p, chunks=chunks, num_chunks=num_chunks)
+    gtr_norm = lp_norm(gtr, p=p, chunks=chunks, num_chunks=num_chunks)
 
     return (err_norm / (gtr_norm + EPSILON))
 
-def rel_lp_error_norm(gtr: Array, prd: Array, p: int = 2, vars: Sequence[int] = None) -> Array:
+def rel_lp_error_norm(gtr: Array, prd: Array, p: int = 2, chunks: Union[None, Sequence[int]] = None, num_chunks: int = None) -> Array:
     """
     Returns the norm of the relative Bochner Lp-norm of an array with respect to a ground-truth.
     The entries of the last axis are interpreted as values of independent scalar-valued
@@ -132,14 +135,40 @@ def rel_lp_error_norm(gtr: Array, prd: Array, p: int = 2, vars: Sequence[int] = 
         prd: Point-wise values of a predicted function on a uniform
             grid with the dimensions [batch, time, space, var]
         p: Order of the norm. Defaults to 2.
-        vars: Index of the variables to use for computing the error. Defaults to None.
+        chunks: Index of variable chunks for vectorial functions.
+            If None, the entries of the last axis are interpreted as values of
+            independent scalar-valued functions. Defaults to None.
 
     Returns:
         The vector norm of the error vector [batch,]
     """
 
-    err_per_var = rel_lp_error_per_var(gtr, prd, p=p, vars=vars)
+    err_per_var = rel_lp_error(gtr, prd, p=p, chunks=chunks, num_chunks=num_chunks)
     err_agg = jnp.linalg.norm(err_per_var, ord=p, axis=1)
+    return err_agg
+
+def rel_lp_error_mean(gtr: Array, prd: Array, p: int = 2, chunks: Union[None, Sequence[int]] = None, num_chunks: int = None) -> Array:
+    """
+    Returns the average of the relative Bochner Lp-norm of an array with respect to a ground-truth.
+    The entries of the last axis are interpreted as values of independent scalar-valued
+    functions. This results in an error vector. The vector norm of the error vector is returned.
+
+    Args:
+        gtr: Point-wise values of a ground-truth function on a uniform
+            grid with the dimensions [batch, time, space, var]
+        prd: Point-wise values of a predicted function on a uniform
+            grid with the dimensions [batch, time, space, var]
+        p: Order of the norm. Defaults to 2.
+        chunks: Index of variable chunks for vectorial functions.
+            If None, the entries of the last axis are interpreted as values of
+            independent scalar-valued functions. Defaults to None.
+
+    Returns:
+        The vector norm of the error vector [batch,]
+    """
+
+    err_per_var = rel_lp_error(gtr, prd, p=p, chunks=chunks, num_chunks=num_chunks)
+    err_agg = jnp.mean(err_per_var, axis=1)
     return err_agg
 
 def rel_lp_loss(gtr: Array, prd: Array, p: int = 2) -> Array:
@@ -176,3 +205,19 @@ def mse_loss(gtr: Array, prd: Array) -> ScalarArray:
     """
 
     return jnp.mean(jnp.power(prd - gtr, 2))
+
+def normalized_rel_lp_error_mean(gtr: Array, prd: Array, metadata: Metadata, p: int = 2) -> ScalarArray:
+    """Compute mean relative lp-error of normalized vectors"""
+
+    mean = jnp.array(metadata.global_mean)
+    std = jnp.array(metadata.global_std)
+    gtr_nrm = (gtr - mean) / std
+    prd_nrm = (prd - mean) / std
+
+    err = rel_lp_error_mean(
+        gtr_nrm, prd_nrm, p=p,
+        chunks=metadata.chunked_variables,
+        num_chunks=metadata.num_variable_chunks,
+    )
+
+    return err

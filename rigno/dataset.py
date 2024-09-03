@@ -3,7 +3,7 @@
 import h5py
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Union, Sequence, NamedTuple, Literal, Mapping
+from typing import Union, Sequence, NamedTuple, Literal
 from copy import deepcopy
 
 import flax.typing
@@ -13,8 +13,7 @@ import jax.numpy as jnp
 import jax.tree_util as tree
 import numpy as np
 
-from rigno.utils import Array, shuffle_arrays
-from rigno.graph.entities import TypedGraph
+from rigno.utils import Array
 from rigno.models.rigno import (
   RegionInteractionGraphMetadata,
   RegionInteractionGraphSet,
@@ -30,18 +29,13 @@ class Metadata:
   type: Literal['poseidon', 'rigno']
   domain_x: tuple[Sequence[int], Sequence[int]]
   domain_t: tuple[int, int]
-  active_variables: Sequence[int]
-  target_variables: Sequence[int]
+  active_variables: Sequence[int]  # Index of variables in input/output
+  chunked_variables: Sequence[int]  # Index of variable groups
+  num_variable_chunks: int  # Number of variable chunks
   signed: dict[str, Union[bool, Sequence[bool]]]
   names: dict[str, Sequence[str]]
-
-  @property
-  def stats_target_variables(self) -> dict[str, np.array]:
-    _stats = {
-      'mean': np.array(self.stats['mean']).reshape(1, 1, 1, 1, -1)[..., self.target_variables],
-      'std': np.array(self.stats['std']).reshape(1, 1, 1, 1, -1)[..., self.target_variables],
-    }
-    return _stats
+  global_mean: Sequence[float]
+  global_std: Sequence[float]
 
 ACTIVE_VARS_NS = [0, 1]
 ACTIVE_VARS_CE = [0, 1, 2, 3]
@@ -50,12 +44,12 @@ ACTIVE_VARS_RD = [0]
 ACTIVE_VARS_WE = [0]
 ACTIVE_VARS_PE = [0]
 
-TARGET_VARS_NS = [0, 1]
-TARGET_VARS_CE = [1, 2]
-TARGET_VARS_GCE = [1, 2]
-TARGET_VARS_RD = [0]
-TARGET_VARS_WE = [0]
-TARGET_VARS_PE = [0]
+CHUNKED_VARS_NS = [0, 0]
+CHUNKED_VARS_CE = [0, 1, 1, 2, 3]
+CHUNKED_VARS_GCE = [0, 1, 1, 2, 3, 4]
+CHUNKED_VARS_RD = [0]
+CHUNKED_VARS_WE = [0]
+CHUNKED_VARS_PE = [0]
 
 SIGNED_NS = {'u': [True, True], 'c': None}
 SIGNED_CE = {'u': [False, True, True, False, False], 'c': None}
@@ -82,9 +76,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
     active_variables=ACTIVE_VARS_NS,
-    target_variables=TARGET_VARS_NS,
+    chunked_variables=CHUNKED_VARS_NS,
+    num_variable_chunks=len(set(CHUNKED_VARS_NS)),
     signed=SIGNED_NS,
     names=NAMES_NS,
+    global_mean=[0.0, 0.0],
+    global_std=[0.391, 0.356],
   ),
   'incompressible_fluids/gaussians': Metadata(
     periodic=True,
@@ -95,9 +92,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
     active_variables=ACTIVE_VARS_NS,
-    target_variables=TARGET_VARS_NS,
+    chunked_variables=CHUNKED_VARS_NS,
+    num_variable_chunks=len(set(CHUNKED_VARS_NS)),
     signed=SIGNED_NS,
     names=NAMES_NS,
+    global_mean=[0.0, 0.0],
+    global_std=[0.391, 0.356],
   ),
   'incompressible_fluids/pwc': Metadata(
     periodic=True,
@@ -108,9 +108,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
     active_variables=ACTIVE_VARS_NS,
-    target_variables=TARGET_VARS_NS,
+    chunked_variables=CHUNKED_VARS_NS,
+    num_variable_chunks=len(set(CHUNKED_VARS_NS)),
     signed=SIGNED_NS,
     names=NAMES_NS,
+    global_mean=[0.0, 0.0],
+    global_std=[0.391, 0.356],
   ),
   'incompressible_fluids/shear_layer': Metadata(
     periodic=True,
@@ -121,9 +124,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
     active_variables=ACTIVE_VARS_NS,
-    target_variables=TARGET_VARS_NS,
+    chunked_variables=CHUNKED_VARS_NS,
+    num_variable_chunks=len(set(CHUNKED_VARS_NS)),
     signed=SIGNED_NS,
     names=NAMES_NS,
+    global_mean=[0.0, 0.0],
+    global_std=[0.391, 0.356],
   ),
   'incompressible_fluids/sines': Metadata(
     periodic=True,
@@ -134,9 +140,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
     active_variables=ACTIVE_VARS_NS,
-    target_variables=TARGET_VARS_NS,
+    chunked_variables=CHUNKED_VARS_NS,
+    num_variable_chunks=len(set(CHUNKED_VARS_NS)),
     signed=SIGNED_NS,
     names=NAMES_NS,
+    global_mean=[0.0, 0.0],
+    global_std=[0.391, 0.356],
   ),
   'incompressible_fluids/vortex_sheet': Metadata(
     periodic=True,
@@ -147,24 +156,14 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
     active_variables=ACTIVE_VARS_NS,
-    target_variables=TARGET_VARS_NS,
+    chunked_variables=CHUNKED_VARS_NS,
+    num_variable_chunks=len(set(CHUNKED_VARS_NS)),
     signed=SIGNED_NS,
     names=NAMES_NS,
+    global_mean=[0.0, 0.0],
+    global_std=[0.391, 0.356],
   ),
   # compressible_flow: [density, velocity, velocity, pressure, energy]
-  'compressible_flow/cloudshock': Metadata(
-    periodic=True,
-    group_u='data',
-    group_c=None,
-    group_x=None,
-    type='poseidon',
-    domain_x=([0, 0], [1, 1]),
-    domain_t=(0, 1),
-    active_variables=ACTIVE_VARS_CE,
-    target_variables=TARGET_VARS_CE,
-    signed=SIGNED_CE,
-    names=NAMES_CE,
-  ),
   'compressible_flow/gauss': Metadata(
     periodic=True,
     group_u='data',
@@ -174,9 +173,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
     active_variables=ACTIVE_VARS_CE,
-    target_variables=TARGET_VARS_CE,
+    chunked_variables=CHUNKED_VARS_CE,
+    num_variable_chunks=len(set(CHUNKED_VARS_CE)),
     signed=SIGNED_CE,
     names=NAMES_CE,
+    global_mean=[0.80, 0., 0., 2.513],
+    global_std=[0.31, 0.391, 0.356, 0.185],
   ),
   'compressible_flow/kh': Metadata(
     periodic=True,
@@ -187,9 +189,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
     active_variables=ACTIVE_VARS_CE,
-    target_variables=TARGET_VARS_CE,
+    chunked_variables=CHUNKED_VARS_CE,
+    num_variable_chunks=len(set(CHUNKED_VARS_CE)),
     signed=SIGNED_CE,
     names=NAMES_CE,
+    global_mean=[0.80, 0., 0., 1.0],
+    global_std=[0.31, 0.391, 0.356, 0.185],
   ),
   'compressible_flow/richtmyer_meshkov': Metadata(
     periodic=True,
@@ -200,9 +205,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 2),
     active_variables=ACTIVE_VARS_CE,
-    target_variables=TARGET_VARS_CE,
+    chunked_variables=CHUNKED_VARS_CE,
+    num_variable_chunks=len(set(CHUNKED_VARS_CE)),
     signed=SIGNED_CE,
     names=NAMES_CE,
+    global_mean=[1.1964245, -7.164812e-06, 2.8968952e-06, 1.5648036],
+    global_std=[0.5543239, 0.24304213, 0.2430597, 0.89639103],
   ),
   'compressible_flow/riemann': Metadata(
     periodic=True,
@@ -213,9 +221,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
     active_variables=ACTIVE_VARS_CE,
-    target_variables=TARGET_VARS_CE,
+    chunked_variables=CHUNKED_VARS_CE,
+    num_variable_chunks=len(set(CHUNKED_VARS_CE)),
     signed=SIGNED_CE,
     names=NAMES_CE,
+    global_mean=[0.80, 0., 0., 0.215],
+    global_std=[0.31, 0.391, 0.356, 0.185],
   ),
   'compressible_flow/riemann_curved': Metadata(
     periodic=True,
@@ -226,9 +237,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
     active_variables=ACTIVE_VARS_CE,
-    target_variables=TARGET_VARS_CE,
+    chunked_variables=CHUNKED_VARS_CE,
+    num_variable_chunks=len(set(CHUNKED_VARS_CE)),
     signed=SIGNED_CE,
     names=NAMES_CE,
+    global_mean=[0.80, 0., 0., 0.553],
+    global_std=[0.31, 0.391, 0.356, 0.185],
   ),
   'compressible_flow/riemann_kh': Metadata(
     periodic=True,
@@ -239,23 +253,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
     active_variables=ACTIVE_VARS_CE,
-    target_variables=TARGET_VARS_CE,
+    chunked_variables=CHUNKED_VARS_CE,
+    num_variable_chunks=len(set(CHUNKED_VARS_CE)),
     signed=SIGNED_CE,
     names=NAMES_CE,
-  ),
-  'compressible_flow/gravity/blast': Metadata(
-    periodic=True,
-    group_u='solution',
-    group_c=None,
-    group_x=None,
-    type='poseidon',
-    domain_x=([0, 0], [1, 1]),
-    domain_t=(0, 1),
-    # CHECK: Where is the gravitational field?
-    active_variables=ACTIVE_VARS_CE,
-    target_variables=TARGET_VARS_CE,
-    signed=SIGNED_CE,
-    names=NAMES_CE,
+    global_mean=[0.80, 0., 0., 1.33],
+    global_std=[0.31, 0.391, 0.356, 0.185],
   ),
   'compressible_flow/gravity/rayleigh_taylor': Metadata(
     periodic=True,
@@ -266,9 +269,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 5),
     active_variables=ACTIVE_VARS_GCE,
-    target_variables=TARGET_VARS_GCE,
+    chunked_variables=CHUNKED_VARS_GCE,
+    num_variable_chunks=len(set(CHUNKED_VARS_GCE)),
     signed=SIGNED_GCE,
     names=NAMES_GCE,
+    global_mean=[0.8970493, 4.0316996e-13, -1.3858967e-13, 0.7133829, -1.7055787],
+    global_std=[0.12857835, 0.014896976, 0.014896975, 0.21293919, 0.40131348],
   ),
   # reaction_diffusion
   'reaction_diffusion/allen_cahn': Metadata(
@@ -280,9 +286,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 0.0002),
     active_variables=ACTIVE_VARS_RD,
-    target_variables=TARGET_VARS_RD,
+    chunked_variables=CHUNKED_VARS_RD,
+    num_variable_chunks=len(set(CHUNKED_VARS_RD)),
     signed=SIGNED_RD,
     names=NAMES_RD,
+    global_mean=[0.002484262],
+    global_std=[0.65351176],
   ),
   # wave_equation
   'wave_equation/seismic_20step': Metadata(
@@ -294,9 +303,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
     active_variables=ACTIVE_VARS_WE,
-    target_variables=TARGET_VARS_WE,
+    chunked_variables=CHUNKED_VARS_WE,
+    num_variable_chunks=len(set(CHUNKED_VARS_WE)),
     signed=SIGNED_WE,
     names=NAMES_WE,
+    global_mean=[0.03467443221585092],
+    global_std=[0.10442421752963911],
   ),
   'wave_equation/gaussians_15step': Metadata(
     periodic=False,
@@ -307,9 +319,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
     active_variables=ACTIVE_VARS_WE,
-    target_variables=TARGET_VARS_WE,
+    chunked_variables=CHUNKED_VARS_WE,
+    num_variable_chunks=len(set(CHUNKED_VARS_WE)),
     signed=SIGNED_WE,
     names=NAMES_WE,
+    global_mean=[0.0334376316],
+    global_std=[0.1171879068],
   ),
   # poisson_equation
   'poisson_equation/sines': Metadata(
@@ -321,9 +336,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=None,
     active_variables=ACTIVE_VARS_PE,
-    target_variables=TARGET_VARS_PE,
+    chunked_variables=CHUNKED_VARS_PE,
+    num_variable_chunks=len(set(CHUNKED_VARS_PE)),
     signed=SIGNED_PE,
     names=NAMES_PE,
+    global_mean=[0.0005603458434937093],
+    global_std=[0.02401226126952699],
   ),
   'poisson_equation/chebyshev': Metadata(
     periodic=False,
@@ -334,9 +352,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=None,
     active_variables=ACTIVE_VARS_PE,
-    target_variables=TARGET_VARS_PE,
+    chunked_variables=CHUNKED_VARS_PE,
+    num_variable_chunks=len(set(CHUNKED_VARS_PE)),
     signed=SIGNED_PE,
     names=NAMES_PE,
+    global_mean=[0.0005603458434937093],
+    global_std=[0.02401226126952699],
   ),
   'poisson_equation/pwc': Metadata(
     periodic=False,
@@ -347,9 +368,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=None,
     active_variables=ACTIVE_VARS_PE,
-    target_variables=TARGET_VARS_PE,
+    chunked_variables=CHUNKED_VARS_PE,
+    num_variable_chunks=len(set(CHUNKED_VARS_PE)),
     signed=SIGNED_PE,
     names=NAMES_PE,
+    global_mean=[0.0005603458434937093],
+    global_std=[0.02401226126952699],
   ),
   'poisson_equation/gaussians': Metadata(
     periodic=False,
@@ -360,9 +384,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=None,
     active_variables=ACTIVE_VARS_PE,
-    target_variables=TARGET_VARS_PE,
+    chunked_variables=CHUNKED_VARS_PE,
+    num_variable_chunks=len(set(CHUNKED_VARS_PE)),
     signed=SIGNED_PE,
     names=NAMES_PE,
+    global_mean=[0.0005603458434937093],
+    global_std=[0.02401226126952699],
   ),
   # steady Euler
   'rigno-unstructured/airfoil_grid': Metadata(
@@ -374,9 +401,12 @@ DATASET_METADATA = {
     domain_x=([-.75, -.75], [1.75, 1.75]),
     domain_t=None,
     active_variables=[0],
-    target_variables=[0],
+    chunked_variables=[0],
+    num_variable_chunks=1,
     signed={'u': [False], 'c': [False]},
     names={'u': ['$\\rho$'], 'c': ['$d$']},
+    global_mean=[0.92984116],
+    global_std=[0.10864315],
   ),
   # rigno-unstructured
   'rigno-unstructured/airfoil_li': Metadata(
@@ -388,9 +418,12 @@ DATASET_METADATA = {
     domain_x=([-1, -1], [2, 1]),
     domain_t=None,
     active_variables=[4],  # Only the Mach number
-    target_variables=[4],
+    chunked_variables=[0, 1, 1, 2, 3],
+    num_variable_chunks=4,
     signed={'u': [False, True, True, False, False], 'c': [False]},
     names={'u': ['$\\rho$', '$v_x$', '$v_y$', '$p$', '$Ma$'], 'c': ['$d$']},
+    global_mean=[0.8353558835432745],
+    global_std=[0.17500192024674652],
   ),
   'rigno-unstructured/poisson_c_sines': Metadata(
     periodic=False,
@@ -401,9 +434,12 @@ DATASET_METADATA = {
     domain_x=([-.5, -.5], [1.5, 1.5]),
     domain_t=None,
     active_variables=[0],
-    target_variables=[0],
+    chunked_variables=[0],
+    num_variable_chunks=1,
     signed={'u': [True], 'c': [True]},
     names={'u': ['$u$'], 'c': ['$f$']},
+    global_mean=[0.],
+    global_std=[0.00064911455],
   ),
   'rigno-unstructured/wave_c_sines': Metadata(
     periodic=False,
@@ -414,9 +450,12 @@ DATASET_METADATA = {
     domain_x=([-.5, -.5], [1.5, 1.5]),
     domain_t=(0, 0.1),
     active_variables=[0],
-    target_variables=[0],
+    chunked_variables=[0],
+    num_variable_chunks=1,
     signed={'u': [True], 'c': None},
     names={'u': ['$u$'], 'c': None},
+    global_mean=[0.],
+    global_std=[0.011314605],
   ),
   'rigno-unstructured/heat_l_sines': Metadata(
     periodic=False,
@@ -427,9 +466,12 @@ DATASET_METADATA = {
     domain_x=([0., 0.], [1., 1.]),
     domain_t=(0, 0.002),
     active_variables=[0],
-    target_variables=[0],
+    chunked_variables=[0],
+    num_variable_chunks=1,
     signed={'u': [True], 'c': None},
     names={'u': ['$u$'], 'c': None},
+    global_mean=[-0.009399102],
+    global_std=[0.020079814],
   ),
   'rigno-unstructured/NS-Gauss': Metadata(
     periodic=True,
@@ -440,9 +482,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
     active_variables=ACTIVE_VARS_NS,
-    target_variables=TARGET_VARS_NS,
+    chunked_variables=CHUNKED_VARS_NS,
+    num_variable_chunks=len(set(CHUNKED_VARS_NS)),
     signed=SIGNED_NS,
     names=NAMES_NS,
+    global_mean=[0.0, 0.0],
+    global_std=[0.391, 0.356],
   ),
   'rigno-unstructured/NS-PwC': Metadata(
     periodic=True,
@@ -453,9 +498,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
     active_variables=ACTIVE_VARS_NS,
-    target_variables=TARGET_VARS_NS,
+    chunked_variables=CHUNKED_VARS_NS,
+    num_variable_chunks=len(set(CHUNKED_VARS_NS)),
     signed=SIGNED_NS,
     names=NAMES_NS,
+    global_mean=[0.0, 0.0],
+    global_std=[0.391, 0.356],
   ),
   'rigno-unstructured/NS-SL': Metadata(
     periodic=True,
@@ -466,9 +514,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
     active_variables=ACTIVE_VARS_NS,
-    target_variables=TARGET_VARS_NS,
+    chunked_variables=CHUNKED_VARS_NS,
+    num_variable_chunks=len(set(CHUNKED_VARS_NS)),
     signed=SIGNED_NS,
     names=NAMES_NS,
+    global_mean=[0.0, 0.0],
+    global_std=[0.391, 0.356],
   ),
   'rigno-unstructured/NS-SVS': Metadata(
     periodic=True,
@@ -479,9 +530,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
     active_variables=ACTIVE_VARS_NS,
-    target_variables=TARGET_VARS_NS,
+    chunked_variables=CHUNKED_VARS_NS,
+    num_variable_chunks=len(set(CHUNKED_VARS_NS)),
     signed=SIGNED_NS,
     names=NAMES_NS,
+    global_mean=[0.0, 0.0],
+    global_std=[0.391, 0.356],
   ),
   'rigno-unstructured/CE-Gauss': Metadata(
     periodic=True,
@@ -492,9 +546,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
     active_variables=ACTIVE_VARS_CE,
-    target_variables=TARGET_VARS_CE,
+    chunked_variables=CHUNKED_VARS_CE,
+    num_variable_chunks=len(set(CHUNKED_VARS_CE)),
     signed=SIGNED_CE,
     names=NAMES_CE,
+    global_mean=[0.80, 0., 0., 2.513],
+    global_std=[0.31, 0.391, 0.356, 0.185],
   ),
   'rigno-unstructured/CE-RP': Metadata(
     periodic=True,
@@ -505,9 +562,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
     active_variables=ACTIVE_VARS_CE,
-    target_variables=TARGET_VARS_CE,
+    chunked_variables=CHUNKED_VARS_CE,
+    num_variable_chunks=len(set(CHUNKED_VARS_CE)),
     signed=SIGNED_CE,
     names=NAMES_CE,
+    global_mean=[0.80, 0., 0., 0.215],
+    global_std=[0.31, 0.391, 0.356, 0.185],
   ),
   'rigno-unstructured/ACE': Metadata(
     periodic=False,
@@ -518,9 +578,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 0.0002),
     active_variables=ACTIVE_VARS_RD,
-    target_variables=TARGET_VARS_RD,
+    chunked_variables=CHUNKED_VARS_RD,
+    num_variable_chunks=len(set(CHUNKED_VARS_RD)),
     signed=SIGNED_RD,
     names=NAMES_RD,
+    global_mean=[0.002484262],
+    global_std=[0.65351176],
   ),
   'rigno-unstructured/Wave-Layer': Metadata(
     periodic=False,
@@ -531,9 +594,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
     active_variables=ACTIVE_VARS_WE,
-    target_variables=TARGET_VARS_WE,
+    chunked_variables=CHUNKED_VARS_WE,
+    num_variable_chunks=len(set(CHUNKED_VARS_WE)),
     signed=SIGNED_WE,
     names=NAMES_WE,
+    global_mean=[0.03467443221585092],
+    global_std=[0.10442421752963911],
   ),
   'rigno-unstructured/Poisson-Gauss': Metadata(
     periodic=False,
@@ -544,9 +610,12 @@ DATASET_METADATA = {
     domain_x=([0, 0], [1, 1]),
     domain_t=None,
     active_variables=ACTIVE_VARS_PE,
-    target_variables=TARGET_VARS_PE,
+    chunked_variables=CHUNKED_VARS_PE,
+    num_variable_chunks=len(set(CHUNKED_VARS_PE)),
     signed=SIGNED_PE,
     names=NAMES_PE,
+    global_mean=[0.0005603458434937093],
+    global_std=[0.02401226126952699],
   ),
 }
 
@@ -597,6 +666,8 @@ class Dataset:
     if not include_passive_variables:
       self.metadata.names['u'] = [self.metadata.names['u'][v] for v in self.metadata.active_variables]
       self.metadata.signed['u'] = [self.metadata.signed['u'][v] for v in self.metadata.active_variables]
+      self.metadata.chunked_variables = [self.metadata.chunked_variables[v] for v in self.metadata.active_variables]
+      self.metadata.num_variable_chunks = len(set(self.metadata.chunked_variables))
     if self.concatenate_coeffs and self.metadata.group_c:
       self.metadata.names['u'] += self.metadata.names['c']
       self.metadata.signed['u'] += self.metadata.signed['c']

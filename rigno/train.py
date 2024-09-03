@@ -23,7 +23,8 @@ from rigno.dataset import Dataset, Batch
 from rigno.experiments import DIR_EXPERIMENTS
 from rigno.metrics import BatchMetrics, Metrics, EvalMetrics
 from rigno.metrics import rel_lp_loss, mse_loss
-from rigno.metrics import mse_error, rel_lp_error_per_var, rel_lp_error_norm
+from rigno.metrics import mse_error, rel_lp_error_norm
+from rigno.metrics import normalized_rel_lp_error_mean
 from rigno.models.operator import AbstractOperator, Inputs
 from rigno.models.rigno import RIGNO
 from rigno.models.rigno import RegionInteractionGraphBuilder
@@ -549,10 +550,13 @@ def train(
     )
 
     # Get mean errors per each sample in the batch
+    _u_pair = (batch.u[:, _tau_ratio:], u_prd[:, :-_tau_ratio])
     batch_metrics = BatchMetrics(
-      mse=mse_error(batch.u[:, _tau_ratio:], u_prd[:, :-_tau_ratio]),
-      l1=rel_lp_error_norm(batch.u[:, _tau_ratio:], u_prd[:, :-_tau_ratio], p=1),
-      l2=rel_lp_error_norm(batch.u[:, _tau_ratio:], u_prd[:, :-_tau_ratio], p=2),
+      mse=mse_error(*_u_pair),
+      l1=rel_lp_error_norm(*_u_pair, p=1),
+      l2=rel_lp_error_norm(*_u_pair, p=2),
+      _l1=normalized_rel_lp_error_mean(*_u_pair, dataset.metadata, p=1),
+      _l2=normalized_rel_lp_error_mean(*_u_pair, dataset.metadata, p=2),
     )
 
     return batch_metrics.__dict__
@@ -596,6 +600,8 @@ def train(
       mse=mse_error(u_tgt, u_prd),
       l1=rel_lp_error_norm(u_tgt, u_prd, p=1),
       l2=rel_lp_error_norm(u_tgt, u_prd, p=2),
+      _l1=normalized_rel_lp_error_mean(u_tgt, u_prd, dataset.metadata, p=1),
+      _l2=normalized_rel_lp_error_mean(u_tgt, u_prd, dataset.metadata, p=2),
     )
 
     return batch_metrics.__dict__
@@ -672,6 +678,8 @@ def train(
       mse=mse_error(u_tgt, u_prd),
       l1=rel_lp_error_norm(u_tgt, u_prd, p=1),
       l2=rel_lp_error_norm(u_tgt, u_prd, p=2),
+      _l1=normalized_rel_lp_error_mean(u_tgt, u_prd, dataset.metadata, p=1),
+      _l2=normalized_rel_lp_error_mean(u_tgt, u_prd, dataset.metadata, p=2),
     )
 
     return batch_metrics.__dict__
@@ -757,26 +765,36 @@ def train(
       mse=jnp.median(jnp.concatenate([m.mse for m in metrics_direct_tau_frac]), axis=0).item(),
       l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_direct_tau_frac]), axis=0).item(),
       l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_direct_tau_frac]), axis=0).item(),
+      _l1=jnp.median(jnp.concatenate([m._l1 for m in metrics_direct_tau_frac]), axis=0).item(),
+      _l2=jnp.median(jnp.concatenate([m._l2 for m in metrics_direct_tau_frac]), axis=0).item(),
     ) if direct else None
     metrics_direct_tau_min = Metrics(
       mse=jnp.median(jnp.concatenate([m.mse for m in metrics_direct_tau_min]), axis=0).item(),
       l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_direct_tau_min]), axis=0).item(),
       l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_direct_tau_min]), axis=0).item(),
+      _l1=jnp.median(jnp.concatenate([m._l1 for m in metrics_direct_tau_min]), axis=0).item(),
+      _l2=jnp.median(jnp.concatenate([m._l2 for m in metrics_direct_tau_min]), axis=0).item(),
     ) if direct else None
     metrics_direct_tau_max = Metrics(
       mse=jnp.median(jnp.concatenate([m.mse for m in metrics_direct_tau_max]), axis=0).item(),
       l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_direct_tau_max]), axis=0).item(),
       l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_direct_tau_max]), axis=0).item(),
+      _l1=jnp.median(jnp.concatenate([m._l1 for m in metrics_direct_tau_max]), axis=0).item(),
+      _l2=jnp.median(jnp.concatenate([m._l2 for m in metrics_direct_tau_max]), axis=0).item(),
     ) if direct else None
     metrics_rollout = Metrics(
       mse=jnp.median(jnp.concatenate([m.mse for m in metrics_rollout]), axis=0).item(),
       l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_rollout]), axis=0).item(),
       l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_rollout]), axis=0).item(),
+      _l1=jnp.median(jnp.concatenate([m._l1 for m in metrics_rollout]), axis=0).item(),
+      _l2=jnp.median(jnp.concatenate([m._l2 for m in metrics_rollout]), axis=0).item(),
     ) if rollout else None
     metrics_final = Metrics(
       mse=jnp.median(jnp.concatenate([m.mse for m in metrics_final]), axis=0).item(),
       l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_final]), axis=0).item(),
       l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_final]), axis=0).item(),
+      _l1=jnp.median(jnp.concatenate([m._l1 for m in metrics_final]), axis=0).item(),
+      _l2=jnp.median(jnp.concatenate([m._l2 for m in metrics_final]), axis=0).item(),
     ) if final else None
 
     # Build the metrics object
