@@ -256,6 +256,7 @@ class RegionInteractionGraphBuilder:
     # Define node features
     # NOTE: Sinusoidal features don't need normalization
     if self.periodic:
+      # TODO: OPTIMIZATION: vectorize the for loop
       sender_node_feats = jnp.concatenate([
           jnp.concatenate([jnp.sin((k+1) * phi_sen), jnp.cos((k+1) * phi_sen)], axis=-1)
           for k in range(self.node_coordinate_freqs)

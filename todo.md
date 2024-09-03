@@ -1,21 +1,30 @@
 # Project Updates
 
+- Datasets are ready
+- Normalization (especially the mean shift) can affect the metric !!
+    - The higher the normalization mean, the more the effect in favor of Poseidon
+- Calculate poseidon's metric for all datasets
+
 # NEXT STEPS
 
-- Run experiments with unstructured datasets on the server
-- Run experiments with some other datasets to validate
-- Experiment with the Cartesian airfoil dataset + visualization
-- Visualize Poisson-Gauss
+- Compute Poseidon's metrics on old models
+    - Find the right commit
+    - Apply the model and STORE the results (gtr + prd)
+    - Move the results to your laptop
+    - Compute Poseidon's metrics and put them in a table
+
+- Visualize E501 results + report them
+- Check E502 (validation)
+- Check E503 with larger batches (check training time !!)
+
+- Update test script
+    - Instead of resolutions, test with multiple space_subsample_factor's
+
+- Optimize the codes
 
 - Register the Elasticity dataset (first encode the geometry of the hole somehow)
 
 - Describe RIGNO v2.0 in the thesis (or a new document)
-
-- Update test script
-    - Separate test from train
-    - Build a graph for each discretization
-    - Instead of resolutions, test with multiple space_subsample_factor's
-
 
 ## Paper details
 
@@ -42,7 +51,6 @@
         with high tau_max). Investigate if this is particular to our architecture.
 
 - Does it really outperform FNO on 1D problems?
-
 
 # Future work
 
@@ -159,6 +167,3 @@
 - Write docstring and type annotations
 
 - Try to understand why without preloading the dataset, loading batches takes longer with more GPUs or a larger model.
-
-- Re-implement segment_sum to avoid constant folding
-    - Not sure there is an easy solution

@@ -48,6 +48,7 @@ class AugmentedMLP(nn.Module):
 
   def __call__(self, *args, c = None, **kwargs):
     x = concatenate_args(args=args, kwargs=kwargs, axis=self.concatenate_axis)
+    # TODO: OPTIMIZATION: use jax.lax.fori_loop or jax.lax.scan
     for layer in self.layers[:-1]:
       x = layer(x)
       x = self.activation(x)
