@@ -418,7 +418,7 @@ DATASET_METADATA = {
     domain_x=([-1, -1], [2, 1]),
     domain_t=None,
     active_variables=[4],  # Only the Mach number
-    chunked_variables=[0, 1, 1, 2, 3],
+    chunked_variables=[1, 2, 2, 3, 0],
     num_variable_chunks=4,
     signed={'u': [False, True, True, False, False], 'c': [False]},
     names={'u': ['$\\rho$', '$v_x$', '$v_y$', '$p$', '$Ma$'], 'c': ['$d$']},
@@ -667,6 +667,7 @@ class Dataset:
       self.metadata.names['u'] = [self.metadata.names['u'][v] for v in self.metadata.active_variables]
       self.metadata.signed['u'] = [self.metadata.signed['u'][v] for v in self.metadata.active_variables]
       self.metadata.chunked_variables = [self.metadata.chunked_variables[v] for v in self.metadata.active_variables]
+      self.metadata.chunked_variables = [v - min(self.metadata.chunked_variables) for v in self.metadata.chunked_variables]
       self.metadata.num_variable_chunks = len(set(self.metadata.chunked_variables))
     if self.concatenate_coeffs and self.metadata.group_c:
       self.metadata.names['u'] += self.metadata.names['c']

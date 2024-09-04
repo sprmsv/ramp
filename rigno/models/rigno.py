@@ -256,14 +256,20 @@ class RegionInteractionGraphBuilder:
     # Define node features
     # NOTE: Sinusoidal features don't need normalization
     if self.periodic:
-      # TODO: OPTIMIZATION: vectorize the for loop
-      sender_node_feats = jnp.concatenate([
-          jnp.concatenate([jnp.sin((k+1) * phi_sen), jnp.cos((k+1) * phi_sen)], axis=-1)
-          for k in range(self.node_coordinate_freqs)
+      k = jnp.arange(self.node_coordinate_freqs)
+      phi_sen_sin = jax.vmap(fun=(lambda _v, _k: jnp.sin(_v * (_k+1))), in_axes=(None, 0), out_axes=-1)(phi_sen, k)
+      phi_sen_cos = jax.vmap(fun=(lambda _v, _k: jnp.cos(_v * (_k+1))), in_axes=(None, 0), out_axes=-1)(phi_sen, k)
+      sender_node_feats = jnp.concatenate(
+        arrays=[
+          phi_sen_sin.reshape(*phi_sen_sin.shape[:-2], -1),
+          phi_sen_cos.reshape(*phi_sen_cos.shape[:-2], -1)
         ], axis=-1)
-      receiver_node_feats = jnp.concatenate([
-          jnp.concatenate([jnp.sin((k+1) * phi_rec), jnp.cos((k+1) * phi_rec)], axis=-1)
-          for k in range(self.node_coordinate_freqs)
+      phi_rec_sin = jax.vmap(fun=(lambda _v, _k: jnp.sin(_v * (_k+1))), in_axes=(None, 0), out_axes=-1)(phi_rec, k)
+      phi_rec_cos = jax.vmap(fun=(lambda _v, _k: jnp.cos(_v * (_k+1))), in_axes=(None, 0), out_axes=-1)(phi_rec, k)
+      receiver_node_feats = jnp.concatenate(
+        arrays=[
+          phi_rec_sin.reshape(*phi_rec_sin.shape[:-2], -1),
+          phi_rec_cos.reshape(*phi_rec_cos.shape[:-2], -1)
         ], axis=-1)
     else:
       sender_node_feats = jnp.concatenate([x_sen], axis=-1)
