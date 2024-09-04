@@ -4,6 +4,7 @@ import flax.typing
 import jax.numpy as jnp
 import jax.random
 import numpy as np
+import jraph
 from flax import linen as nn
 from scipy.spatial import Delaunay
 
@@ -443,8 +444,7 @@ class Encoder(nn.Module):
       include_sent_messages_in_node_update=False,
       activation='swish',
       f32_aggregation=True,
-      aggregate_edges_for_nodes_fn='segment_mean',
-      aggregate_normalization=None,
+      aggregate_edges_for_nodes_fn=jraph.segment_mean,
     )
 
   def __call__(self,
@@ -544,7 +544,7 @@ class Processor(nn.Module):
       activation='swish',
       f32_aggregation=False,
       # NOTE: segment_mean because number of edges is not balanced
-      aggregate_edges_for_nodes_fn='segment_mean',
+      aggregate_edges_for_nodes_fn=jraph.segment_mean,
     )
 
   def __call__(self,
@@ -642,7 +642,7 @@ class Decoder(nn.Module):
     activation='swish',
     f32_aggregation=False,
     # NOTE: segment_mean because number of edges is not balanced
-    aggregate_edges_for_nodes_fn='segment_mean',
+    aggregate_edges_for_nodes_fn=jraph.segment_mean,
   )
 
   def __call__(self,

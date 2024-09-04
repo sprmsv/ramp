@@ -25,7 +25,7 @@ Generalization to TypedGraphs of the deep Graph Neural Network from:
 }
 """
 
-from typing import Mapping, Optional, Union
+from typing import Mapping, Optional, Union, Callable
 
 import jax
 import jax.numpy as jnp
@@ -88,12 +88,6 @@ class DeepTypedGraphNet(nn.Module):
     f32_aggregation: Use float32 in the edge aggregation.
     aggregate_edges_for_nodes_fn: function used to aggregate messages to each
       node.
-    aggregate_normalization: An optional constant that normalizes the output
-      of aggregate_edges_for_nodes_fn. For context, this can be used to
-      reduce the shock the model undergoes when switching resolution, which
-      increase the number of edges connected to a node. In particular, this is
-      useful when using segment_sum, but should not be combined with
-      segment_mean.
     name: Name of the model.
 
   """
@@ -114,15 +108,10 @@ class DeepTypedGraphNet(nn.Module):
   cond_norm_hidden_size: int = 16
   activation: str = 'swish'
   f32_aggregation: bool = False
-  aggregate_edges_for_nodes_fn: str = 'segment_mean'
-  aggregate_normalization: Optional[float] = None
+  aggregate_edges_for_nodes_fn: Callable = jraph.segment_mean
 
   def setup(self):
     self._activation = _get_activation_fn(self.activation)
-    self._aggregate_edges_for_nodes_fn = _get_aggregate_edges_for_nodes_fn(self.aggregate_edges_for_nodes_fn)
-    if self.aggregate_normalization:
-      # using aggregate_normalization only makes sense with segment_sum.
-      assert self.aggregate_edges_for_nodes_fn == 'segment_sum'
 
     # The embedder graph network independently embeds edge and node features.
     if self.embed_edges:
@@ -167,17 +156,13 @@ class DeepTypedGraphNet(nn.Module):
       def aggregate_fn(data, *args, **kwargs):
         dtype = data.dtype
         data = data.astype(jnp.float32)
-        output = self._aggregate_edges_for_nodes_fn(data, *args, **kwargs)
-        if self.aggregate_normalization:
-          output = output / self.aggregate_normalization
+        output = self.aggregate_edges_for_nodes_fn(data, *args, **kwargs)
         output = output.astype(dtype)
         return output
 
     else:
       def aggregate_fn(data, *args, **kwargs):
-        output = self._aggregate_edges_for_nodes_fn(data, *args, **kwargs)
-        if self.aggregate_normalization:
-          output = output / self.aggregate_normalization
+        output = self.aggregate_edges_for_nodes_fn(data, *args, **kwargs)
         return output
 
     # Create `num_message_passing_steps` graph networks with unshared parameters
@@ -337,10 +322,3 @@ def _get_activation_fn(name):
   if hasattr(jnp, name):
     return getattr(jnp, name)
   raise ValueError(f'Unknown activation function {name} specified.')
-
-def _get_aggregate_edges_for_nodes_fn(name):
-  """Return aggregate_edges_for_nodes_fn corresponding to function_name."""
-  if hasattr(jraph, name):
-    return getattr(jraph, name)
-  raise ValueError(
-      f'Unknown aggregate_edges_for_nodes_fn function {name} specified.')
