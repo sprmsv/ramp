@@ -417,13 +417,13 @@ DATASET_METADATA = {
     type='rigno',
     domain_x=([-1, -1], [2, 1]),
     domain_t=None,
-    active_variables=[4],  # Only the Mach number
-    chunked_variables=[1, 2, 2, 3, 0],
+    active_variables=[0],  # Only the density
+    chunked_variables=[0, 1, 1, 2, 3],
     num_variable_chunks=4,
     signed={'u': [False, True, True, False, False], 'c': [False]},
     names={'u': ['$\\rho$', '$v_x$', '$v_y$', '$p$', '$Ma$'], 'c': ['$d$']},
-    global_mean=[0.8353558835432745],
-    global_std=[0.17500192024674652],
+    global_mean=[0.9637927979586245],
+    global_std=[0.11830822800242624],
   ),
   'rigno-unstructured/poisson_c_sines': Metadata(
     periodic=False,
