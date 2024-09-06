@@ -1,34 +1,13 @@
 # Project Updates
 
-- Datasets are ready
-- The higher the normalization mean, the more the effect in favor of Poseidon
-    - NS, Poisson, ACE, Wave datasets: zero mean -> in RIGNO's favor (by a factor of 5)
-    - CE: non-zero mean for density and pressure -> I have to check but I guess RIGNO's favor
-    - SE-AF: non-zero mean -> in POSEIDON's favor by a factor of 10
-    - airfoil_li: Levi also predicts denormalized but pressure + 1500 samples
-
-- Re-checked the training hyperparameters
-    - number of epochs and training times
-    - learning rates
-    - batch size (E503)
-
-- Need to re-train for the data-scaling table
-    - The old plot is with TAU_MAX=1 !!
-    - But I have some results with 256 trajectories and TAU_MAX=4
-
 # NEXT STEPS
 
-- Check E503 with larger batches (check training time and performance)
-    - Fix bsz_per_device for a100_80gb
-    - Fix bsz and n_epochs for 2 GPUs based on performance
-    * 2 GPUs but many experiments at the same time!
-- Check E507 with larger TAU_MAX (goal is DR-1)
-- Check E501 results for the other "simple" datasets
-
-- Benchmark inferrence
-
-- Update test script
-    - Instead of resolutions, test with multiple space_subsample_factor's
+- Debug fractional pairing strategy
+- Update the test script
+    - Make sure about time-continuity with fractional pairing
+    - Support time-indep datasets (try airfoil_li)
+    - Test it on the server
+- Benchmark inference
 
 - Register the Elasticity dataset (first encode the geometry of the hole somehow)
 
@@ -38,19 +17,11 @@
     - added support radius to the structural regional node features
     - Time-independent datasets: no t, no tau
 
+- Impose boundary conditions
+
 ## SOME UNANSWERED QUESTIONS
 
-- Instable with tau_max = 7
-
 - Why NS-SVS and NS-Sines do not generalize on time??
-
-- Is noise injection helpful for us?
-    - It seems like that for every other architecture out there, noise injection
-        reduces rollout errors. For us, at least training unrolling, did not bring
-        any good, but maybe Gaussian noise injection does.
-        On the other hand, without doing ANYTHING, we are able to control the noise,
-        and even the self-induced rollout noises are damped (check rollout errors
-        with high tau_max). Investigate if this is particular to our architecture.
 
 # Future work
 
@@ -79,8 +50,7 @@
     - Check overfitting and overall performance
     - Compute parameter efficiency
 
-- Try breaking the solution into several Fourier modes and predicting the coefficients instead
-    - Insight: The model struggles in high-frequency solutions
+- Try Encode-FNO/CNO-Decode (exactly like GINO)
 
 ## Uncertainty
 
@@ -92,9 +62,6 @@
 
 
 ## Benchmarks
-
-- GNO, MeshGraphNets, (GNOT)
-- (scOT), (FNO), (CNO)
 
 - Compare model size
     - Number of parameters

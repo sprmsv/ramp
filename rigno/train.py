@@ -541,12 +541,11 @@ def train(
 
     u_prd = get_direct_estimations(
       step=step,
+      graph_builder=graph_builder,
       variables={'params': state.params},
       stats=stats,
       batch=batch,
-      builder=graph_builder,
       tau=(_tau_ratio * dataset.dt),
-      time_downsample_factor=1,
     )
 
     # Get mean errors per each sample in the batch
@@ -827,12 +826,12 @@ def train(
     f'TIME: {time_tot_pre : 06.1f}s',
     f'GRAD: {0. : .2e}',
     f'LOSS: {0. : .2e}',
-    f'DR-0.5: {metrics_val.direct_tau_frac.l1 : .2%}' if metrics_val.direct_tau_frac.l1 else '',
-    f'DR-1: {metrics_val.direct_tau_min.l1 : .2%}' if metrics_val.direct_tau_min.l1 else '',
-    f'DR-{FLAGS.tau_max}: {metrics_val.direct_tau_max.l1 : .2%}' if metrics_val.direct_tau_max.l1 else '',
-    f'FN: {metrics_val.final.l1 : .2%}' if metrics_val.final.l1 else '',
-    f'TRN-DR-1: {metrics_trn.direct_tau_min.l1 : .2%}' if metrics_trn.direct_tau_min.l1 else '',
-    f'TRN-FN: {metrics_trn.final.l1 : .2%}' if metrics_trn.final.l1 else '',
+    f'DR-0.5: {metrics_val.direct_tau_frac._l1 : .2%}' if metrics_val.direct_tau_frac._l1 else '',
+    f'DR-1: {metrics_val.direct_tau_min._l1 : .2%}' if metrics_val.direct_tau_min._l1 else '',
+    f'DR-{FLAGS.tau_max}: {metrics_val.direct_tau_max._l1 : .2%}' if metrics_val.direct_tau_max._l1 else '',
+    f'FN: {metrics_val.final._l1 : .2%}' if metrics_val.final._l1 else '',
+    f'TRN-DR-1: {metrics_trn.direct_tau_min._l1 : .2%}' if metrics_trn.direct_tau_min._l1 else '',
+    f'TRN-FN: {metrics_trn.final._l1 : .2%}' if metrics_trn.final._l1 else '',
   ]))
 
   # Set up the checkpoint manager
@@ -843,7 +842,7 @@ def train(
     checkpointer_options = orbax.checkpoint.CheckpointManagerOptions(
       max_to_keep=1,
       keep_period=None,
-      best_fn=(lambda metrics: metrics['valid']['final']['l2']),
+      best_fn=(lambda metrics: metrics['valid']['final']['_l1']),
       best_mode='min',
       create=True,)
     checkpointer_save_args = orbax_utils.save_args_from_target(target={'state': state})
@@ -882,12 +881,12 @@ def train(
         f'TIME: {time_tot : 06.1f}s',
         f'GRAD: {grad.item() : .2e}',
         f'LOSS: {loss.item() : .2e}',
-        f'DR-0.5: {metrics_val.direct_tau_frac.l1 : .2%}' if metrics_val.direct_tau_frac.l1 else '',
-        f'DR-1: {metrics_val.direct_tau_min.l1 : .2%}' if metrics_val.direct_tau_min.l1 else '',
-        f'DR-{FLAGS.tau_max}: {metrics_val.direct_tau_max.l1 : .2%}' if metrics_val.direct_tau_max.l1 else '',
-        f'FN: {metrics_val.final.l1 : .2%}' if metrics_val.final.l1 else '',
-        f'TRN-DR-1: {metrics_trn.direct_tau_min.l1 : .2%}' if metrics_trn.direct_tau_min.l1 else '',
-        f'TRN-FN: {metrics_trn.final.l1 : .2%}' if metrics_trn.final.l1 else '',
+        f'DR-0.5: {metrics_val.direct_tau_frac._l1 : .2%}' if metrics_val.direct_tau_frac._l1 else '',
+        f'DR-1: {metrics_val.direct_tau_min._l1 : .2%}' if metrics_val.direct_tau_min._l1 else '',
+        f'DR-{FLAGS.tau_max}: {metrics_val.direct_tau_max._l1 : .2%}' if metrics_val.direct_tau_max._l1 else '',
+        f'FN: {metrics_val.final._l1 : .2%}' if metrics_val.final._l1 else '',
+        f'TRN-DR-1: {metrics_trn.direct_tau_min._l1 : .2%}' if metrics_trn.direct_tau_min._l1 else '',
+        f'TRN-FN: {metrics_trn.final._l1 : .2%}' if metrics_trn.final._l1 else '',
       ]))
 
       with disable_logging(level=logging.FATAL):
@@ -1017,7 +1016,7 @@ def main(argv):
   flags = {f: FLAGS.get_flag_value(f, default=None) for f in FLAGS}
   with open(DIR / 'configs.json', 'w') as f:
     json.dump(fp=f,
-      obj={'flags': flags, 'model_configs': model.configs, 'resolution': dataset.shape[2:4]},
+      obj={'flags': flags, 'model_configs': model.configs},
       indent=2,
     )
   # Store the statistics

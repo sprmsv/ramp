@@ -2,25 +2,26 @@ import json
 import pickle
 import shutil
 from time import time
-from typing import Tuple, Type, Mapping, Callable, Any, Sequence
+from typing import Type, Mapping, Callable, Any, Sequence
 
 import jax
 import jax.numpy as jnp
+import jax.tree_util as tree
 import matplotlib.pyplot as plt
 import numpy as np
 import orbax.checkpoint
 import pandas as pd
 from absl import app, flags, logging
 from flax.training.common_utils import shard, shard_prng_key
+from flax.typing import PRNGKey
 from flax.jax_utils import replicate
 
 from rigno.dataset import Dataset, Batch
 from rigno.experiments import DIR_EXPERIMENTS
-from rigno.metrics import rel_lp_error_norm
+from rigno.metrics import rel_lp_error
 from rigno.models.operator import AbstractOperator, Inputs
-from rigno.models.rigno import RIGNO, RegionInteractionGraphSet, RegionInteractionGraphBuilder
-from rigno.models.unet import UNet
-from rigno.plot import plot_ensemble, plot_error_vs_time
+from rigno.models.rigno import RIGNO, RegionInteractionGraphMetadata, RegionInteractionGraphBuilder
+from rigno.plot import plot_ensemble, plot_error_vs_time, plot_estimates
 from rigno.stepping import Stepper, TimeDerivativeStepper, ResidualStepper, OutputStepper
 from rigno.stepping import AutoregressiveStepper
 from rigno.utils import Array, disable_logging, profile
@@ -45,10 +46,10 @@ def define_flags():
     help='Number of test samples'
   )
   flags.DEFINE_boolean(name='profile', default=False, required=False,
-    help='If passed, inference is profiled with 1 GPU'
+    help='If passed, inference is profiled using 1 GPU'
   )
   flags.DEFINE_boolean(name='resolution', default=False, required=False,
-    help='If passed, estimations with different resolutions are computed'
+    help='If passed, estimations with different discretizations are computed'
   )
   flags.DEFINE_boolean(name='noise', default=False, required=False,
     help='If passed, estimations for noise control are computed'
@@ -57,18 +58,70 @@ def define_flags():
     help='If passed, ensemble samples are generated using model randomness'
   )
 
-def print_between_dashes(msg):
+def _print_between_dashes(msg):
   logging.info('-' * 80)
   logging.info(msg)
   logging.info('-' * 80)
 
-# TMP Finish up
-def change_discretization(u: Array):
-  ...
+def _build_graph_metadata(batch: Batch, graph_builder: RegionInteractionGraphBuilder, dataset: Dataset):
+  # Build graph metadata with transformed coordinates
+  metadata = []
+  num_p2r_edges = 0
+  num_r2r_edges = 0
+  num_r2p_edges = 0
+  # Loop over all coordinates in the batch
+  # NOTE: Assuming constant x in time
+  for x in batch.x[:, 0]:
+    m = graph_builder.build_metadata(x_inp=x, x_out=x, domain=np.array(dataset.metadata.domain_x), key=None)
+    metadata.append(m)
+    # Store the maximum number of edges
+    num_p2r_edges = max(num_p2r_edges, m.p2r_edge_indices.shape[1])
+    num_r2r_edges = max(num_r2r_edges, m.r2r_edge_indices.shape[1])
+    if m.r2p_edge_indices is not None:
+      num_r2p_edges = max(num_r2p_edges, m.r2p_edge_indices.shape[1])
+  # Pad the edge sets using dummy nodes
+  # NOTE: Exploiting jax' behavior for out-of-dimension indexing
+  for i, m in enumerate(metadata):
+    m: RegionInteractionGraphMetadata
+    metadata[i] = RegionInteractionGraphMetadata(
+      x_pnodes_inp=m.x_pnodes_inp,
+      x_pnodes_out=m.x_pnodes_out,
+      x_rnodes=m.x_rnodes,
+      r_rnodes=m.r_rnodes,
+      p2r_edge_indices=m.p2r_edge_indices[:, jnp.arange(num_p2r_edges), :],
+      r2r_edge_indices=m.r2r_edge_indices[:, jnp.arange(num_r2r_edges), :],
+      r2r_edge_domains=m.r2r_edge_domains[:, jnp.arange(num_r2r_edges), :],
+      r2p_edge_indices=m.r2p_edge_indices[:, jnp.arange(num_r2p_edges), :] if (m.r2p_edge_indices is not None) else None,
+    )
+  # Concatenate all padded graph sets and store them
+  g = tree.tree_map(lambda *v: jnp.concatenate(v), *metadata)
+
+  return g
+
+def _change_discretization(batch: Batch, key: PRNGKey = None):
+  if key is None:
+    key = jax.random.PRNGKey(0)
+  permutation = jax.random.permutation(key, batch.shape[2])
+  _u = batch.u[:, :, permutation, :]
+  _c = batch.c[:, :, permutation, :] if (batch.c is not None) else None
+  _x = batch.x[:, :, permutation, :]
+  _g = None
+  return Batch(u=_u, c=_c, x=_x, t=batch.t, g=_g)
+
+def _change_resolution(batch: Batch, space_downsample_factor: int):
+  if space_downsample_factor == 1:
+    return batch
+  num_space = int(batch.shape[2] / space_downsample_factor)
+  batch = _change_discretization(batch)
+  _u = batch.u[:, :, :num_space, :]
+  _c = batch.c[:, :, :num_space, :] if (batch.c is not None) else None
+  _x = batch.x[:, :, :num_space, :]
+  _g = None
+  return Batch(u=_u, c=_c, x=_x, t=batch.t, g=_g)
 
 def profile_inferrence(
   dataset: Dataset,
-  graphs: RegionInteractionGraphSet,
+  graph_builder: RegionInteractionGraphBuilder,
   model: AbstractOperator,
   stepping: Type[Stepper],
   state: dict,
@@ -80,43 +133,53 @@ def profile_inferrence(
 
   # Configure and build new model
   model_configs = model.configs
-  if isinstance(model, RIGNO):
-    model_configs['p_dropout_edges_grid2mesh'] = p_edge_masking
-    model_configs['p_dropout_edges_multimesh'] = 0.
-    model_configs['p_dropout_edges_mesh2grid'] = 0.
-  elif isinstance(model, UNet):
-    pass
-  else:
-    raise NotImplementedError
-  stepper = stepping(operator=model.__class__(**model_configs))
+  model_configs['p_edge_masking'] = p_edge_masking
+  stepper = stepping(operator=RIGNO(**model_configs))
 
   apply_fn = stepper.apply
-  if jit:
-    apply_fn = jax.jit(apply_fn)
+  if jit: apply_fn = jax.jit(apply_fn)
+  graph_fn = lambda x: graph_builder.build_metadata(x, x, np.array(dataset.metadata.domain_x))
 
   # Get a batch and transform it
   batch_size_per_device = FLAGS.batch_size // NUM_DEVICES
   batch = next(dataset.batches(mode='test', batch_size=batch_size_per_device))
 
   # Set model inputs
-  model_kwargs = dict(
-    variables={'params': state['params']},
-    stats=stats,
-    inputs=Inputs(
-      u=batch.u[:, [0]],
-      c=(batch.c[:, [0]] if (batch.c is not None) else None),
-      x_inp=batch._x,
-      x_out=batch._x,
-      t=batch.t[:, [0]],
-      tau=dataset.dt,
-    ),
-    graphs=graphs,
-  )
+  if dataset.time_dependent:
+    model_kwargs = dict(
+      variables={'params': state['params']},
+      stats=stats,
+      inputs=Inputs(
+        u=batch.u[:, [0]],
+        c=(batch.c[:, [0]] if (batch.c is not None) else None),
+        x_inp=batch.x,
+        x_out=batch.x,
+        t=batch.t[:, [0]],
+        tau=dataset.dt,
+      ),
+      graphs=graph_builder.build_graphs(batch.g),
+    )
+  else:
+    model_kwargs = dict(
+      variables={'params': state['params']},
+      stats=stats,
+      inputs=Inputs(
+        u=batch.c[:, [0]],
+        c=None,
+        x_inp=batch.x,
+        x_out=batch.x,
+        t=None,
+        tau=None,
+      ),
+      graphs=graph_builder.build_graphs(batch.g),
+    )
 
+  # Profile graph building
+  t_graph = profile(graph_fn, kwargs=dict(x=batch.x[0, 0]), repeats=10)
   # Profile compilation
   t_compilation = profile(f=apply_fn, kwargs=model_kwargs, repeats=1)
   # Profile inferrence after compilation
-  t = profile(f=apply_fn, kwargs=model_kwargs, repeats=repeats) / repeats
+  t = profile(f=apply_fn, kwargs=model_kwargs, repeats=repeats)
 
   general_info = [
     'NUMBER OF DEVICES: 1',
@@ -126,9 +189,10 @@ def profile_inferrence(
   ]
 
   times_info = [
+    f'Graph building: {t_graph * 1000: .2f}ms',
     f'Compilation: {t_compilation : .2f}s',
-    f'Inferrence: {t : .6f}s per batch',
-    f'Inferrence: {t / batch_size_per_device : .6f}s per sample',
+    f'Inferrence: {t * 1000 : .2f}ms per batch',
+    f'Inferrence: {t * 1000 / batch_size_per_device : .2f}ms per sample',
   ]
 
   # Print all messages in dashes
@@ -138,15 +202,13 @@ def profile_inferrence(
   for line in all_msgs:
     logging.info(line)
 
-# TMP Update
 def get_direct_estimations(
   step: Stepper.apply,
+  graph_builder: RegionInteractionGraphBuilder,
   variables,
   stats,
   batch: Batch,
-  builder: RegionInteractionGraphBuilder,
   tau: float,
-  time_downsample_factor: int = 1,  # TMP REMOVE?
   key = None,
 ) -> Array:
   """Inputs are of shape [batch_size_per_device, ...]"""
@@ -172,14 +234,14 @@ def get_direct_estimations(
       c=(batch.c[:, [idx]] if (batch.c is not None) else None),
       x_inp=batch.x,
       x_out=batch.x,
-      t=(t_inp[idx] / time_downsample_factor),
+      t=t_inp[idx],
       tau=tau,
     )
     _u_prd = step(
       variables=variables,
       stats=stats,
       inputs=inputs,
-      graphs=builder.build_graphs(batch.g),
+      graphs=graph_builder.build_graphs(batch.g),
       key=key,
     )
     carry += 1
@@ -198,43 +260,49 @@ def get_direct_estimations(
 
   return u_prd
 
-# TMP Update
 def get_rollout_estimations(
   unroll: AutoregressiveStepper.unroll,
   num_steps: int,
+  graph_builder: RegionInteractionGraphBuilder,
   variables,
   stats,
-  u_inp: Array,
+  batch: Batch,
   key = None,
 ):
   """Inputs are of shape [batch_size_per_device, ...]"""
 
-  batch_size = u_inp.shape[0]
+  inputs = Inputs(
+    u=batch.u[:, [0]],
+    c=(batch.c[:, [0]] if (batch.c is not None) else None),
+    x_inp=batch.x,
+    x_out=batch.x,
+    t=batch.t[:, [0]],
+    tau=None,
+  )
   rollout, _ = unroll(
     variables,
     stats,
-    u_inp,
-    jnp.array([0.]).repeat(repeats=(batch_size)).reshape(batch_size, 1),
     num_steps,
-    key,
+    inputs=inputs,
+    key=key,
+    graphs=graph_builder.build_graphs(batch.g),
   )
 
   return rollout
 
-# TMP Update
 def get_all_estimations(
   dataset: Dataset,
   model: AbstractOperator,
+  graph_builder: RegionInteractionGraphBuilder,
   stepping: Type[Stepper],
   state: dict,
   stats: dict,
-  resolution_train: Tuple[int, int],
   train_flags: Mapping,
   taus_direct: Sequence[int] = [],
   taus_rollout: Sequence[int] = [],
-  resolutions: Sequence[Tuple[int, int]] = [],
+  space_dsfs: Sequence[int] = [],
   noise_levels: Sequence[float] = [],
-  p_edge_masking_grid2mesh: float = 0.,
+  p_edge_masking: float = 0.,
 ):
 
   # Replicate state and stats
@@ -243,42 +311,52 @@ def get_all_estimations(
   stats = replicate(stats)
 
   # Get pmapped version of the estimator functions
-  _get_direct_estimations = jax.pmap(get_direct_estimations, static_broadcasted_argnums=(0,))
-  _get_rollout_estimations = jax.pmap(get_rollout_estimations, static_broadcasted_argnums=(0, 1))
+  _get_direct_estimations = jax.pmap(get_direct_estimations, static_broadcasted_argnums=(0, 1))
+  _get_rollout_estimations = jax.pmap(get_rollout_estimations, static_broadcasted_argnums=(0, 1, 2))
 
   def _get_estimations_in_batches(
     direct: bool,
     apply_fn: Callable,
-    tau: int = None,
+    tau_ratio: int = None,
     transform: Callable[[Array], Array] = None,
   ):
     # Check inputs
     if direct:
-      assert tau is not None
+      assert tau_ratio is not None
 
     # Loop over the batches
     u_prd = []
     for batch in dataset.batches(mode='test', batch_size=FLAGS.batch_size):
+      batch: Batch
       # Transform the batch
       if transform is not None:
         batch = transform(batch)
+        g = _build_graph_metadata(batch, graph_builder, dataset)
+      else:
+        g = batch.g
 
       # Split the batch between devices
       # -> [NUM_DEVICES, batch_size_per_device, ...]
-      batch = shard(batch)
+      batch = Batch(
+        u=shard(batch.u),
+        c=shard(batch.c),
+        x=shard(batch.x),
+        t=shard(batch.t),
+        g=shard(g),
+      )
 
       # Get the direct predictions
       if direct:
         u_prd_batch = _get_direct_estimations(
           apply_fn,
+          graph_builder,
           variables={'params': state['params']},
           stats=stats,
-          trajs=batch,
-          tau=replicate(tau),
-          time_downsample_factor=replicate(train_flags['time_downsample_factor']),
+          batch=batch,
+          tau=replicate(tau_ratio * dataset.dt),
         )
         # Replace the tail of the predictions with the head of the input
-        u_prd_batch = jnp.concatenate([batch[:, :, :tau], u_prd_batch[:, :, :-tau]], axis=2)
+        u_prd_batch = jnp.concatenate([batch.u[:, :, :tau_ratio], u_prd_batch[:, :, :-tau_ratio]], axis=2)
 
       # Get the rollout predictions
       else:
@@ -286,9 +364,10 @@ def get_all_estimations(
         u_prd_batch = _get_rollout_estimations(
           apply_fn,
           num_times,
+          graph_builder,
           variables={'params': state['params']},
           stats=stats,
-          u_inp=batch[:, :, [0]],
+          batch=batch,
         )
 
       # Undo the split between devices
@@ -303,224 +382,276 @@ def get_all_estimations(
     return u_prd
 
   # Instantiate the steppers
-  all_resolutions = set(resolutions + [resolution_train])
-  steppers: dict[Any, Stepper] = {res: None for res in all_resolutions}
-  apply_steppers_jit: dict[Any, Stepper.apply] = {res: None for res in all_resolutions}
-  apply_steppers_twice_jit: dict[Any, Stepper.unroll] = {res: None for res in all_resolutions}
+  all_dsfs = set(space_dsfs + [train_flags['space_downsample_factor']])
+  steppers: dict[Any, Stepper] = {res: None for res in all_dsfs}
+  apply_steppers_jit: dict[Any, Stepper.apply] = {res: None for res in all_dsfs}
+  apply_steppers_twice_jit: dict[Any, Stepper.unroll] = {res: None for res in all_dsfs}
   unrollers: dict[Any, dict[Any, AutoregressiveStepper]] = {
-    res: {tau: None for tau in taus_rollout} for res in all_resolutions}
+    res: {tau: None for tau in taus_rollout} for res in all_dsfs}
   apply_unroll_jit: dict[Any, dict[Any, AutoregressiveStepper.unroll]] = {
-    res: {tau: None for tau in taus_rollout} for res in all_resolutions}
+    res: {tau: None for tau in taus_rollout} for res in all_dsfs}
 
   # Instantiate the steppers
-  for resolution in all_resolutions:
+  # TMP TODO: Same stepper for all resolutions !!
+  for dsf in all_dsfs:
     # Configure and build new model
     model_configs = model.configs
-    if isinstance(model, RIGNO):
-      model_configs['num_grid_nodes'] = resolution
-      model_configs['p_dropout_edges_grid2mesh'] = p_edge_masking_grid2mesh
-      model_configs['p_dropout_edges_multimesh'] = 0.
-      model_configs['p_dropout_edges_mesh2grid'] = 0.
-    elif isinstance(model, UNet):
-      pass
-    else:
-      raise NotImplementedError
+    model_configs['p_edge_masking'] = p_edge_masking
 
-    steppers[resolution] = stepping(operator=model.__class__(**model_configs))
-    apply_steppers_jit[resolution] = jax.jit(steppers[resolution].apply)
+    steppers[dsf] = stepping(operator=model.__class__(**model_configs))
+    apply_steppers_jit[dsf] = jax.jit(steppers[dsf].apply)
     def apply_steppers_twice(*args, **kwargs):
-      return steppers[resolution].unroll(*args, **kwargs, num_steps=2)
-    apply_steppers_twice_jit[resolution] = jax.jit(apply_steppers_twice)
+      return steppers[dsf].unroll(*args, **kwargs, num_steps=2)
+    apply_steppers_twice_jit[dsf] = jax.jit(apply_steppers_twice)
 
-    for tau_max in taus_rollout:
-      unrollers[resolution][tau_max] = AutoregressiveStepper(
-        stepper=steppers[resolution],
-        tau_max=(tau_max / train_flags['time_downsample_factor']),
-        dt=(1. / train_flags['time_downsample_factor'])
+    for tau_ratio_max in taus_rollout:
+      unrollers[dsf][tau_ratio_max] = AutoregressiveStepper(
+        stepper=steppers[dsf],
+        dt=dataset.dt,
+        tau_max=(tau_ratio_max * dataset.dt),
       )
-      apply_unroll_jit[resolution][tau_max] = jax.jit(
-        unrollers[resolution][tau_max].unroll, static_argnums=(4,))
+      apply_unroll_jit[dsf][tau_ratio_max] = jax.jit(
+        unrollers[dsf][tau_ratio_max].unroll, static_argnums=(2,))
 
-  # Set the groundtruth solutions
-  u_gtr = next(dataset.batches(mode='test', batch_size=dataset.nums['test']))
+  # Set the ground-truth solutions
+  batch_test = next(dataset.batches(mode='test', batch_size=dataset.nums['test']))
 
   # Instantiate the outputs
   errors = {error_type: {
       key: {'direct': {}, 'rollout': {}}
-      for key in ['tau', 'px', 'noise']
+      for key in ['tau', 'disc', 'dsf', 'noise']
     }
-    for error_type in ['l1', 'l2']
+    for error_type in ['_l1', '_l2']
   }
   u_prd_rollout = None
 
-  # Define a auxiliary function for getting the median of the errors
+  # Define a auxiliary function for getting the errors
   def _get_err_trajectory(_u_gtr, _u_prd, p):
     _err = [
-      np.median(rel_lp_error_norm(_u_gtr[:, [idx_t]], _u_prd[:, [idx_t]], p=p)).item() * 100
+      np.mean(np.median(rel_lp_error(
+        _u_gtr[:, [idx_t]],
+        _u_prd[:, [idx_t]],
+        p=p,
+        chunks=dataset.metadata.chunked_variables,
+        num_chunks=dataset.metadata.num_variable_chunks,
+      ), axis=0)).item() * 100
       for idx_t in range(_u_gtr.shape[1])
     ]
     return _err
 
   # Temporal continuity
-  resolution = resolution_train
-  for tau in taus_direct:
-    if tau == .5:
-      _apply_stepper = apply_steppers_twice_jit[resolution]
+  dsf = train_flags['space_downsample_factor']
+  for tau_ratio in taus_direct:
+    if tau_ratio == .5:
+      _apply_stepper = apply_steppers_twice_jit[dsf]
     else:
-      _apply_stepper = apply_steppers_jit[resolution]
+      _apply_stepper = apply_steppers_jit[dsf]
     t0 = time()
     u_prd = _get_estimations_in_batches(
       direct=True,
       apply_fn=_apply_stepper,
-      tau=(tau if tau != .5 else 1),
-      transform=(lambda arr: change_resolution(arr, resolution)),
+      tau_ratio=(tau_ratio if tau_ratio != .5 else 1),
+      transform=(lambda arr: _change_resolution(arr, dsf)),
     )
-    errors['l1']['tau']['direct'][tau] = _get_err_trajectory(
-      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+    errors['_l1']['tau']['direct'][tau_ratio] = _get_err_trajectory(
+      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
       _u_prd=u_prd,
       p=1,
     )
-    errors['l2']['tau']['direct'][tau] = _get_err_trajectory(
-      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+    errors['_l2']['tau']['direct'][tau_ratio] = _get_err_trajectory(
+      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
       _u_prd=u_prd,
       p=2,
     )
     del u_prd
-    print_between_dashes(f'tau_direct={tau} \t TIME={time()-t0 : .4f}s')
+    _print_between_dashes(f'tau_direct={tau_ratio} \t TIME={time()-t0 : .4f}s')
 
   # Autoregressive rollout
-  resolution = resolution_train
-  for tau_max in taus_rollout:
+  dsf = train_flags['space_downsample_factor']
+  for tau_ratio_max in taus_rollout:
     t0 = time()
     u_prd = _get_estimations_in_batches(
       direct=False,
-      apply_fn=apply_unroll_jit[resolution][tau_max],
-      transform=(lambda arr: change_resolution(arr, resolution)),
+      apply_fn=apply_unroll_jit[dsf][tau_ratio_max],
+      transform=(lambda arr: _change_resolution(arr, dsf)),
     )
-    errors['l1']['tau']['rollout'][tau_max] = _get_err_trajectory(
-      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+    errors['_l1']['tau']['rollout'][tau_ratio_max] = _get_err_trajectory(
+      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
       _u_prd=u_prd,
       p=1,
     )
-    errors['l2']['tau']['rollout'][tau_max] = _get_err_trajectory(
-      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+    errors['_l2']['tau']['rollout'][tau_ratio_max] = _get_err_trajectory(
+      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
       _u_prd=u_prd,
       p=2,
     )
-    if tau_max == train_flags['time_downsample_factor']:
+    if tau_ratio_max == train_flags['time_downsample_factor']:
       u_prd_rollout = u_prd[:, [0, IDX_FN, -1]]
     del u_prd
-    print_between_dashes(f'tau_max={tau_max} \t TIME={time()-t0 : .4f}s')
+    _print_between_dashes(f'tau_max={tau_ratio_max} \t TIME={time()-t0 : .4f}s')
 
-  # Spatial continuity
-  tau_max = train_flags['time_downsample_factor']
-  tau = train_flags['time_downsample_factor']
-  for resolution in resolutions:
+  # Discretization invariance
+  tau_ratio_max = train_flags['time_downsample_factor']
+  tau_ratio = train_flags['time_downsample_factor']
+  dsf = train_flags['space_downsample_factor']
+  for i_disc in range(4):
+    key = jax.random.PRNGKey(i_disc)
     # Direct
     t0 = time()
     u_prd = _get_estimations_in_batches(
       direct=True,
-      apply_fn=apply_steppers_jit[resolution],
-      tau=tau,
-      transform=(lambda arr: change_resolution(arr, resolution)),
+      apply_fn=apply_steppers_jit[dsf],
+      tau_ratio=tau_ratio,
+      transform=(lambda arr: _change_resolution(_change_discretization(arr, key), dsf)),
     )
-    errors['l1']['px']['direct'][resolution] = _get_err_trajectory(
-      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+    errors['_l1']['disc']['direct'][i_disc] = _get_err_trajectory(
+      _u_gtr=_change_resolution(_change_discretization(batch_test, key), dsf).u,
       _u_prd=u_prd,
       p=1,
     )
-    errors['l2']['px']['direct'][resolution] = _get_err_trajectory(
-      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+    errors['_l2']['disc']['direct'][i_disc] = _get_err_trajectory(
+      _u_gtr=_change_resolution(_change_discretization(batch_test, key), dsf).u,
       _u_prd=u_prd,
       p=2,
     )
     del u_prd
-    print_between_dashes(f'resolution={resolution} (direct) \t TIME={time()-t0 : .4f}s')
+    _print_between_dashes(f'discretization={i_disc} (direct) \t TIME={time()-t0 : .4f}s')
     # Rollout
     t0 = time()
     u_prd = _get_estimations_in_batches(
       direct=False,
-      apply_fn=apply_unroll_jit[resolution][tau_max],
-      transform=(lambda arr: change_resolution(arr, resolution)),
+      apply_fn=apply_unroll_jit[dsf][tau_ratio_max],
+      transform=(lambda arr: _change_resolution(_change_discretization(arr, key), dsf)),
     )
-    errors['l1']['px']['rollout'][resolution] = _get_err_trajectory(
-      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+    errors['_l1']['disc']['rollout'][i_disc] = _get_err_trajectory(
+      _u_gtr=_change_resolution(_change_discretization(batch_test, key), dsf).u,
       _u_prd=u_prd,
       p=1,
     )
-    errors['l2']['px']['rollout'][resolution] = _get_err_trajectory(
-      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+    errors['_l2']['disc']['rollout'][i_disc] = _get_err_trajectory(
+      _u_gtr=_change_resolution(_change_discretization(batch_test, key), dsf).u,
       _u_prd=u_prd,
       p=2,
     )
     del u_prd
-    print_between_dashes(f'resolution={resolution} (rollout) \t TIME={time()-t0 : .4f}s')
+    _print_between_dashes(f'discretization={i_disc} (rollout) \t TIME={time()-t0 : .4f}s')
 
-  # Noise control
-  tau_max = train_flags['time_downsample_factor']
-  tau = train_flags['time_downsample_factor']
-  resolution = resolution_train
+  # Resolution invariance
+  tau_ratio_max = train_flags['time_downsample_factor']
+  tau_ratio = train_flags['time_downsample_factor']
+  for dsf in space_dsfs:
+    # Direct
+    t0 = time()
+    u_prd = _get_estimations_in_batches(
+      direct=True,
+      apply_fn=apply_steppers_jit[dsf],
+      tau_ratio=tau_ratio,
+      transform=(lambda arr: _change_resolution(arr, dsf)),
+    )
+    errors['_l1']['dsf']['direct'][dsf] = _get_err_trajectory(
+      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
+      _u_prd=u_prd,
+      p=1,
+    )
+    errors['_l2']['dsf']['direct'][dsf] = _get_err_trajectory(
+      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
+      _u_prd=u_prd,
+      p=2,
+    )
+    del u_prd
+    _print_between_dashes(f'resolution={dsf} (direct) \t TIME={time()-t0 : .4f}s')
+    # Rollout
+    t0 = time()
+    u_prd = _get_estimations_in_batches(
+      direct=False,
+      apply_fn=apply_unroll_jit[dsf][tau_ratio_max],
+      transform=(lambda arr: _change_resolution(arr, dsf)),
+    )
+    errors['_l1']['dsf']['rollout'][dsf] = _get_err_trajectory(
+      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
+      _u_prd=u_prd,
+      p=1,
+    )
+    errors['_l2']['dsf']['rollout'][dsf] = _get_err_trajectory(
+      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
+      _u_prd=u_prd,
+      p=2,
+    )
+    del u_prd
+    _print_between_dashes(f'resolution={dsf} (rollout) \t TIME={time()-t0 : .4f}s')
+
+  # Robustness to noise
+  tau_ratio_max = train_flags['time_downsample_factor']
+  tau_ratio = train_flags['time_downsample_factor']
+  dsf = train_flags['space_downsample_factor']
   for noise_level in noise_levels:
     # Transformation
-    def transform(arr):
-      arr = change_resolution(arr, resolution)
-      std_arr = np.std(arr, axis=(0, 2, 3), keepdims=True)
-      arr += noise_level * np.random.normal(scale=std_arr, size=arr.shape)
-      return arr
+    def transform(batch):
+      batch = _change_resolution(batch, dsf)
+      std_arr = np.std(batch.u, axis=(0, 2), keepdims=True)
+      u_noisy = batch.u + noise_level * np.random.normal(scale=std_arr, size=batch.shape)
+      # TMP add noise to c too
+      batch_noisy = Batch(
+        u=u_noisy,
+        c=batch.c,
+        x=batch.x,
+        t=batch.t,
+        g=batch.g,
+      )
+      return batch_noisy
     # Direct estimations
     t0 = time()
     u_prd = _get_estimations_in_batches(
       direct=True,
-      apply_fn=apply_steppers_jit[resolution],
-      tau=tau,
+      apply_fn=apply_steppers_jit[dsf],
+      tau_ratio=tau_ratio,
       transform=transform,
     )
-    errors['l1']['noise']['direct'][noise_level] = _get_err_trajectory(
-      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+    errors['_l1']['noise']['direct'][noise_level] = _get_err_trajectory(
+      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
       _u_prd=u_prd,
       p=1,
     )
-    errors['l2']['noise']['direct'][noise_level] = _get_err_trajectory(
-      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+    errors['_l2']['noise']['direct'][noise_level] = _get_err_trajectory(
+      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
       _u_prd=u_prd,
       p=2,
     )
     del u_prd
-    print_between_dashes(f'noise_level={noise_level} (direct) \t TIME={time()-t0 : .4f}s')
+    _print_between_dashes(f'noise_level={noise_level} (direct) \t TIME={time()-t0 : .4f}s')
     # Rollout estimations
     t0 = time()
     u_prd = _get_estimations_in_batches(
       direct=False,
-      apply_fn=apply_unroll_jit[resolution][tau_max],
+      apply_fn=apply_unroll_jit[dsf][tau_ratio_max],
       transform=transform,
     )
-    errors['l1']['noise']['rollout'][noise_level] = _get_err_trajectory(
-      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+    errors['_l1']['noise']['rollout'][noise_level] = _get_err_trajectory(
+      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
       _u_prd=u_prd,
       p=1,
     )
-    errors['l2']['noise']['rollout'][noise_level] = _get_err_trajectory(
-      _u_gtr=change_resolution(u_gtr, resolution=resolution),
+    errors['_l2']['noise']['rollout'][noise_level] = _get_err_trajectory(
+      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
       _u_prd=u_prd,
       p=2,
     )
     del u_prd
-    print_between_dashes(f'noise_level={noise_level} (rollout) \t TIME={time()-t0 : .4f}s')
+    _print_between_dashes(f'noise_level={noise_level} (rollout) \t TIME={time()-t0 : .4f}s')
 
   return errors, u_prd_rollout
 
-# TMP Update
 def get_ensemble_estimations(
   repeats: int,
   dataset: Dataset,
   model: AbstractOperator,
+  graph_builder: RegionInteractionGraphBuilder,
   stepping: Type[Stepper],
   state: dict,
   stats: dict,
-  resolution_train: Tuple[int, int],
   train_flags: Mapping,
-  tau_max: int,
-  p_edge_masking_grid2mesh: float,
+  tau_ratio_max: int,
+  p_edge_masking: float,
   key,
 ):
 
@@ -530,7 +661,7 @@ def get_ensemble_estimations(
   stats = replicate(stats)
 
   # Get pmapped version of the estimator functions
-  _get_rollout_estimations = jax.pmap(get_rollout_estimations, static_broadcasted_argnums=(0, 1))
+  _get_rollout_estimations = jax.pmap(get_rollout_estimations, static_broadcasted_argnums=(0, 1, 2))
 
   def _get_estimations_in_batches(
     apply_fn: Callable,
@@ -543,10 +674,19 @@ def get_ensemble_estimations(
       # Transform the batch
       if transform is not None:
         batch = transform(batch)
+        g = _build_graph_metadata(batch, graph_builder, dataset)
+      else:
+        g = batch.g
 
       # Split the batch between devices
       # -> [NUM_DEVICES, batch_size_per_device, ...]
-      batch = shard(batch)
+      batch = Batch(
+        u=shard(batch.u),
+        c=shard(batch.c),
+        x=shard(batch.x),
+        t=shard(batch.t),
+        g=shard(g),
+      )
       subkey, key = jax.random.split(key)
       subkey = shard_prng_key(subkey)
 
@@ -555,10 +695,10 @@ def get_ensemble_estimations(
       u_prd_batch = _get_rollout_estimations(
         apply_fn,
         num_times,
+        graph_builder,
         variables={'params': state['params']},
         stats=stats,
-        u_inp=batch[:, :, [0]],
-        key=subkey,
+        batch=batch,
       )
 
       # Undo the split between devices
@@ -574,24 +714,15 @@ def get_ensemble_estimations(
 
   # Configure and build new model
   model_configs = model.configs
-  if isinstance(model, RIGNO):
-    model_configs['num_grid_nodes'] = resolution_train
-    model_configs['p_dropout_edges_grid2mesh'] = p_edge_masking_grid2mesh
-    model_configs['p_dropout_edges_multimesh'] = 0.
-    model_configs['p_dropout_edges_mesh2grid'] = 0.
-  elif isinstance(model, UNet):
-    pass
-  else:
-    raise NotImplementedError
+  model_configs['p_edge_masking'] = p_edge_masking
 
   stepper = stepping(operator=model.__class__(**model_configs))
   unroller = AutoregressiveStepper(
     stepper=stepper,
-    tau_max=(tau_max / train_flags['time_downsample_factor']),
-    dt=(1. / train_flags['time_downsample_factor'])
+    dt=(dataset.dt),
+    tau_max=(tau_ratio_max * dataset.dt),
   )
-  apply_unroll_jit = jax.jit(
-    unroller.unroll, static_argnums=(4,))
+  apply_unroll_jit = jax.jit(unroller.unroll, static_argnums=(2,))
 
   # Autoregressive rollout
   u_prd = []
@@ -601,11 +732,11 @@ def get_ensemble_estimations(
     u_prd.append(
       _get_estimations_in_batches(
         apply_fn=apply_unroll_jit,
-        transform=(lambda arr: change_resolution(arr, resolution_train)),
+        transform=(lambda arr: _change_resolution(arr, train_flags['space_downsample_factor'])),
         key=subkey,
       )[:, [0, IDX_FN, -1]]
     )
-    print_between_dashes(f'ensemble_repeat={i} \t TIME={time()-t0 : .4f}s')
+    _print_between_dashes(f'ensemble_repeat={i} \t TIME={time()-t0 : .4f}s')
   u_prd = np.stack(u_prd)
 
   return u_prd
@@ -660,7 +791,10 @@ def main(argv):
   with open(DIR / 'stats.pkl', 'rb') as f:
     stats = pickle.load(f)
   stats = {
-      key: {k: jnp.array(v) for k, v in val.items()}
+      key: {
+        k: jnp.array(v) if (v is not None) else None
+        for k, v in val.items()
+      }
       for key, val in stats.items()
     }
   # Read the configs
@@ -669,7 +803,6 @@ def main(argv):
   time_downsample_factor = configs['flags']['time_downsample_factor']
   tau_max_train = configs['flags']['tau_max']
   model_configs = configs['model_configs']
-  resolution_train = tuple(configs['resolution'])
   # Read the state
   orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
   mngr = orbax.checkpoint.CheckpointManager(DIR / 'checkpoints')
@@ -691,7 +824,7 @@ def main(argv):
   model = RIGNO(**model_configs)
 
   # Define the graph builder
-  builder = RegionInteractionGraphBuilder(
+  graph_builder = RegionInteractionGraphBuilder(
     periodic=dataset.metadata.periodic,
     rmesh_levels=configs['flags']['rmesh_levels'],
     subsample_factor=configs['flags']['mesh_subsample_factor'],
@@ -699,23 +832,15 @@ def main(argv):
     overlap_factor_r2p=configs['flags']['overlap_factor_r2p'],
     node_coordinate_freqs=configs['flags']['node_coordinate_freqs'],
   )
-
-  # TMP TODO: Build a graph for each discretization
-  # Construct the graphs
-  # NOTE: Assuming fix mesh for all batches
-  graphs = builder.build(
-    x_inp=dataset.sample._x,
-    x_out=dataset.sample._x,
-    domain=np.array(dataset.metadata.domain_x),
-    key=None,
-  )
+  dataset.build_graphs(graph_builder)
+  dataset_small.build_graphs(graph_builder)
 
   # Profile
   # NOTE: One compilation
   if FLAGS.profile:
     profile_inferrence(
       dataset=dataset,
-      graphs=graphs,
+      graph_builder=graph_builder,
       model=model,
       stepping=stepping,
       state=state,
@@ -731,79 +856,76 @@ def main(argv):
   DIR_TESTS.mkdir()
   DIR_FIGS.mkdir()
 
-  # Set evaluation settings  # TMP
+  # Set evaluation settings
   tau_min = 1
   tau_max = (tau_max_train + (tau_max_train > 1))
   taus_direct = [.5] + list(range(tau_min, tau_max + 1))
   # NOTE: One compilation per tau_rollout
   taus_rollout = [.5, 1] + [time_downsample_factor * d for d in range(1, tau_max_train+1)]
-  # NOTE: Two compilations per resolution
-  space_downsample_factors = [4, 3, 2, 1.5, 1] if FLAGS.resolution else []
+  # NOTE: Two compilations per discretization  # TMP
+  space_dsfs = [4, 3, 2, 1.5, 1] if FLAGS.resolution else []
   noise_levels = [0, .005, .01, .02] if FLAGS.noise else []
 
-  # Set the groundtruth trajectories
-  u_gtr = next(dataset.batches(mode='test', batch_size=dataset.nums['test']))
-  u_gtr_small = next(dataset_small.batches(mode='test', batch_size=dataset_small.nums['test']))
+  # Set the ground-truth trajectories
+  batch_tst = next(dataset.batches(mode='test', batch_size=dataset.nums['test']))
+  batch_tst_small = next(dataset_small.batches(mode='test', batch_size=dataset_small.nums['test']))
 
   # Get model estimations with all settings
   errors, u_prd = get_all_estimations(
     dataset=dataset,
     model=model,
+    graph_builder=graph_builder,
     stepping=stepping,
     state=state,
     stats=stats,
-    resolution_train=resolution_train,
     train_flags=configs['flags'],
     taus_direct=taus_direct,
     taus_rollout=taus_rollout,
-    resolutions=space_downsample_factors,
+    space_dsfs=space_dsfs,
     noise_levels=noise_levels,
-    p_edge_masking_grid2mesh=0,
+    p_edge_masking=0,
   )
 
   # Plot estimation visualizations
   (DIR_FIGS / 'samples').mkdir()
   for s in range(min(4, FLAGS.n_test)):
-    fig, _ = plot_estimations(
-      u_gtr=change_resolution(u_gtr[:, [0, IDX_FN, -1]], resolution_train),
-      u_prd=u_prd,
-      idx_out=1,
-      idx_inp=0,
-      idx_traj=s,
-      symmetric=dataset.metadata.signed,
-      names=dataset.metadata.names,
+    _batch_tst = _change_resolution(batch_tst, configs['flags']['space_downsample_factor'])
+    fig = plot_estimates(
+      u_inp=_batch_tst.u[s, 0],  # TMP or c
+      u_gtr=_batch_tst.u[s, IDX_FN],
+      u_prd=u_prd[s, 1],
+      x_inp=_batch_tst.x[s, 0],
+      x_out=_batch_tst.x[s, 0],
+      domain=dataset.metadata.domain_x,
+      symmetric=dataset.metadata.signed['u'],
+      names=dataset.metadata.names['u'],
     )
-    fig.savefig(DIR_FIGS / 'samples' / f'rollout-fn-s{s:02d}.png')
+    fig.savefig(DIR_FIGS / 'samples' / f'rollout-fn-s{s:02d}.png', dpi=300, bbox_inches='tight')
     plt.close(fig)
-    fig, _ = plot_estimations(
-      u_gtr=change_resolution(u_gtr[:, [0, IDX_FN, -1]], resolution_train),
-      u_prd=u_prd,
-      idx_out=2,
-      idx_inp=0,
-      idx_traj=s,
-      symmetric=dataset.metadata.signed,
-      names=dataset.metadata.names,
+    fig = plot_estimates(
+      u_inp=_batch_tst.u[s, 0],  # TMP or c
+      u_gtr=_batch_tst.u[s, -1],
+      u_prd=u_prd[s, -1],
+      x_inp=_batch_tst.x[s, 0],
+      x_out=_batch_tst.x[s, 0],
+      domain=dataset.metadata.domain_x,
+      symmetric=dataset.metadata.signed['u'],
+      names=dataset.metadata.names['u'],
     )
-    fig.savefig(DIR_FIGS / 'samples' / f'rollout-ex-s{s:02d}.png')
+    fig.savefig(DIR_FIGS / 'samples' / f'rollout-ex-s{s:02d}.png', dpi=300, bbox_inches='tight')
     plt.close(fig)
 
   # Store the errors
-  for error_type in errors.keys():
-    for key in errors[error_type]['px'].keys():
-      errors[error_type]['px'][key] = {
-        str(resolution): errors[error_type]['px'][key][resolution]
-        for resolution in errors[error_type]['px'][key].keys()
-      }
   with open(DIR_TESTS / 'errors.json', 'w') as f:
     json.dump(obj=errors, fp=f)
 
   # Print minimum errors
-  l1_final = min([errors['l1']['tau']['rollout'][tau][IDX_FN] for tau in taus_rollout])
-  l2_final = min([errors['l2']['tau']['rollout'][tau][IDX_FN] for tau in taus_rollout])
-  l1_extra = min([errors['l2']['tau']['rollout'][tau][-1] for tau in taus_rollout])
-  l2_extra = min([errors['l2']['tau']['rollout'][tau][-1] for tau in taus_rollout])
-  print_between_dashes(f'ERROR AT t={IDX_FN} \t l1: {l1_final : .2f}% \t l2: {l2_final : .2f}%')
-  print_between_dashes(f'ERROR AT t={dataset.shape[1]-1} \t l1: {l1_extra : .2f}% \t l2: {l2_extra : .2f}%')
+  l1_final = min([errors['_l1']['tau']['rollout'][tau][IDX_FN] for tau in taus_rollout])
+  l2_final = min([errors['_l2']['tau']['rollout'][tau][IDX_FN] for tau in taus_rollout])
+  l1_extra = min([errors['_l2']['tau']['rollout'][tau][-1] for tau in taus_rollout])
+  l2_extra = min([errors['_l2']['tau']['rollout'][tau][-1] for tau in taus_rollout])
+  _print_between_dashes(f'ERROR AT t={IDX_FN} \t _l1: {l1_final : .2f}% \t _l2: {l2_final : .2f}%')
+  _print_between_dashes(f'ERROR AT t={dataset.shape[1]-1} \t _l1: {l1_extra : .2f}% \t _l2: {l2_extra : .2f}%')
 
   # Plot the errors and store the plots
   (DIR_FIGS / 'errors').mkdir()
@@ -813,21 +935,21 @@ def main(argv):
     df = df.melt(id_vars=['t'], value_name='error')
     return df
   # Set which errors to plot
-  errors_plot = errors['l1']
+  errors_plot = errors['_l1']
   # Temporal continuity
   g = plot_error_vs_time(
     df=errors_to_df(errors_plot['tau']['direct']),
     idx_fn=IDX_FN,
     variable_title='$\\tau$',
   )
-  g.figure.savefig(DIR_FIGS / 'errors' / 'tau-direct.png')
+  g.figure.savefig(DIR_FIGS / 'errors' / 'tau-direct.png', dpi=300, bbox_inches='tight')
   plt.close(g.figure)
   g = plot_error_vs_time(
     df=errors_to_df(errors_plot['tau']['rollout']),
     idx_fn=IDX_FN,
     variable_title='$\\tau_{max}$',
   )
-  g.figure.savefig(DIR_FIGS / 'errors' / 'tau-rollout.png')
+  g.figure.savefig(DIR_FIGS / 'errors' / 'tau-rollout.png', dpi=300, bbox_inches='tight')
   plt.close(g.figure)
   # Noise control
   g = plot_error_vs_time(
@@ -835,29 +957,44 @@ def main(argv):
     idx_fn=IDX_FN,
     variable_title='$\\dfrac{\\sigma_{noise}}{\\sigma_{data}}$',
   )
-  g.figure.savefig(DIR_FIGS / 'errors' / 'noise-direct.png')
+  g.figure.savefig(DIR_FIGS / 'errors' / 'noise-direct.png', dpi=300, bbox_inches='tight')
   plt.close(g.figure)
   g = plot_error_vs_time(
     df=errors_to_df(errors_plot['noise']['rollout']),
     idx_fn=IDX_FN,
     variable_title='$\\dfrac{\\sigma_{noise}}{\\sigma_{data}}$',
   )
-  g.figure.savefig(DIR_FIGS / 'errors' / 'noise-rollout.png')
+  g.figure.savefig(DIR_FIGS / 'errors' / 'noise-rollout.png', dpi=300, bbox_inches='tight')
   plt.close(g.figure)
-  # Spatial continuity
+  # Discretization invariance
   g = plot_error_vs_time(
-    df=errors_to_df(errors_plot['px']['direct']),
+    df=errors_to_df(errors_plot['disc']['direct']),
     idx_fn=IDX_FN,
-    variable_title='Resolution',
+    variable_title='Discretization',
   )
-  g.figure.savefig(DIR_FIGS / 'errors' / 'resolution-direct.png')
+  g.figure.savefig(DIR_FIGS / 'errors' / 'discretization-direct.png', dpi=300, bbox_inches='tight')
   plt.close(g.figure)
   g = plot_error_vs_time(
-    df=errors_to_df(errors_plot['px']['rollout']),
+    df=errors_to_df(errors_plot['disc']['rollout']),
     idx_fn=IDX_FN,
-    variable_title='Resolution',
+    variable_title='Discretization',
   )
-  g.figure.savefig(DIR_FIGS / 'errors' / 'resolution-rollout.png')
+  g.figure.savefig(DIR_FIGS / 'errors' / 'discretization-rollout.png', dpi=300, bbox_inches='tight')
+  plt.close(g.figure)
+  # Resolution invariance
+  g = plot_error_vs_time(
+    df=errors_to_df(errors_plot['dsf']['direct']),
+    idx_fn=IDX_FN,
+    variable_title='DSF',
+  )
+  g.figure.savefig(DIR_FIGS / 'errors' / 'resolution-direct.png', dpi=300, bbox_inches='tight')
+  plt.close(g.figure)
+  g = plot_error_vs_time(
+    df=errors_to_df(errors_plot['dsf']['rollout']),
+    idx_fn=IDX_FN,
+    variable_title='DSF',
+  )
+  g.figure.savefig(DIR_FIGS / 'errors' / 'resolution-rollout.png', dpi=300, bbox_inches='tight')
   plt.close(g.figure)
 
   # Get ensemble estimations with the default settings
@@ -869,41 +1006,44 @@ def main(argv):
       repeats=20,
       dataset=dataset_small,
       model=model,
+      graph_builder=graph_builder,
       stepping=stepping,
       state=state,
       stats=stats,
-      resolution_train=resolution_train,
       train_flags=configs['flags'],
-      tau_max=time_downsample_factor,
-      p_edge_masking_grid2mesh=0.5,
+      tau_ratio_max=time_downsample_factor,
+      p_edge_masking=0.5,
       key=subkey,
     )
 
     # Plot ensemble statistics
     (DIR_FIGS / 'ensemble').mkdir()
+    _batch_tst_small = _change_resolution(batch_tst_small, configs['flags']['space_downsample_factor'])
     for s in range(min(4, FLAGS.n_test)):
-      fig, _ = plot_ensemble(
-        u_gtr=change_resolution(u_gtr_small[:, [0, IDX_FN, -1]], resolution_train),
+      fig = plot_ensemble(
+        u_gtr=_batch_tst_small.u[:, [0, IDX_FN, -1]],
         u_ens=u_prd_ensemble,
+        x=_batch_tst_small.x[s, 0],
         idx_out=1,
-        idx_traj=s,
-        symmetric=dataset_small.metadata.signed,
-        names=dataset_small.metadata.names,
+        idx_s=s,
+        symmetric=dataset_small.metadata.signed['u'],  # TMP
+        names=dataset_small.metadata.names['u'],  # TMP
       )
-      fig.savefig(DIR_FIGS / 'ensemble' / f'rollout-fn-s{s:02d}.png')
+      fig.savefig(DIR_FIGS / 'ensemble' / f'rollout-fn-s{s:02d}.png', dpi=300, bbox_inches='tight')
       plt.close(fig)
-      fig, _ = plot_ensemble(
-        u_gtr=change_resolution(u_gtr_small[:, [0, IDX_FN, -1]], resolution_train),
+      fig = plot_ensemble(
+        u_gtr=_batch_tst_small.u[:, [0, IDX_FN, -1]],
         u_ens=u_prd_ensemble,
-        idx_out=2,
-        idx_traj=s,
-        symmetric=dataset_small.metadata.signed,
-        names=dataset_small.metadata.names,
+        x=_batch_tst_small.x[s, 0],
+        idx_out=-1,
+        idx_s=s,
+        symmetric=dataset_small.metadata.signed['u'],  # TMP
+        names=dataset_small.metadata.names['u'],  # TMP
       )
-      fig.savefig(DIR_FIGS / 'ensemble' / f'rollout-ex-s{s:02d}.png')
+      fig.savefig(DIR_FIGS / 'ensemble' / f'rollout-ex-s{s:02d}.png', dpi=300, bbox_inches='tight')
       plt.close(fig)
 
-  print_between_dashes('DONE')
+  _print_between_dashes('DONE')
 
 if __name__ == '__main__':
   logging.set_verbosity('info')

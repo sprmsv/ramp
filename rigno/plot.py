@@ -318,7 +318,7 @@ def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None
 
   return fig
 
-def plot_ensemble(u_gtr, u_ens, x, idx_t, idx_s: int = 0, symmetric=True, names=None):
+def plot_ensemble(u_gtr, u_ens, x, idx_out: int, idx_s: int = 0, symmetric=True, names=None):
 
   _HEIGHT_PER_ROW = 2.5
   _HEIGHT_MARGIN = .2
@@ -379,12 +379,12 @@ def plot_ensemble(u_gtr, u_ens, x, idx_t, idx_s: int = 0, symmetric=True, names=
 
   # Loop over variables
   for ivar in range(n_vars):
-    vmax_gtr = np.max(np.abs(u_gtr[idx_s, idx_t, :, ivar]))
+    vmax_gtr = np.max(np.abs(u_gtr[idx_s, idx_out, :, ivar]))
     # Plot mean
     h = axs_avg[ivar].scatter(
       x=x[:, 0],
       y=x[:, 1],
-      c=u_ens_avg[idx_s, idx_t, :, ivar],
+      c=u_ens_avg[idx_s, idx_out, :, ivar],
       cmap=(CMAP_BWR if symmetric[ivar] else CMAP_WRB),
       vmax=(vmax_gtr if symmetric[ivar] else None),
       vmin=(-vmax_gtr if symmetric[ivar] else None),
@@ -395,7 +395,7 @@ def plot_ensemble(u_gtr, u_ens, x, idx_t, idx_s: int = 0, symmetric=True, names=
     h = axs_err[ivar].scatter(
       x=x[:, 0],
       y=x[:, 1],
-      c=u_ens_std[idx_s, idx_t, :, ivar],
+      c=u_ens_std[idx_s, idx_out, :, ivar],
       cmap=CMAP_WRB,
       vmin=0,
       vmax=None,
@@ -406,7 +406,7 @@ def plot_ensemble(u_gtr, u_ens, x, idx_t, idx_s: int = 0, symmetric=True, names=
     h = axs_std[ivar].scatter(
       x=x[:, 0],
       y=x[:, 1],
-      c=np.abs(u_err[idx_s, idx_t, :, ivar]),
+      c=np.abs(u_err[idx_s, idx_out, :, ivar]),
       cmap=CMAP_WRB,
       vmin=0,
       vmax=None,

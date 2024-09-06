@@ -33,7 +33,7 @@ def profile(f: Callable, kwargs: dict, repeats: int = 1):
   t_0 = time()
   for _ in range(repeats):
     _ = f(**kwargs)
-  return (time() - t_0)
+  return ((time() - t_0) / repeats)
 
 def shuffle_arrays(key: flax.typing.PRNGKey, arrays: Sequence[Array], axis: int = 0) -> Sequence[Array]:
   """Shuffles a set of arrays with the same random permutation along the leading axis."""
