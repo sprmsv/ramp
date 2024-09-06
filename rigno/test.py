@@ -202,6 +202,34 @@ def profile_inferrence(
   for line in all_msgs:
     logging.info(line)
 
+def get_time_independent_estimations(
+  step: Stepper.apply,
+  graph_builder: RegionInteractionGraphBuilder,
+  variables,
+  stats,
+  batch: Batch,
+  key = None,
+) -> Array:
+
+  inputs = Inputs(
+    u=batch.c[:, [0]],
+    c=None,
+    x_inp=batch.x,
+    x_out=batch.x,
+    t=None,
+    tau=None,
+  )
+
+  _u_prd = step(
+    variables=variables,
+    stats=stats,
+    inputs=inputs,
+    graphs=graph_builder.build_graphs(batch.g),
+    key=key,
+  )
+
+  return _u_prd
+
 def get_direct_estimations(
   step: Stepper.apply,
   graph_builder: RegionInteractionGraphBuilder,
@@ -311,6 +339,7 @@ def get_all_estimations(
   stats = replicate(stats)
 
   # Get pmapped version of the estimator functions
+  _get_tindep_estimations = jax.pmap(get_time_independent_estimations, static_broadcasted_argnums=(0, 1))
   _get_direct_estimations = jax.pmap(get_direct_estimations, static_broadcasted_argnums=(0, 1))
   _get_rollout_estimations = jax.pmap(get_rollout_estimations, static_broadcasted_argnums=(0, 1, 2))
 
@@ -321,7 +350,7 @@ def get_all_estimations(
     transform: Callable[[Array], Array] = None,
   ):
     # Check inputs
-    if direct:
+    if dataset.time_dependent and direct:
       assert tau_ratio is not None
 
     # Loop over the batches
@@ -345,25 +374,35 @@ def get_all_estimations(
         g=shard(g),
       )
 
-      # Get the direct predictions
-      if direct:
-        u_prd_batch = _get_direct_estimations(
-          apply_fn,
-          graph_builder,
-          variables={'params': state['params']},
-          stats=stats,
-          batch=batch,
-          tau=replicate(tau_ratio * dataset.dt),
-        )
-        # Replace the tail of the predictions with the head of the input
-        u_prd_batch = jnp.concatenate([batch.u[:, :, :tau_ratio], u_prd_batch[:, :, :-tau_ratio]], axis=2)
+      if dataset.time_dependent:
+        # Get the direct predictions
+        if direct:
+          u_prd_batch = _get_direct_estimations(
+            apply_fn,
+            graph_builder,
+            variables={'params': state['params']},
+            stats=stats,
+            batch=batch,
+            tau=replicate(tau_ratio * dataset.dt),
+          )
+          # Replace the tail of the predictions with the head of the input
+          u_prd_batch = jnp.concatenate([batch.u[:, :, :tau_ratio], u_prd_batch[:, :, :-tau_ratio]], axis=2)
 
-      # Get the rollout predictions
+        # Get the rollout predictions
+        else:
+          num_times = batch.shape[2]
+          u_prd_batch = _get_rollout_estimations(
+            apply_fn,
+            num_times,
+            graph_builder,
+            variables={'params': state['params']},
+            stats=stats,
+            batch=batch,
+          )
+
       else:
-        num_times = batch.shape[2]
-        u_prd_batch = _get_rollout_estimations(
+        u_prd_batch = _get_tindep_estimations(
           apply_fn,
-          num_times,
           graph_builder,
           variables={'params': state['params']},
           stats=stats,
@@ -418,12 +457,28 @@ def get_all_estimations(
 
   # Instantiate the outputs
   errors = {error_type: {
-      key: {'direct': {}, 'rollout': {}}
+      key: {'direct': {}, 'rollout': {}} if dataset.time_dependent else {}
       for key in ['tau', 'disc', 'dsf', 'noise']
     }
     for error_type in ['_l1', '_l2']
   }
-  u_prd_rollout = None
+  u_prd_output = None
+
+  # Get predictions for plotting
+  tau_ratio_max = train_flags['time_downsample_factor']
+  dsf = train_flags['space_downsample_factor']
+  if dataset.time_dependent:
+    u_prd_output = _get_estimations_in_batches(
+      direct=False,
+      apply_fn=apply_unroll_jit[dsf][tau_ratio_max],
+      transform=(lambda b: _change_resolution(b, dsf)),
+    )[:, [0, IDX_FN, -1]]
+  else:
+    u_prd_output = _get_estimations_in_batches(
+      direct=False,
+      apply_fn=apply_steppers_jit[dsf],
+      transform=(lambda b: _change_resolution(b, dsf)),
+    )
 
   # Define a auxiliary function for getting the errors
   def _get_err_trajectory(_u_gtr, _u_prd, p):
@@ -439,56 +494,56 @@ def get_all_estimations(
     ]
     return _err
 
-  # Temporal continuity
+  # Temporal continuity (time-dependent)
   dsf = train_flags['space_downsample_factor']
   for tau_ratio in taus_direct:
-    if tau_ratio == .5:
-      _apply_stepper = apply_steppers_twice_jit[dsf]
-    else:
-      _apply_stepper = apply_steppers_jit[dsf]
-    t0 = time()
-    u_prd = _get_estimations_in_batches(
-      direct=True,
-      apply_fn=_apply_stepper,
-      tau_ratio=(tau_ratio if tau_ratio != .5 else 1),
-      transform=(lambda arr: _change_resolution(arr, dsf)),
-    )
-    errors['_l1']['tau']['direct'][tau_ratio] = _get_err_trajectory(
-      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
-      _u_prd=u_prd,
-      p=1,
-    )
-    errors['_l2']['tau']['direct'][tau_ratio] = _get_err_trajectory(
-      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
-      _u_prd=u_prd,
-      p=2,
-    )
-    del u_prd
-    _print_between_dashes(f'tau_direct={tau_ratio} \t TIME={time()-t0 : .4f}s')
+    if dataset.time_dependent:
+      if tau_ratio == .5:
+        _apply_stepper = apply_steppers_twice_jit[dsf]
+      else:
+        _apply_stepper = apply_steppers_jit[dsf]
+      t0 = time()
+      u_prd = _get_estimations_in_batches(
+        direct=True,
+        apply_fn=_apply_stepper,
+        tau_ratio=(tau_ratio if tau_ratio != .5 else 1),
+        transform=(lambda b: _change_resolution(b, dsf)),
+      )
+      errors['_l1']['tau']['direct'][tau_ratio] = _get_err_trajectory(
+        _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
+        _u_prd=u_prd,
+        p=1,
+      )
+      errors['_l2']['tau']['direct'][tau_ratio] = _get_err_trajectory(
+        _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
+        _u_prd=u_prd,
+        p=2,
+      )
+      del u_prd
+      _print_between_dashes(f'tau_direct={tau_ratio} \t TIME={time()-t0 : .4f}s')
 
-  # Autoregressive rollout
+  # Autoregressive rollout (time-dependent)
   dsf = train_flags['space_downsample_factor']
   for tau_ratio_max in taus_rollout:
-    t0 = time()
-    u_prd = _get_estimations_in_batches(
-      direct=False,
-      apply_fn=apply_unroll_jit[dsf][tau_ratio_max],
-      transform=(lambda arr: _change_resolution(arr, dsf)),
-    )
-    errors['_l1']['tau']['rollout'][tau_ratio_max] = _get_err_trajectory(
-      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
-      _u_prd=u_prd,
-      p=1,
-    )
-    errors['_l2']['tau']['rollout'][tau_ratio_max] = _get_err_trajectory(
-      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
-      _u_prd=u_prd,
-      p=2,
-    )
-    if tau_ratio_max == train_flags['time_downsample_factor']:
-      u_prd_rollout = u_prd[:, [0, IDX_FN, -1]]
-    del u_prd
-    _print_between_dashes(f'tau_max={tau_ratio_max} \t TIME={time()-t0 : .4f}s')
+    if dataset.time_dependent:
+      t0 = time()
+      u_prd = _get_estimations_in_batches(
+        direct=False,
+        apply_fn=apply_unroll_jit[dsf][tau_ratio_max],
+        transform=(lambda b: _change_resolution(b, dsf)),
+      )
+      errors['_l1']['tau']['rollout'][tau_ratio_max] = _get_err_trajectory(
+        _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
+        _u_prd=u_prd,
+        p=1,
+      )
+      errors['_l2']['tau']['rollout'][tau_ratio_max] = _get_err_trajectory(
+        _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
+        _u_prd=u_prd,
+        p=2,
+      )
+      del u_prd
+      _print_between_dashes(f'tau_max={tau_ratio_max} \t TIME={time()-t0 : .4f}s')
 
   # Discretization invariance
   tau_ratio_max = train_flags['time_downsample_factor']
@@ -496,89 +551,129 @@ def get_all_estimations(
   dsf = train_flags['space_downsample_factor']
   for i_disc in range(4):
     key = jax.random.PRNGKey(i_disc)
-    # Direct
-    t0 = time()
-    u_prd = _get_estimations_in_batches(
-      direct=True,
-      apply_fn=apply_steppers_jit[dsf],
-      tau_ratio=tau_ratio,
-      transform=(lambda arr: _change_resolution(_change_discretization(arr, key), dsf)),
-    )
-    errors['_l1']['disc']['direct'][i_disc] = _get_err_trajectory(
-      _u_gtr=_change_resolution(_change_discretization(batch_test, key), dsf).u,
-      _u_prd=u_prd,
-      p=1,
-    )
-    errors['_l2']['disc']['direct'][i_disc] = _get_err_trajectory(
-      _u_gtr=_change_resolution(_change_discretization(batch_test, key), dsf).u,
-      _u_prd=u_prd,
-      p=2,
-    )
-    del u_prd
-    _print_between_dashes(f'discretization={i_disc} (direct) \t TIME={time()-t0 : .4f}s')
-    # Rollout
-    t0 = time()
-    u_prd = _get_estimations_in_batches(
-      direct=False,
-      apply_fn=apply_unroll_jit[dsf][tau_ratio_max],
-      transform=(lambda arr: _change_resolution(_change_discretization(arr, key), dsf)),
-    )
-    errors['_l1']['disc']['rollout'][i_disc] = _get_err_trajectory(
-      _u_gtr=_change_resolution(_change_discretization(batch_test, key), dsf).u,
-      _u_prd=u_prd,
-      p=1,
-    )
-    errors['_l2']['disc']['rollout'][i_disc] = _get_err_trajectory(
-      _u_gtr=_change_resolution(_change_discretization(batch_test, key), dsf).u,
-      _u_prd=u_prd,
-      p=2,
-    )
-    del u_prd
-    _print_between_dashes(f'discretization={i_disc} (rollout) \t TIME={time()-t0 : .4f}s')
+    if dataset.time_dependent:
+      # Direct
+      t0 = time()
+      u_prd = _get_estimations_in_batches(
+        direct=True,
+        apply_fn=apply_steppers_jit[dsf],
+        tau_ratio=tau_ratio,
+        transform=(lambda b: _change_resolution(_change_discretization(b, key), dsf)),
+      )
+      errors['_l1']['disc']['direct'][i_disc] = _get_err_trajectory(
+        _u_gtr=_change_resolution(_change_discretization(batch_test, key), dsf).u,
+        _u_prd=u_prd,
+        p=1,
+      )
+      errors['_l2']['disc']['direct'][i_disc] = _get_err_trajectory(
+        _u_gtr=_change_resolution(_change_discretization(batch_test, key), dsf).u,
+        _u_prd=u_prd,
+        p=2,
+      )
+      del u_prd
+      _print_between_dashes(f'discretization={i_disc} (direct) \t TIME={time()-t0 : .4f}s')
+      # Rollout
+      t0 = time()
+      u_prd = _get_estimations_in_batches(
+        direct=False,
+        apply_fn=apply_unroll_jit[dsf][tau_ratio_max],
+        transform=(lambda b: _change_resolution(_change_discretization(b, key), dsf)),
+      )
+      errors['_l1']['disc']['rollout'][i_disc] = _get_err_trajectory(
+        _u_gtr=_change_resolution(_change_discretization(batch_test, key), dsf).u,
+        _u_prd=u_prd,
+        p=1,
+      )
+      errors['_l2']['disc']['rollout'][i_disc] = _get_err_trajectory(
+        _u_gtr=_change_resolution(_change_discretization(batch_test, key), dsf).u,
+        _u_prd=u_prd,
+        p=2,
+      )
+      del u_prd
+      _print_between_dashes(f'discretization={i_disc} (rollout) \t TIME={time()-t0 : .4f}s')
+    else:
+      t0 = time()
+      u_prd = _get_estimations_in_batches(
+        direct=False,
+        apply_fn=apply_steppers_jit[dsf],
+        transform=(lambda b: _change_resolution(_change_discretization(b, key), dsf)),
+      )
+      errors['_l1']['disc'][i_disc] = _get_err_trajectory(
+        _u_gtr=_change_resolution(_change_discretization(batch_test, key), dsf).u,
+        _u_prd=u_prd,
+        p=1,
+      )
+      errors['_l2']['disc'][i_disc] = _get_err_trajectory(
+        _u_gtr=_change_resolution(_change_discretization(batch_test, key), dsf).u,
+        _u_prd=u_prd,
+        p=2,
+      )
+      del u_prd
+      _print_between_dashes(f'discretization={i_disc} \t TIME={time()-t0 : .4f}s')
 
   # Resolution invariance
   tau_ratio_max = train_flags['time_downsample_factor']
   tau_ratio = train_flags['time_downsample_factor']
   for dsf in space_dsfs:
-    # Direct
-    t0 = time()
-    u_prd = _get_estimations_in_batches(
-      direct=True,
-      apply_fn=apply_steppers_jit[dsf],
-      tau_ratio=tau_ratio,
-      transform=(lambda arr: _change_resolution(arr, dsf)),
-    )
-    errors['_l1']['dsf']['direct'][dsf] = _get_err_trajectory(
-      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
-      _u_prd=u_prd,
-      p=1,
-    )
-    errors['_l2']['dsf']['direct'][dsf] = _get_err_trajectory(
-      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
-      _u_prd=u_prd,
-      p=2,
-    )
-    del u_prd
-    _print_between_dashes(f'resolution={dsf} (direct) \t TIME={time()-t0 : .4f}s')
-    # Rollout
-    t0 = time()
-    u_prd = _get_estimations_in_batches(
-      direct=False,
-      apply_fn=apply_unroll_jit[dsf][tau_ratio_max],
-      transform=(lambda arr: _change_resolution(arr, dsf)),
-    )
-    errors['_l1']['dsf']['rollout'][dsf] = _get_err_trajectory(
-      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
-      _u_prd=u_prd,
-      p=1,
-    )
-    errors['_l2']['dsf']['rollout'][dsf] = _get_err_trajectory(
-      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
-      _u_prd=u_prd,
-      p=2,
-    )
-    del u_prd
-    _print_between_dashes(f'resolution={dsf} (rollout) \t TIME={time()-t0 : .4f}s')
+    if dataset.time_dependent:
+      # Direct
+      t0 = time()
+      u_prd = _get_estimations_in_batches(
+        direct=True,
+        apply_fn=apply_steppers_jit[dsf],
+        tau_ratio=tau_ratio,
+        transform=(lambda b: _change_resolution(b, dsf)),
+      )
+      errors['_l1']['dsf']['direct'][dsf] = _get_err_trajectory(
+        _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
+        _u_prd=u_prd,
+        p=1,
+      )
+      errors['_l2']['dsf']['direct'][dsf] = _get_err_trajectory(
+        _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
+        _u_prd=u_prd,
+        p=2,
+      )
+      del u_prd
+      _print_between_dashes(f'dsf={dsf} (direct) \t TIME={time()-t0 : .4f}s')
+      # Rollout
+      t0 = time()
+      u_prd = _get_estimations_in_batches(
+        direct=False,
+        apply_fn=apply_unroll_jit[dsf][tau_ratio_max],
+        transform=(lambda b: _change_resolution(b, dsf)),
+      )
+      errors['_l1']['dsf']['rollout'][dsf] = _get_err_trajectory(
+        _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
+        _u_prd=u_prd,
+        p=1,
+      )
+      errors['_l2']['dsf']['rollout'][dsf] = _get_err_trajectory(
+        _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
+        _u_prd=u_prd,
+        p=2,
+      )
+      del u_prd
+      _print_between_dashes(f'dsf={dsf} (rollout) \t TIME={time()-t0 : .4f}s')
+    else:
+      t0 = time()
+      u_prd = _get_estimations_in_batches(
+        direct=False,
+        apply_fn=apply_steppers_jit[dsf],
+        transform=(lambda b: _change_resolution(b, dsf)),
+      )
+      errors['_l1']['dsf'][dsf] = _get_err_trajectory(
+        _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
+        _u_prd=u_prd,
+        p=1,
+      )
+      errors['_l2']['dsf'][dsf] = _get_err_trajectory(
+        _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
+        _u_prd=u_prd,
+        p=2,
+      )
+      del u_prd
+      _print_between_dashes(f'dsf={dsf} \t TIME={time()-t0 : .4f}s')
 
   # Robustness to noise
   tau_ratio_max = train_flags['time_downsample_factor']
@@ -588,58 +683,80 @@ def get_all_estimations(
     # Transformation
     def transform(batch):
       batch = _change_resolution(batch, dsf)
-      std_arr = np.std(batch.u, axis=(0, 2), keepdims=True)
-      u_noisy = batch.u + noise_level * np.random.normal(scale=std_arr, size=batch.shape)
-      # TMP add noise to c too
+      u_std = np.std(batch.u, axis=(0, 2), keepdims=True)
+      u_noisy = batch.u + noise_level * np.random.normal(scale=u_std, size=batch.shape)
+      if batch.c is not None:
+        c_std = np.std(batch.c, axis=(0, 2), keepdims=True)
+        c_noisy = batch.c + noise_level * np.random.normal(scale=c_std, size=batch.shape)
       batch_noisy = Batch(
         u=u_noisy,
-        c=batch.c,
+        c=(c_noisy if (batch.c is not None) else None),
         x=batch.x,
         t=batch.t,
         g=batch.g,
       )
       return batch_noisy
-    # Direct estimations
-    t0 = time()
-    u_prd = _get_estimations_in_batches(
-      direct=True,
-      apply_fn=apply_steppers_jit[dsf],
-      tau_ratio=tau_ratio,
-      transform=transform,
-    )
-    errors['_l1']['noise']['direct'][noise_level] = _get_err_trajectory(
-      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
-      _u_prd=u_prd,
-      p=1,
-    )
-    errors['_l2']['noise']['direct'][noise_level] = _get_err_trajectory(
-      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
-      _u_prd=u_prd,
-      p=2,
-    )
-    del u_prd
-    _print_between_dashes(f'noise_level={noise_level} (direct) \t TIME={time()-t0 : .4f}s')
-    # Rollout estimations
-    t0 = time()
-    u_prd = _get_estimations_in_batches(
-      direct=False,
-      apply_fn=apply_unroll_jit[dsf][tau_ratio_max],
-      transform=transform,
-    )
-    errors['_l1']['noise']['rollout'][noise_level] = _get_err_trajectory(
-      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
-      _u_prd=u_prd,
-      p=1,
-    )
-    errors['_l2']['noise']['rollout'][noise_level] = _get_err_trajectory(
-      _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
-      _u_prd=u_prd,
-      p=2,
-    )
-    del u_prd
-    _print_between_dashes(f'noise_level={noise_level} (rollout) \t TIME={time()-t0 : .4f}s')
+    if dataset.time_dependent:
+      # Direct estimations
+      t0 = time()
+      u_prd = _get_estimations_in_batches(
+        direct=True,
+        apply_fn=apply_steppers_jit[dsf],
+        tau_ratio=tau_ratio,
+        transform=transform,
+      )
+      errors['_l1']['noise']['direct'][noise_level] = _get_err_trajectory(
+        _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
+        _u_prd=u_prd,
+        p=1,
+      )
+      errors['_l2']['noise']['direct'][noise_level] = _get_err_trajectory(
+        _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
+        _u_prd=u_prd,
+        p=2,
+      )
+      del u_prd
+      _print_between_dashes(f'noise_level={noise_level} (direct) \t TIME={time()-t0 : .4f}s')
+      # Rollout estimations
+      t0 = time()
+      u_prd = _get_estimations_in_batches(
+        direct=False,
+        apply_fn=apply_unroll_jit[dsf][tau_ratio_max],
+        transform=transform,
+      )
+      errors['_l1']['noise']['rollout'][noise_level] = _get_err_trajectory(
+        _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
+        _u_prd=u_prd,
+        p=1,
+      )
+      errors['_l2']['noise']['rollout'][noise_level] = _get_err_trajectory(
+        _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
+        _u_prd=u_prd,
+        p=2,
+      )
+      del u_prd
+      _print_between_dashes(f'noise_level={noise_level} (rollout) \t TIME={time()-t0 : .4f}s')
+    else:
+      t0 = time()
+      u_prd = _get_estimations_in_batches(
+        direct=False,
+        apply_fn=apply_steppers_jit[dsf],
+        transform=transform,
+      )
+      errors['_l1']['noise'][noise_level] = _get_err_trajectory(
+        _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
+        _u_prd=u_prd,
+        p=1,
+      )
+      errors['_l2']['noise'][noise_level] = _get_err_trajectory(
+        _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
+        _u_prd=u_prd,
+        p=2,
+      )
+      del u_prd
+      _print_between_dashes(f'noise_level={noise_level} \t TIME={time()-t0 : .4f}s')
 
-  return errors, u_prd_rollout
+  return errors, u_prd_output
 
 def get_ensemble_estimations(
   repeats: int,
@@ -661,6 +778,7 @@ def get_ensemble_estimations(
   stats = replicate(stats)
 
   # Get pmapped version of the estimator functions
+  _get_tindep_estimations = jax.pmap(get_time_independent_estimations, static_broadcasted_argnums=(0, 1))
   _get_rollout_estimations = jax.pmap(get_rollout_estimations, static_broadcasted_argnums=(0, 1, 2))
 
   def _get_estimations_in_batches(
@@ -691,15 +809,26 @@ def get_ensemble_estimations(
       subkey = shard_prng_key(subkey)
 
       # Get the rollout predictions
-      num_times = batch.shape[2]
-      u_prd_batch = _get_rollout_estimations(
-        apply_fn,
-        num_times,
-        graph_builder,
-        variables={'params': state['params']},
-        stats=stats,
-        batch=batch,
-      )
+      if dataset.time_dependent:
+        num_times = batch.shape[2]
+        u_prd_batch = _get_rollout_estimations(
+          apply_fn,
+          num_times,
+          graph_builder,
+          variables={'params': state['params']},
+          stats=stats,
+          batch=batch,
+          key=subkey,
+        )
+      else:
+        u_prd_batch = _get_tindep_estimations(
+          apply_fn,
+          graph_builder,
+          variables={'params': state['params']},
+          stats=stats,
+          batch=batch,
+          key=subkey
+        )
 
       # Undo the split between devices
       u_prd_batch = u_prd_batch.reshape(FLAGS.batch_size, *u_prd_batch.shape[2:])
@@ -717,25 +846,37 @@ def get_ensemble_estimations(
   model_configs['p_edge_masking'] = p_edge_masking
 
   stepper = stepping(operator=model.__class__(**model_configs))
-  unroller = AutoregressiveStepper(
-    stepper=stepper,
-    dt=(dataset.dt),
-    tau_max=(tau_ratio_max * dataset.dt),
-  )
-  apply_unroll_jit = jax.jit(unroller.unroll, static_argnums=(2,))
+  if dataset.time_dependent:
+    unroller = AutoregressiveStepper(
+      stepper=stepper,
+      dt=(dataset.dt),
+      tau_max=(tau_ratio_max * dataset.dt),
+    )
+    apply_jit = jax.jit(unroller.unroll, static_argnums=(2,))
+  else:
+    apply_jit = jax.jit(stepper.apply)
 
   # Autoregressive rollout
   u_prd = []
   for i in range(repeats):
     t0 = time()
     subkey, key = jax.random.split(key)
-    u_prd.append(
-      _get_estimations_in_batches(
-        apply_fn=apply_unroll_jit,
-        transform=(lambda arr: _change_resolution(arr, train_flags['space_downsample_factor'])),
-        key=subkey,
-      )[:, [0, IDX_FN, -1]]
-    )
+    if dataset.time_dependent:
+      u_prd.append(
+        _get_estimations_in_batches(
+          apply_fn=apply_jit,
+          transform=(lambda b: _change_resolution(b, train_flags['space_downsample_factor'])),
+          key=subkey,
+        )[:, [0, IDX_FN, -1]]
+      )
+    else:
+      u_prd.append(
+        _get_estimations_in_batches(
+          apply_fn=apply_jit,
+          transform=(lambda b: _change_resolution(b, train_flags['space_downsample_factor'])),
+          key=subkey,
+        )
+      )
     _print_between_dashes(f'ensemble_repeat={i} \t TIME={time()-t0 : .4f}s')
   u_prd = np.stack(u_prd)
 
@@ -858,7 +999,7 @@ def main(argv):
 
   # Set evaluation settings
   tau_min = 1
-  tau_max = (tau_max_train + (tau_max_train > 1))
+  tau_max = (tau_max_train + (tau_max_train > 1)) * time_downsample_factor
   taus_direct = [.5] + list(range(tau_min, tau_max + 1))
   # NOTE: One compilation per tau_rollout
   taus_rollout = [.5, 1] + [time_downsample_factor * d for d in range(1, tau_max_train+1)]
@@ -879,8 +1020,8 @@ def main(argv):
     state=state,
     stats=stats,
     train_flags=configs['flags'],
-    taus_direct=taus_direct,
-    taus_rollout=taus_rollout,
+    taus_direct=(taus_direct if dataset.time_dependent else []),
+    taus_rollout=(taus_rollout if dataset.time_dependent else []),
     space_dsfs=space_dsfs,
     noise_levels=noise_levels,
     p_edge_masking=0,
@@ -890,112 +1031,133 @@ def main(argv):
   (DIR_FIGS / 'samples').mkdir()
   for s in range(min(4, FLAGS.n_test)):
     _batch_tst = _change_resolution(batch_tst, configs['flags']['space_downsample_factor'])
-    fig = plot_estimates(
-      u_inp=_batch_tst.u[s, 0],  # TMP or c
-      u_gtr=_batch_tst.u[s, IDX_FN],
-      u_prd=u_prd[s, 1],
-      x_inp=_batch_tst.x[s, 0],
-      x_out=_batch_tst.x[s, 0],
-      domain=dataset.metadata.domain_x,
-      symmetric=dataset.metadata.signed['u'],
-      names=dataset.metadata.names['u'],
-    )
-    fig.savefig(DIR_FIGS / 'samples' / f'rollout-fn-s{s:02d}.png', dpi=300, bbox_inches='tight')
-    plt.close(fig)
-    fig = plot_estimates(
-      u_inp=_batch_tst.u[s, 0],  # TMP or c
-      u_gtr=_batch_tst.u[s, -1],
-      u_prd=u_prd[s, -1],
-      x_inp=_batch_tst.x[s, 0],
-      x_out=_batch_tst.x[s, 0],
-      domain=dataset.metadata.domain_x,
-      symmetric=dataset.metadata.signed['u'],
-      names=dataset.metadata.names['u'],
-    )
-    fig.savefig(DIR_FIGS / 'samples' / f'rollout-ex-s{s:02d}.png', dpi=300, bbox_inches='tight')
-    plt.close(fig)
+    if dataset.time_dependent:
+      fig = plot_estimates(
+        u_inp=_batch_tst.u[s, 0],
+        u_gtr=_batch_tst.u[s, IDX_FN],
+        u_prd=u_prd[s, 1],
+        x_inp=_batch_tst.x[s, 0],
+        x_out=_batch_tst.x[s, 0],
+        symmetric=dataset.metadata.signed['u'],
+        names=dataset.metadata.names['u'],
+        domain=dataset.metadata.domain_x,
+      )
+      fig.savefig(DIR_FIGS / 'samples' / f'rollout-fn-s{s:02d}.png', dpi=300, bbox_inches='tight')
+      plt.close(fig)
+      fig = plot_estimates(
+        u_inp=_batch_tst.u[s, 0],
+        u_gtr=_batch_tst.u[s, -1],
+        u_prd=u_prd[s, -1],
+        x_inp=_batch_tst.x[s, 0],
+        x_out=_batch_tst.x[s, 0],
+        symmetric=dataset.metadata.signed['u'],
+        names=dataset.metadata.names['u'],
+        domain=dataset.metadata.domain_x,
+      )
+      fig.savefig(DIR_FIGS / 'samples' / f'rollout-ex-s{s:02d}.png', dpi=300, bbox_inches='tight')
+      plt.close(fig)
+    else:
+      fig = plot_estimates(
+        u_inp=_batch_tst.c[s, 0],
+        u_gtr=_batch_tst.u[s, 0],
+        u_prd=u_prd[s, 0],
+        x_inp=_batch_tst.x[s, 0],
+        x_out=_batch_tst.x[s, 0],
+        symmetric=dataset.metadata.signed['u'],
+        names=dataset.metadata.names['u'],
+        domain=dataset.metadata.domain_x,
+      )
+      fig.savefig(DIR_FIGS / 'samples' / f's{s:02d}.png', dpi=300, bbox_inches='tight')
+      plt.close(fig)
 
   # Store the errors
   with open(DIR_TESTS / 'errors.json', 'w') as f:
     json.dump(obj=errors, fp=f)
 
   # Print minimum errors
-  l1_final = min([errors['_l1']['tau']['rollout'][tau][IDX_FN] for tau in taus_rollout])
-  l2_final = min([errors['_l2']['tau']['rollout'][tau][IDX_FN] for tau in taus_rollout])
-  l1_extra = min([errors['_l2']['tau']['rollout'][tau][-1] for tau in taus_rollout])
-  l2_extra = min([errors['_l2']['tau']['rollout'][tau][-1] for tau in taus_rollout])
-  _print_between_dashes(f'ERROR AT t={IDX_FN} \t _l1: {l1_final : .2f}% \t _l2: {l2_final : .2f}%')
-  _print_between_dashes(f'ERROR AT t={dataset.shape[1]-1} \t _l1: {l1_extra : .2f}% \t _l2: {l2_extra : .2f}%')
+  if dataset.time_dependent:
+    l1_final = min([errors['_l1']['tau']['rollout'][tau][IDX_FN] for tau in taus_rollout])
+    l2_final = min([errors['_l2']['tau']['rollout'][tau][IDX_FN] for tau in taus_rollout])
+    l1_extra = min([errors['_l2']['tau']['rollout'][tau][-1] for tau in taus_rollout])
+    l2_extra = min([errors['_l2']['tau']['rollout'][tau][-1] for tau in taus_rollout])
+    _print_between_dashes(f'ERROR AT t={IDX_FN} \t _l1: {l1_final : .2f}% \t _l2: {l2_final : .2f}%')
+    _print_between_dashes(f'ERROR AT t={dataset.shape[1]-1} \t _l1: {l1_extra : .2f}% \t _l2: {l2_extra : .2f}%')
+  else:
+    l1 = errors['_l1']['disc'][0][0]
+    l2 = errors['_l2']['disc'][0][0]
+    _print_between_dashes(f'ERROR \t _l1: {l1 : .2f}% \t _l2: {l2 : .2f}%')
+
 
   # Plot the errors and store the plots
-  (DIR_FIGS / 'errors').mkdir()
-  def errors_to_df(_errors):
-    df = pd.DataFrame(_errors)
-    df['t'] = df.index
-    df = df.melt(id_vars=['t'], value_name='error')
-    return df
-  # Set which errors to plot
-  errors_plot = errors['_l1']
-  # Temporal continuity
-  g = plot_error_vs_time(
-    df=errors_to_df(errors_plot['tau']['direct']),
-    idx_fn=IDX_FN,
-    variable_title='$\\tau$',
-  )
-  g.figure.savefig(DIR_FIGS / 'errors' / 'tau-direct.png', dpi=300, bbox_inches='tight')
-  plt.close(g.figure)
-  g = plot_error_vs_time(
-    df=errors_to_df(errors_plot['tau']['rollout']),
-    idx_fn=IDX_FN,
-    variable_title='$\\tau_{max}$',
-  )
-  g.figure.savefig(DIR_FIGS / 'errors' / 'tau-rollout.png', dpi=300, bbox_inches='tight')
-  plt.close(g.figure)
-  # Noise control
-  g = plot_error_vs_time(
-    df=errors_to_df(errors_plot['noise']['direct']),
-    idx_fn=IDX_FN,
-    variable_title='$\\dfrac{\\sigma_{noise}}{\\sigma_{data}}$',
-  )
-  g.figure.savefig(DIR_FIGS / 'errors' / 'noise-direct.png', dpi=300, bbox_inches='tight')
-  plt.close(g.figure)
-  g = plot_error_vs_time(
-    df=errors_to_df(errors_plot['noise']['rollout']),
-    idx_fn=IDX_FN,
-    variable_title='$\\dfrac{\\sigma_{noise}}{\\sigma_{data}}$',
-  )
-  g.figure.savefig(DIR_FIGS / 'errors' / 'noise-rollout.png', dpi=300, bbox_inches='tight')
-  plt.close(g.figure)
-  # Discretization invariance
-  g = plot_error_vs_time(
-    df=errors_to_df(errors_plot['disc']['direct']),
-    idx_fn=IDX_FN,
-    variable_title='Discretization',
-  )
-  g.figure.savefig(DIR_FIGS / 'errors' / 'discretization-direct.png', dpi=300, bbox_inches='tight')
-  plt.close(g.figure)
-  g = plot_error_vs_time(
-    df=errors_to_df(errors_plot['disc']['rollout']),
-    idx_fn=IDX_FN,
-    variable_title='Discretization',
-  )
-  g.figure.savefig(DIR_FIGS / 'errors' / 'discretization-rollout.png', dpi=300, bbox_inches='tight')
-  plt.close(g.figure)
-  # Resolution invariance
-  g = plot_error_vs_time(
-    df=errors_to_df(errors_plot['dsf']['direct']),
-    idx_fn=IDX_FN,
-    variable_title='DSF',
-  )
-  g.figure.savefig(DIR_FIGS / 'errors' / 'resolution-direct.png', dpi=300, bbox_inches='tight')
-  plt.close(g.figure)
-  g = plot_error_vs_time(
-    df=errors_to_df(errors_plot['dsf']['rollout']),
-    idx_fn=IDX_FN,
-    variable_title='DSF',
-  )
-  g.figure.savefig(DIR_FIGS / 'errors' / 'resolution-rollout.png', dpi=300, bbox_inches='tight')
-  plt.close(g.figure)
+  if dataset.time_dependent:
+    (DIR_FIGS / 'errors').mkdir()
+    def errors_to_df(_errors):
+      df = pd.DataFrame(_errors)
+      df['t'] = df.index
+      df = df.melt(id_vars=['t'], value_name='error')
+      return df
+    # Set which errors to plot
+    errors_plot = errors['_l1']
+    # Temporal continuity
+    g = plot_error_vs_time(
+      df=errors_to_df(errors_plot['tau']['direct']),
+      idx_fn=IDX_FN,
+      variable_title='$\\dfrac{\\tau}{\Delta t}$',
+    )
+    g.figure.savefig(DIR_FIGS / 'errors' / 'tau-direct.png', dpi=300, bbox_inches='tight')
+    plt.close(g.figure)
+    g = plot_error_vs_time(
+      df=errors_to_df(errors_plot['tau']['rollout']),
+      idx_fn=IDX_FN,
+      variable_title='$\\dfrac{\\tau_{max}}{\Delta t}$',
+    )
+    g.figure.savefig(DIR_FIGS / 'errors' / 'tau-rollout.png', dpi=300, bbox_inches='tight')
+    plt.close(g.figure)
+    # Noise control
+    g = plot_error_vs_time(
+      df=errors_to_df(errors_plot['noise']['direct']),
+      idx_fn=IDX_FN,
+      variable_title='$\\dfrac{\\sigma_{noise}}{\\sigma_{data}}$',
+    )
+    g.figure.savefig(DIR_FIGS / 'errors' / 'noise-direct.png', dpi=300, bbox_inches='tight')
+    plt.close(g.figure)
+    g = plot_error_vs_time(
+      df=errors_to_df(errors_plot['noise']['rollout']),
+      idx_fn=IDX_FN,
+      variable_title='$\\dfrac{\\sigma_{noise}}{\\sigma_{data}}$',
+    )
+    g.figure.savefig(DIR_FIGS / 'errors' / 'noise-rollout.png', dpi=300, bbox_inches='tight')
+    plt.close(g.figure)
+    # Discretization invariance
+    g = plot_error_vs_time(
+      df=errors_to_df(errors_plot['disc']['direct']),
+      idx_fn=IDX_FN,
+      variable_title='Discretization',
+    )
+    g.figure.savefig(DIR_FIGS / 'errors' / 'discretization-direct.png', dpi=300, bbox_inches='tight')
+    plt.close(g.figure)
+    g = plot_error_vs_time(
+      df=errors_to_df(errors_plot['disc']['rollout']),
+      idx_fn=IDX_FN,
+      variable_title='Discretization',
+    )
+    g.figure.savefig(DIR_FIGS / 'errors' / 'discretization-rollout.png', dpi=300, bbox_inches='tight')
+    plt.close(g.figure)
+    # Resolution invariance
+    g = plot_error_vs_time(
+      df=errors_to_df(errors_plot['dsf']['direct']),
+      idx_fn=IDX_FN,
+      variable_title='DSF',
+    )
+    g.figure.savefig(DIR_FIGS / 'errors' / 'resolution-direct.png', dpi=300, bbox_inches='tight')
+    plt.close(g.figure)
+    g = plot_error_vs_time(
+      df=errors_to_df(errors_plot['dsf']['rollout']),
+      idx_fn=IDX_FN,
+      variable_title='DSF',
+    )
+    g.figure.savefig(DIR_FIGS / 'errors' / 'resolution-rollout.png', dpi=300, bbox_inches='tight')
+    plt.close(g.figure)
 
   # Get ensemble estimations with the default settings
   # NOTE: One compilation
@@ -1020,28 +1182,45 @@ def main(argv):
     (DIR_FIGS / 'ensemble').mkdir()
     _batch_tst_small = _change_resolution(batch_tst_small, configs['flags']['space_downsample_factor'])
     for s in range(min(4, FLAGS.n_test)):
-      fig = plot_ensemble(
-        u_gtr=_batch_tst_small.u[:, [0, IDX_FN, -1]],
-        u_ens=u_prd_ensemble,
-        x=_batch_tst_small.x[s, 0],
-        idx_out=1,
-        idx_s=s,
-        symmetric=dataset_small.metadata.signed['u'],  # TMP
-        names=dataset_small.metadata.names['u'],  # TMP
-      )
-      fig.savefig(DIR_FIGS / 'ensemble' / f'rollout-fn-s{s:02d}.png', dpi=300, bbox_inches='tight')
-      plt.close(fig)
-      fig = plot_ensemble(
-        u_gtr=_batch_tst_small.u[:, [0, IDX_FN, -1]],
-        u_ens=u_prd_ensemble,
-        x=_batch_tst_small.x[s, 0],
-        idx_out=-1,
-        idx_s=s,
-        symmetric=dataset_small.metadata.signed['u'],  # TMP
-        names=dataset_small.metadata.names['u'],  # TMP
-      )
-      fig.savefig(DIR_FIGS / 'ensemble' / f'rollout-ex-s{s:02d}.png', dpi=300, bbox_inches='tight')
-      plt.close(fig)
+      if dataset.time_dependent:
+        fig = plot_ensemble(
+          u_gtr=_batch_tst_small.u[:, [0, IDX_FN, -1]],
+          u_ens=u_prd_ensemble,
+          x=_batch_tst_small.x[s, 0],
+          idx_out=1,
+          idx_s=s,
+          symmetric=dataset_small.metadata.signed['u'],
+          names=dataset_small.metadata.names['u'],
+          domain=dataset.metadata.domain_x,
+        )
+        fig.savefig(DIR_FIGS / 'ensemble' / f'rollout-fn-s{s:02d}.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        fig = plot_ensemble(
+          u_gtr=_batch_tst_small.u[:, [0, IDX_FN, -1]],
+          u_ens=u_prd_ensemble,
+          x=_batch_tst_small.x[s, 0],
+          idx_out=-1,
+          idx_s=s,
+          symmetric=dataset_small.metadata.signed['u'],  # TMP
+          names=dataset_small.metadata.names['u'],  # TMP
+          domain=dataset.metadata.domain_x,
+        )
+        fig.savefig(DIR_FIGS / 'ensemble' / f'rollout-ex-s{s:02d}.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
+      else:
+        fig = plot_ensemble(
+          u_gtr=_batch_tst_small.u,
+          u_ens=u_prd_ensemble,
+          x=_batch_tst_small.x[s, 0],
+          idx_out=0,
+          idx_s=s,
+          symmetric=dataset_small.metadata.signed['u'],
+          names=dataset_small.metadata.names['u'],
+          domain=dataset.metadata.domain_x,
+        )
+        fig.savefig(DIR_FIGS / 'ensemble' / f's{s:02d}.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
+
 
   _print_between_dashes('DONE')
 

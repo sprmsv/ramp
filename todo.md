@@ -2,11 +2,9 @@
 
 # NEXT STEPS
 
-- Debug fractional pairing strategy
-- Update the test script
-    - Make sure about time-continuity with fractional pairing
-    - Support time-indep datasets (try airfoil_li)
-    - Test it on the server
+- Arrange the colorbar ticks (rotation, font, scientific format)
+- Keep graphs on CPU by using np instead of jnp ?
+- Test.py on the server
 - Benchmark inference
 
 - Register the Elasticity dataset (first encode the geometry of the hole somehow)

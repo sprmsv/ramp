@@ -529,7 +529,6 @@ def train(
     batch: Batch
   ) -> Mapping:
 
-
     if tau_ratio < 1:
       assert is_multiple(1., tau_ratio)
       step = lambda *args, **kwargs: stepper.unroll(*args, **kwargs, num_steps=int(1 / tau_ratio))

@@ -32,7 +32,7 @@ CMAP_WRB = matplotlib.colors.LinearSegmentedColormap.from_list(
 )
 
 plt.rcParams['font.family'] = 'serif'
-SCATTER_SETTINGS = dict(marker='s', s=1, alpha=1)
+SCATTER_SETTINGS = dict(marker='s', s=1, alpha=1, linewidth=0)
 HATCH_SETTINGS = dict(facecolor='none', hatch='//////', edgecolor='#4f4f4f', linewidth=.0)
 
 # TODO: Update
@@ -100,6 +100,8 @@ def plot_trajectory(u, x, t, idx_t, idx_s=0, symmetric=True, ylabels=None, domai
   _HEIGHT_PER_ROW = 1.5
   _WIDTH_MARGIN = .2
   _HEIGHT_MARGIN = .2
+  _SCATTER_SETTINGS = SCATTER_SETTINGS.copy()
+  _SCATTER_SETTINGS['s'] = _SCATTER_SETTINGS['s'] * .4 * _HEIGHT_PER_ROW
 
   # Arrange the inputs
   n_vars = u.shape[-1]
@@ -161,7 +163,7 @@ def plot_trajectory(u, x, t, idx_t, idx_s=0, symmetric=True, ylabels=None, domai
         cmap=cmap,
         vmin=vmin,
         vmax=vmax,
-        **SCATTER_SETTINGS,
+        **_SCATTER_SETTINGS,
       )
       if (r == 0) and (len(idx_t) > 1):
         axs[r, icol].set(title=f'$t=t_{{{idx_t[icol]}}}$')
@@ -169,7 +171,8 @@ def plot_trajectory(u, x, t, idx_t, idx_s=0, symmetric=True, ylabels=None, domai
     # Add colorbar
     ax_cb = fig.add_subplot(g[r, -1])
     ax_cb.tick_params(labelsize=8)
-    plt.colorbar(h, cax=ax_cb)
+    cb = plt.colorbar(h, cax=ax_cb)
+    cb.formatter.set_powerlimits((0, 0))
 
   # Add ylabels
   for r in range(n_vars):
@@ -182,6 +185,8 @@ def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None
 
   _HEIGHT_PER_ROW = 2
   _HEIGHT_MARGIN = .2
+  _SCATTER_SETTINGS = SCATTER_SETTINGS.copy()
+  _SCATTER_SETTINGS['s'] = _SCATTER_SETTINGS['s'] * .42 * _HEIGHT_PER_ROW
 
   n_vars = u_gtr.shape[-1]
   if isinstance(symmetric, bool):
@@ -263,9 +268,10 @@ def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None
       cmap=(CMAP_BWR if symmetric[ivar] else CMAP_WRB),
       vmax=(abs_vmax_inp if symmetric[ivar] else vmax_inp),
       vmin=(-abs_vmax_inp if symmetric[ivar] else vmin_inp),
-      **SCATTER_SETTINGS,
+      **_SCATTER_SETTINGS,
     )
-    plt.colorbar(h, cax=axs_cb_inp[ivar], orientation='horizontal')
+    cb = plt.colorbar(h, cax=axs_cb_inp[ivar], orientation='horizontal')
+    cb.formatter.set_powerlimits((0, 0))
     # Plot ground truth
     h = axs_gtr[ivar].scatter(
       x=x_out[:, 0],
@@ -274,7 +280,7 @@ def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None
       cmap=(CMAP_BWR if symmetric[ivar] else CMAP_WRB),
       vmax=(abs_vmax_out if symmetric[ivar] else vmax_out),
       vmin=(-abs_vmax_out if symmetric[ivar] else vmin_out),
-      **SCATTER_SETTINGS,
+      **_SCATTER_SETTINGS,
     )
     # Plot estimate
     h = axs_prd[ivar].scatter(
@@ -284,9 +290,10 @@ def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None
       cmap=(CMAP_BWR if symmetric[ivar] else CMAP_WRB),
       vmax=(abs_vmax_out if symmetric[ivar] else vmax_out),
       vmin=(-abs_vmax_out if symmetric[ivar] else vmin_out),
-      **SCATTER_SETTINGS,
+      **_SCATTER_SETTINGS,
     )
-    plt.colorbar(h, cax=axs_cb_out[ivar], orientation='horizontal')
+    cb = plt.colorbar(h, cax=axs_cb_out[ivar], orientation='horizontal')
+    cb.formatter.set_powerlimits((0, 0))
     # Plot error
     h = axs_err[ivar].scatter(
       x=x_out[:, 0],
@@ -295,9 +302,10 @@ def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None
       cmap=CMAP_WRB,
       vmin=0,
       vmax=np.max(np.abs(u_err[:, ivar])),
-      **SCATTER_SETTINGS,
+      **_SCATTER_SETTINGS,
     )
-    plt.colorbar(h, cax=axs_cb_err[ivar], orientation='horizontal')
+    cb = plt.colorbar(h, cax=axs_cb_err[ivar], orientation='horizontal')
+    cb.formatter.set_powerlimits((0, 0))
 
   # Set titles
   axs_inp[0].set(title='Input');
@@ -314,14 +322,16 @@ def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None
   for ax in [ax for axs in [axs_cb_inp, axs_cb_out, axs_cb_err] for ax in axs]:
     ax: plt.Axes
     ticklabels = ax.get_xticklabels()
-    ax.set_xticklabels(ticklabels[:-1], rotation=-45)
+    ax.set_xticklabels(ticklabels, rotation=-45)
 
   return fig
 
-def plot_ensemble(u_gtr, u_ens, x, idx_out: int, idx_s: int = 0, symmetric=True, names=None):
+def plot_ensemble(u_gtr, u_ens, x, idx_out: int, idx_s: int = 0, symmetric=True, names=None, domain=([0, 0], [1, 1])):
 
   _HEIGHT_PER_ROW = 2.5
   _HEIGHT_MARGIN = .2
+  _SCATTER_SETTINGS = SCATTER_SETTINGS.copy()
+  _SCATTER_SETTINGS['s'] = _SCATTER_SETTINGS['s'] * .6 * _HEIGHT_PER_ROW
 
   n_vars = u_gtr.shape[-1]
   if isinstance(symmetric, bool):
@@ -366,8 +376,12 @@ def plot_ensemble(u_gtr, u_ens, x, idx_out: int, idx_s: int = 0, symmetric=True,
     ax: plt.Axes
     ax.set_xticks([])
     ax.set_yticks([])
-    ax.set_xlim([0, 1])
-    ax.set_ylim([0, 1])
+    ax.set_xlim([domain[0][0], domain[1][0]])
+    ax.set_ylim([domain[0][1], domain[1][1]])
+    ax.fill_between(
+      x=[domain[0][0], domain[1][0]], y1=domain[0][1], y2=domain[1][1],
+      **HATCH_SETTINGS,
+    )
   for ax in [ax for axs in [axs_cb_avg, axs_cb_err, axs_cb_std] for ax in axs]:
     ax: plt.Axes
     ax.tick_params(labelsize=8)
@@ -388,31 +402,34 @@ def plot_ensemble(u_gtr, u_ens, x, idx_out: int, idx_s: int = 0, symmetric=True,
       cmap=(CMAP_BWR if symmetric[ivar] else CMAP_WRB),
       vmax=(vmax_gtr if symmetric[ivar] else None),
       vmin=(-vmax_gtr if symmetric[ivar] else None),
-      **SCATTER_SETTINGS,
+      **_SCATTER_SETTINGS,
     )
-    plt.colorbar(h, cax=axs_cb_avg[ivar], orientation='horizontal')
+    cb = plt.colorbar(h, cax=axs_cb_avg[ivar], orientation='horizontal')
+    cb.formatter.set_powerlimits((0, 0))
     # Plot error
     h = axs_err[ivar].scatter(
-      x=x[:, 0],
-      y=x[:, 1],
-      c=u_ens_std[idx_s, idx_out, :, ivar],
-      cmap=CMAP_WRB,
-      vmin=0,
-      vmax=None,
-      **SCATTER_SETTINGS,
-    )
-    plt.colorbar(h, cax=axs_cb_err[ivar], orientation='horizontal')
-    # Plot std
-    h = axs_std[ivar].scatter(
       x=x[:, 0],
       y=x[:, 1],
       c=np.abs(u_err[idx_s, idx_out, :, ivar]),
       cmap=CMAP_WRB,
       vmin=0,
       vmax=None,
-      **SCATTER_SETTINGS,
+      **_SCATTER_SETTINGS,
     )
-    plt.colorbar(h, cax=axs_cb_std[ivar], orientation='horizontal')
+    cb = plt.colorbar(h, cax=axs_cb_err[ivar], orientation='horizontal')
+    cb.formatter.set_powerlimits((0, 0))
+    # Plot std
+    h = axs_std[ivar].scatter(
+      x=x[:, 0],
+      y=x[:, 1],
+      c=u_ens_std[idx_s, idx_out, :, ivar],
+      cmap=CMAP_WRB,
+      vmin=0,
+      vmax=None,
+      **_SCATTER_SETTINGS,
+    )
+    cb = plt.colorbar(h, cax=axs_cb_std[ivar], orientation='horizontal')
+    cb.formatter.set_powerlimits((0, 0))
 
   # Set titles
   axs_avg[0].set(title='Ensemble mean');
@@ -428,7 +445,7 @@ def plot_ensemble(u_gtr, u_ens, x, idx_out: int, idx_s: int = 0, symmetric=True,
   for ax in [ax for axs in [axs_cb_avg, axs_cb_err, axs_cb_std] for ax in axs]:
     ax: plt.Axes
     ticklabels = ax.get_xticklabels()
-    ax.set_xticklabels(ticklabels[:-1], rotation=-45)
+    ax.set_xticklabels(ticklabels, rotation=-45)
 
   return fig
 
