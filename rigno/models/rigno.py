@@ -132,6 +132,8 @@ class RegionInteractionGraphBuilder:
     for level in range(self.rmesh_levels):
       # Sub-sample the rmesh
       _rmesh_size = int(x_rmesh.shape[0] / (self.subsample_factor ** level))
+      if _rmesh_size < 4:
+        continue
       _x_rmesh = x_rmesh[:_rmesh_size]
       # Construct a triangulation
       if self.periodic:
@@ -171,12 +173,14 @@ class RegionInteractionGraphBuilder:
     if self.periodic:
       x_rnodes = _subsample_pointset(key=key, x=x_inp, factor=self.subsample_factor)
     else:
-      # NOTE: Always keep boundary nodes for non-periodic BC
-      idx_bound = np.where((x_inp[:, 0] == -1) | (x_inp[:, 0] == +1) | (x_inp[:, 1] == -1) | (x_inp[:, 1] == +1))
-      x_boundary = x_inp[idx_bound]
-      x_internal = np.delete(x_inp, idx_bound, axis=0)
-      x_rmesh_internal = _subsample_pointset(key=key, x=x_internal, factor=self.subsample_factor)
-      x_rnodes, = shuffle_arrays(key=key, arrays=(jnp.concatenate([x_boundary, x_rmesh_internal]),))
+      # TODO: Keep boundary nodes for non-periodic BC
+      # NOTE: With the below implementation the number of x_rnodes might end up different
+      x_rnodes = _subsample_pointset(key=key, x=x_inp, factor=self.subsample_factor)
+      # idx_bound = np.where((x_inp[:, 0] == -1) | (x_inp[:, 0] == +1) | (x_inp[:, 1] == -1) | (x_inp[:, 1] == +1))
+      # x_boundary = x_inp[idx_bound]
+      # x_internal = np.delete(x_inp, idx_bound, axis=0)
+      # x_rmesh_internal = _subsample_pointset(key=key, x=x_internal, factor=self.subsample_factor)
+      # x_rnodes, = shuffle_arrays(key=key, arrays=(jnp.concatenate([x_boundary, x_rmesh_internal]),))
 
     # Compute minimum support radius of each rmesh node
     r_rnodes = self._compute_minimum_support_radius(x_rnodes)

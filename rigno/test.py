@@ -1201,8 +1201,8 @@ def main(argv):
           x=_batch_tst_small.x[s, 0],
           idx_out=-1,
           idx_s=s,
-          symmetric=dataset_small.metadata.signed['u'],  # TMP
-          names=dataset_small.metadata.names['u'],  # TMP
+          symmetric=dataset_small.metadata.signed['u'],
+          names=dataset_small.metadata.names['u'],
           domain=dataset.metadata.domain_x,
         )
         fig.savefig(DIR_FIGS / 'ensemble' / f'rollout-ex-s{s:02d}.png', dpi=300, bbox_inches='tight')
