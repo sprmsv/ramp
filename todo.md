@@ -2,13 +2,6 @@
 
 # NEXT STEPS
 
-- Arrange the colorbar ticks (rotation, font, scientific format)
-- Keep graphs on CPU by using np instead of jnp ?
-- Test.py on the server
-- Benchmark inference
-
-- Register the Elasticity dataset (first encode the geometry of the hole somehow)
-
 - Describe RIGNO v2.0 in the thesis (or a new document)
     - The whole unstructured mesh handling
     - New metrics for unstructured meshes

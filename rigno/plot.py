@@ -32,67 +32,10 @@ CMAP_WRB = matplotlib.colors.LinearSegmentedColormap.from_list(
 )
 
 plt.rcParams['font.family'] = 'serif'
+
+plt.rcParams['font.family'] = 'serif'
 SCATTER_SETTINGS = dict(marker='s', s=1, alpha=1, linewidth=0)
-HATCH_SETTINGS = dict(facecolor='none', hatch='//////', edgecolor='#4f4f4f', linewidth=.0)
-
-# TODO: Update
-def animate(trajs, idx_traj=0, symmetric=True, cmaps=CMAP_BBR, vertical=True):
-  return
-  if not isinstance(trajs, list):
-    trajs = [trajs]
-  n_trjs = len(trajs)
-
-  if not isinstance(cmaps, list):
-    cmaps = [cmaps] * n_trjs
-  assert len(trajs) == len(cmaps)
-
-  if not isinstance(symmetric, list):
-    symmetric = [symmetric] * n_trjs
-  assert len(trajs) == len(symmetric)
-
-  n_vars = trajs[0].shape[-1]
-  n_time = trajs[0].shape[1]
-
-  if vertical:
-    fig, axs = plt.subplots(
-      nrows=n_vars, ncols=n_trjs,
-      figsize=(5*n_trjs, 4*n_vars)
-    )
-  else:
-    fig, axs = plt.subplots(
-      nrows=n_trjs, ncols=n_vars,
-      figsize=(5*n_vars, 4*n_trjs)
-    )
-
-  handlers = []
-  for i in range(n_vars):
-    for j in range(n_trjs):
-      if symmetric[j]:
-        vmax = np.max(np.abs(trajs[j][idx_traj, :, ..., i]))
-        vmin = -vmax
-      else:
-        vmax = np.max(trajs[j][idx_traj, :, ..., i])
-        vmin = np.min(trajs[j][idx_traj, :, ..., i])
-
-      idx = (n_trjs * i + j) if vertical else (n_vars * j + i)
-      h = axs.flatten()[idx].imshow(
-        trajs[j][idx_traj, 0, ..., i],
-        cmap=cmaps[j],
-        vmin=vmin,
-        vmax=vmax,
-      )
-      plt.colorbar(h)
-      handlers.append(h)
-
-  def update(frame):
-    for i in range(n_vars):
-      for j in range(n_trjs):
-        idx = (n_trjs * i + j) if vertical else (n_vars * j + i)
-        handlers[idx].set_data(trajs[j][idx_traj, frame, ..., i])
-
-  ani = animation.FuncAnimation(fig=fig, func=update, frames=n_time, interval=150)
-
-  return ani, (fig, axs)
+HATCH_SETTINGS = dict(facecolor='#b8b8b8', hatch='//////', edgecolor='#4f4f4f', linewidth=.0)
 
 def plot_trajectory(u, x, t, idx_t, idx_s=0, symmetric=True, ylabels=None, domain=([0, 0], [1, 1])):
 
@@ -101,7 +44,8 @@ def plot_trajectory(u, x, t, idx_t, idx_s=0, symmetric=True, ylabels=None, domai
   _WIDTH_MARGIN = .2
   _HEIGHT_MARGIN = .2
   _SCATTER_SETTINGS = SCATTER_SETTINGS.copy()
-  _SCATTER_SETTINGS['s'] = _SCATTER_SETTINGS['s'] * .3 * _HEIGHT_PER_ROW
+  _SCATTER_SETTINGS['s'] = _SCATTER_SETTINGS['s'] * .42 * _HEIGHT_PER_ROW
+  _SCATTER_SETTINGS['s'] = _SCATTER_SETTINGS['s'] * 128 / (x.shape[2] ** .5)
 
   # Arrange the inputs
   n_vars = u.shape[-1]
@@ -188,6 +132,7 @@ def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None
   _HEIGHT_MARGIN = .2
   _SCATTER_SETTINGS = SCATTER_SETTINGS.copy()
   _SCATTER_SETTINGS['s'] = _SCATTER_SETTINGS['s'] * .4 * _HEIGHT_PER_ROW
+  _SCATTER_SETTINGS['s'] = _SCATTER_SETTINGS['s'] * 128 / (x_inp.shape[0] ** .5)
 
   n_vars = u_gtr.shape[-1]
   if isinstance(symmetric, bool):
@@ -205,7 +150,7 @@ def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None
 
   figs = []
   for ivar in range(n_vars):
-    figs.append(fig.add_subfigure(g_fig[ivar]))
+    figs.append(fig.add_subfigure(g_fig[ivar], frameon=False))
   # Add axes
   axs_inp = []
   axs_gtr = []
@@ -326,10 +271,11 @@ def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None
 
 def plot_ensemble(u_gtr, u_ens, x, idx_out: int, idx_s: int = 0, symmetric=True, names=None, domain=([0, 0], [1, 1])):
 
-  _HEIGHT_PER_ROW = 3
+  _HEIGHT_PER_ROW = 2.5
   _HEIGHT_MARGIN = .2
   _SCATTER_SETTINGS = SCATTER_SETTINGS.copy()
   _SCATTER_SETTINGS['s'] = _SCATTER_SETTINGS['s'] * .6 * _HEIGHT_PER_ROW
+  _SCATTER_SETTINGS['s'] = _SCATTER_SETTINGS['s'] * 128 / (x.shape[0] ** .5)
 
   n_vars = u_gtr.shape[-1]
   if isinstance(symmetric, bool):
@@ -347,7 +293,7 @@ def plot_ensemble(u_gtr, u_ens, x, idx_out: int, idx_s: int = 0, symmetric=True,
 
   figs = []
   for ivar in range(n_vars):
-    figs.append(fig.add_subfigure(g_fig[ivar]))
+    figs.append(fig.add_subfigure(g_fig[ivar], frameon=False))
   # Add axes
   axs_avg = []
   axs_err = []
@@ -513,3 +459,62 @@ def plot_intermediates(features, idx_t: int = 0, idx_s: int = 0, share_cmap: boo
     ax.set_yticks([])
 
   return fig, axs
+
+# TODO: Update
+def animate(trajs, idx_traj=0, symmetric=True, cmaps=CMAP_BBR, vertical=True):
+  return
+  if not isinstance(trajs, list):
+    trajs = [trajs]
+  n_trjs = len(trajs)
+
+  if not isinstance(cmaps, list):
+    cmaps = [cmaps] * n_trjs
+  assert len(trajs) == len(cmaps)
+
+  if not isinstance(symmetric, list):
+    symmetric = [symmetric] * n_trjs
+  assert len(trajs) == len(symmetric)
+
+  n_vars = trajs[0].shape[-1]
+  n_time = trajs[0].shape[1]
+
+  if vertical:
+    fig, axs = plt.subplots(
+      nrows=n_vars, ncols=n_trjs,
+      figsize=(5*n_trjs, 4*n_vars)
+    )
+  else:
+    fig, axs = plt.subplots(
+      nrows=n_trjs, ncols=n_vars,
+      figsize=(5*n_vars, 4*n_trjs)
+    )
+
+  handlers = []
+  for i in range(n_vars):
+    for j in range(n_trjs):
+      if symmetric[j]:
+        vmax = np.max(np.abs(trajs[j][idx_traj, :, ..., i]))
+        vmin = -vmax
+      else:
+        vmax = np.max(trajs[j][idx_traj, :, ..., i])
+        vmin = np.min(trajs[j][idx_traj, :, ..., i])
+
+      idx = (n_trjs * i + j) if vertical else (n_vars * j + i)
+      h = axs.flatten()[idx].imshow(
+        trajs[j][idx_traj, 0, ..., i],
+        cmap=cmaps[j],
+        vmin=vmin,
+        vmax=vmax,
+      )
+      plt.colorbar(h)
+      handlers.append(h)
+
+  def update(frame):
+    for i in range(n_vars):
+      for j in range(n_trjs):
+        idx = (n_trjs * i + j) if vertical else (n_vars * j + i)
+        handlers[idx].set_data(trajs[j][idx_traj, frame, ..., i])
+
+  ani = animation.FuncAnimation(fig=fig, func=update, frames=n_time, interval=150)
+
+  return ani, (fig, axs)
