@@ -97,11 +97,11 @@ def animate(trajs, idx_traj=0, symmetric=True, cmaps=CMAP_BBR, vertical=True):
 def plot_trajectory(u, x, t, idx_t, idx_s=0, symmetric=True, ylabels=None, domain=([0, 0], [1, 1])):
 
   _WIDTH_PER_COL = 1.5
-  _HEIGHT_PER_ROW = 1.5
+  _HEIGHT_PER_ROW = 1.7
   _WIDTH_MARGIN = .2
   _HEIGHT_MARGIN = .2
   _SCATTER_SETTINGS = SCATTER_SETTINGS.copy()
-  _SCATTER_SETTINGS['s'] = _SCATTER_SETTINGS['s'] * .4 * _HEIGHT_PER_ROW
+  _SCATTER_SETTINGS['s'] = _SCATTER_SETTINGS['s'] * .3 * _HEIGHT_PER_ROW
 
   # Arrange the inputs
   n_vars = u.shape[-1]
@@ -116,7 +116,7 @@ def plot_trajectory(u, x, t, idx_t, idx_s=0, symmetric=True, ylabels=None, domai
     ncols=len(idx_t)+1,
     width_ratios=([1]*len(idx_t) + [.1]),
     wspace=0.05,
-    hspace=0.05,
+    hspace=0.20,
   )
   # Add all axes
   axs = []
@@ -170,9 +170,10 @@ def plot_trajectory(u, x, t, idx_t, idx_s=0, symmetric=True, ylabels=None, domai
 
     # Add colorbar
     ax_cb = fig.add_subplot(g[r, -1])
-    ax_cb.tick_params(labelsize=8)
     cb = plt.colorbar(h, cax=ax_cb)
     cb.formatter.set_powerlimits((0, 0))
+    ax_cb.yaxis.get_offset_text().set(size=8)
+    ax_cb.yaxis.set_tick_params(labelsize=8)
 
   # Add ylabels
   for r in range(n_vars):
@@ -183,10 +184,10 @@ def plot_trajectory(u, x, t, idx_t, idx_s=0, symmetric=True, ylabels=None, domai
 
 def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None, domain=([0, 0], [1, 1])):
 
-  _HEIGHT_PER_ROW = 2
+  _HEIGHT_PER_ROW = 1.9
   _HEIGHT_MARGIN = .2
   _SCATTER_SETTINGS = SCATTER_SETTINGS.copy()
-  _SCATTER_SETTINGS['s'] = _SCATTER_SETTINGS['s'] * .42 * _HEIGHT_PER_ROW
+  _SCATTER_SETTINGS['s'] = _SCATTER_SETTINGS['s'] * .4 * _HEIGHT_PER_ROW
 
   n_vars = u_gtr.shape[-1]
   if isinstance(symmetric, bool):
@@ -218,7 +219,7 @@ def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None
       nrows=2,
       ncols=4,
       height_ratios=[1, .05],
-      wspace=0.05,
+      wspace=0.20,
       hspace=0.05,
     )
     axs_inp.append(figs[ivar].add_subplot(g[0, 0]))
@@ -239,9 +240,6 @@ def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None
       x=[domain[0][0], domain[1][0]], y1=domain[0][1], y2=domain[1][1],
       **HATCH_SETTINGS,
     )
-  for ax in [ax for axs in [axs_cb_inp, axs_cb_out, axs_cb_err] for ax in axs]:
-    ax: plt.Axes
-    ax.tick_params(labelsize=8)
 
   # Get prediction error
   u_err = (u_gtr - u_prd)
@@ -321,14 +319,14 @@ def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None
   # Rotate colorbar tick labels
   for ax in [ax for axs in [axs_cb_inp, axs_cb_out, axs_cb_err] for ax in axs]:
     ax: plt.Axes
-    ticklabels = ax.get_xticklabels()
-    ax.set_xticklabels(ticklabels, rotation=-45)
+    ax.xaxis.get_offset_text().set(size=8)
+    ax.xaxis.set_tick_params(labelsize=8)
 
   return fig
 
 def plot_ensemble(u_gtr, u_ens, x, idx_out: int, idx_s: int = 0, symmetric=True, names=None, domain=([0, 0], [1, 1])):
 
-  _HEIGHT_PER_ROW = 2.5
+  _HEIGHT_PER_ROW = 3
   _HEIGHT_MARGIN = .2
   _SCATTER_SETTINGS = SCATTER_SETTINGS.copy()
   _SCATTER_SETTINGS['s'] = _SCATTER_SETTINGS['s'] * .6 * _HEIGHT_PER_ROW
@@ -362,7 +360,7 @@ def plot_ensemble(u_gtr, u_ens, x, idx_out: int, idx_s: int = 0, symmetric=True,
       nrows=2,
       ncols=3,
       height_ratios=[1, .05],
-      wspace=0.05,
+      wspace=0.20,
       hspace=0.05,
     )
     axs_avg.append(figs[ivar].add_subplot(g[0, 0]))
@@ -382,9 +380,6 @@ def plot_ensemble(u_gtr, u_ens, x, idx_out: int, idx_s: int = 0, symmetric=True,
       x=[domain[0][0], domain[1][0]], y1=domain[0][1], y2=domain[1][1],
       **HATCH_SETTINGS,
     )
-  for ax in [ax for axs in [axs_cb_avg, axs_cb_err, axs_cb_std] for ax in axs]:
-    ax: plt.Axes
-    ax.tick_params(labelsize=8)
 
   # Compute statistics and error
   u_ens_avg = np.mean(u_ens, axis=0)
@@ -444,8 +439,8 @@ def plot_ensemble(u_gtr, u_ens, x, idx_out: int, idx_s: int = 0, symmetric=True,
   # Rotate colorbar tick labels
   for ax in [ax for axs in [axs_cb_avg, axs_cb_err, axs_cb_std] for ax in axs]:
     ax: plt.Axes
-    ticklabels = ax.get_xticklabels()
-    ax.set_xticklabels(ticklabels, rotation=-45)
+    ax.xaxis.get_offset_text().set(size=8)
+    ax.xaxis.set_tick_params(labelsize=8)
 
   return fig
 

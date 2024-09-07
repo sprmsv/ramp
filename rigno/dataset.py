@@ -645,7 +645,7 @@ class Dataset:
     concatenate_coeffs: bool = False,
     time_cutoff_idx: int = None,
     time_downsample_factor: int = 1,
-    space_downsample_factor: int = 1,
+    space_downsample_factor: float = 1.,
     n_train: int = 0,
     n_valid: int = 0,
     n_test: int = 0,
@@ -939,11 +939,13 @@ class Dataset:
 
     # Downsample the space coordinates randomly
     if self.space_downsample_factor > 1:
-      permutation = jax.random.permutation(self.key, u.shape[2])
-      # NOTE: Same discretization for all snapshots
-      u = u[:, :, permutation]
-      c = c[:, :, permutation] if (c is not None) else None
-      x = x[:, :, permutation]
+      if False:
+        # NOTE: TMP Temporarily turning this off
+        permutation = jax.random.permutation(self.key, u.shape[2])
+        # NOTE: Same discretization for all snapshots
+        u = u[:, :, permutation]
+        c = c[:, :, permutation] if (c is not None) else None
+        x = x[:, :, permutation]
 
       size = int(u.shape[2] / (self.space_downsample_factor ** 2))
       u = u[:, :, :size]

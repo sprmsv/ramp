@@ -63,10 +63,10 @@ def define_flags():
     help='Seed for random number generator'
   )
   flags.DEFINE_integer(name='time_downsample_factor', default=2, required=False,
-    help='Factor for time downsampling'
+    help='Factor for downsampling the time resolution'
   )
-  flags.DEFINE_integer(name='space_downsample_factor', default=1, required=False,
-    help='Factor for space downsampling'
+  flags.DEFINE_float(name='space_downsample_factor', default=1., required=False,
+    help='Factor for downsampling the space resolution'
   )
 
   # FLAGS::training
