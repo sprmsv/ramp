@@ -482,6 +482,10 @@ def get_all_estimations(
 
   # Define a auxiliary function for getting the errors
   def _get_err_trajectory(_u_gtr, _u_prd, p):
+    mean = np.array(dataset.metadata.global_mean)
+    std = np.array(dataset.metadata.global_std)
+    _u_gtr = (_u_gtr - mean) / std
+    _u_prd = (_u_prd - mean) / std
     _err = [
       np.mean(np.median(rel_lp_error(
         _u_gtr[:, [idx_t]],

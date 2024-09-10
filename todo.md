@@ -2,13 +2,21 @@
 
 # NEXT STEPS
 
+- Try to make it resolution invariant again
+
 - Describe RIGNO v2.0 in the thesis (or a new document)
     - The whole unstructured mesh handling
     - New metrics for unstructured meshes
     - added support radius to the structural regional node features
     - Time-independent datasets: no t, no tau
 
-- Impose boundary conditions
+- Redo the faulty tests:
+    - E601/rigno-unstructured/Poisson-Gauss/240907-210509
+    - E602/rigno-unstructured/airfoil_grid/240907-210524
+    - E602/rigno-unstructured/Poisson-Gauss/240907-210524
+    - E603/rigno-unstructured/elasticity/240907-210532
+
+- Experiment with airfoil_li_large.nc
 
 ## SOME UNANSWERED QUESTIONS
 
