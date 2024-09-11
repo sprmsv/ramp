@@ -162,7 +162,7 @@ class RegionInteractionGraphBuilder:
     return edges, domains
 
   # TODO: Build multiple graphs at the same time in a vectorial way
-  def build_metadata(self, x_inp: Array, x_out: Array, domain: Array, key: Union[flax.typing.PRNGKey, None] = None) -> RegionInteractionGraphMetadata:
+  def build_metadata(self, x_inp: Array, x_out: Array, domain: Array, rmesh_correction_dsf: int = 1, key: Union[flax.typing.PRNGKey, None] = None) -> RegionInteractionGraphMetadata:
 
     # Normalize coordinates in [-1, +1)
     x_inp = 2 * (x_inp - domain[0]) / (domain[1] - domain[0]) - 1
@@ -174,13 +174,19 @@ class RegionInteractionGraphBuilder:
       x_rnodes = _subsample_pointset(key=key, x=x_inp, factor=self.subsample_factor)
     else:
       # TODO: Keep boundary nodes for non-periodic BC
-      # NOTE: With the below implementation the number of x_rnodes might end up different
+      # NOTE: With the below implementation the number of x_rnodes might vary
       x_rnodes = _subsample_pointset(key=key, x=x_inp, factor=self.subsample_factor)
       # idx_bound = np.where((x_inp[:, 0] == -1) | (x_inp[:, 0] == +1) | (x_inp[:, 1] == -1) | (x_inp[:, 1] == +1))
       # x_boundary = x_inp[idx_bound]
       # x_internal = np.delete(x_inp, idx_bound, axis=0)
       # x_rmesh_internal = _subsample_pointset(key=key, x=x_internal, factor=self.subsample_factor)
       # x_rnodes, = shuffle_arrays(key=key, arrays=(jnp.concatenate([x_boundary, x_rmesh_internal]),))
+
+    # Downsample or upsample the rmesh
+    if rmesh_correction_dsf > 1:
+      x_rnodes = _subsample_pointset(key=key, x=x_rnodes, factor=rmesh_correction_dsf)
+    elif rmesh_correction_dsf < 1:
+      x_rnodes = _upsample_pointset(key=key, x=x_rnodes, factor=(1 / rmesh_correction_dsf))
 
     # Compute minimum support radius of each rmesh node
     r_rnodes = self._compute_minimum_support_radius(x_rnodes)
@@ -909,9 +915,19 @@ class RIGNO(AbstractOperator):
     return output
 
 def _subsample_pointset(key, x: Array, factor: float) -> Array:
+  """Downsamples a point cloud by randomly subsampling them"""
   x = jnp.array(x)
   x_shuffled, = shuffle_arrays(key, [x])
   return x_shuffled[:int(x.shape[0] / factor)]
+
+def _upsample_pointset(key, x: Array, factor: float) -> Array:
+  """Upsamples a point cloud by adding the middle point of randomly selected simplices."""
+
+  num_new_points = int(x.shape[0] * (factor - 1))
+  tri = Delaunay(points=x)
+  simplices = jax.random.permutation(key=key, x=tri.simplices)[:num_new_points]
+  x_ext = np.mean(x[simplices], axis=1)
+  return np.concatenate([x, x_ext], axis=0)
 
 def _get_edges_from_triangulation(tri: Delaunay, bidirectional: bool = True):
   indptr, cols = tri.vertex_neighbor_vertices

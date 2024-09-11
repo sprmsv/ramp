@@ -63,7 +63,7 @@ def _print_between_dashes(msg):
   logging.info(msg)
   logging.info('-' * 80)
 
-def _build_graph_metadata(batch: Batch, graph_builder: RegionInteractionGraphBuilder, dataset: Dataset):
+def _build_graph_metadata(batch: Batch, graph_builder: RegionInteractionGraphBuilder, dataset: Dataset, rmesh_correction_dsf: int = 1) -> RegionInteractionGraphMetadata:
   # Build graph metadata with transformed coordinates
   metadata = []
   num_p2r_edges = 0
@@ -72,7 +72,7 @@ def _build_graph_metadata(batch: Batch, graph_builder: RegionInteractionGraphBui
   # Loop over all coordinates in the batch
   # NOTE: Assuming constant x in time
   for x in batch.x[:, 0]:
-    m = graph_builder.build_metadata(x_inp=x, x_out=x, domain=np.array(dataset.metadata.domain_x), key=None)
+    m = graph_builder.build_metadata(x_inp=x, x_out=x, domain=np.array(dataset.metadata.domain_x), rmesh_correction_dsf=rmesh_correction_dsf)
     metadata.append(m)
     # Store the maximum number of edges
     num_p2r_edges = max(num_p2r_edges, m.p2r_edge_indices.shape[1])
@@ -348,6 +348,7 @@ def get_all_estimations(
     apply_fn: Callable,
     tau_ratio: int = None,
     transform: Callable[[Array], Array] = None,
+    dsf: int = 1,
   ):
     # Check inputs
     if dataset.time_dependent and direct:
@@ -360,7 +361,8 @@ def get_all_estimations(
       # Transform the batch
       if transform is not None:
         batch = transform(batch)
-        g = _build_graph_metadata(batch, graph_builder, dataset)
+        correction_dsf = train_flags['space_downsample_factor'] / dsf
+        g = _build_graph_metadata(batch, graph_builder, dataset, rmesh_correction_dsf=correction_dsf)
       else:
         g = batch.g
 
@@ -453,7 +455,7 @@ def get_all_estimations(
         unrollers[dsf][tau_ratio_max].unroll, static_argnums=(2,))
 
   # Set the ground-truth solutions
-  batch_test = next(dataset.batches(mode='test', batch_size=dataset.nums['test']))
+  batch_test = next(dataset.batches(mode='test', batch_size=dataset.nums['test'], get_graphs=False))
 
   # Instantiate the outputs
   errors = {error_type: {
@@ -472,12 +474,14 @@ def get_all_estimations(
       direct=False,
       apply_fn=apply_unroll_jit[dsf][tau_ratio_max],
       transform=(lambda b: _change_resolution(b, dsf)),
+      dsf=dsf,
     )[:, [0, IDX_FN, -1]]
   else:
     u_prd_output = _get_estimations_in_batches(
       direct=False,
       apply_fn=apply_steppers_jit[dsf],
       transform=(lambda b: _change_resolution(b, dsf)),
+      dsf=dsf,
     )
 
   # Define a auxiliary function for getting the errors
@@ -512,6 +516,7 @@ def get_all_estimations(
         apply_fn=_apply_stepper,
         tau_ratio=(tau_ratio if tau_ratio != .5 else 1),
         transform=(lambda b: _change_resolution(b, dsf)),
+        dsf=dsf,
       )
       errors['_l1']['tau']['direct'][tau_ratio] = _get_err_trajectory(
         _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
@@ -535,6 +540,7 @@ def get_all_estimations(
         direct=False,
         apply_fn=apply_unroll_jit[dsf][tau_ratio_max],
         transform=(lambda b: _change_resolution(b, dsf)),
+        dsf=dsf,
       )
       errors['_l1']['tau']['rollout'][tau_ratio_max] = _get_err_trajectory(
         _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
@@ -563,6 +569,7 @@ def get_all_estimations(
         apply_fn=apply_steppers_jit[dsf],
         tau_ratio=tau_ratio,
         transform=(lambda b: _change_resolution(_change_discretization(b, key), dsf)),
+        dsf=dsf,
       )
       errors['_l1']['disc']['direct'][i_disc] = _get_err_trajectory(
         _u_gtr=_change_resolution(_change_discretization(batch_test, key), dsf).u,
@@ -582,6 +589,7 @@ def get_all_estimations(
         direct=False,
         apply_fn=apply_unroll_jit[dsf][tau_ratio_max],
         transform=(lambda b: _change_resolution(_change_discretization(b, key), dsf)),
+        dsf=dsf,
       )
       errors['_l1']['disc']['rollout'][i_disc] = _get_err_trajectory(
         _u_gtr=_change_resolution(_change_discretization(batch_test, key), dsf).u,
@@ -601,6 +609,7 @@ def get_all_estimations(
         direct=False,
         apply_fn=apply_steppers_jit[dsf],
         transform=(lambda b: _change_resolution(_change_discretization(b, key), dsf)),
+        dsf=dsf,
       )
       errors['_l1']['disc'][i_disc] = _get_err_trajectory(
         _u_gtr=_change_resolution(_change_discretization(batch_test, key), dsf).u,
@@ -627,6 +636,7 @@ def get_all_estimations(
         apply_fn=apply_steppers_jit[dsf],
         tau_ratio=tau_ratio,
         transform=(lambda b: _change_resolution(b, dsf)),
+        dsf=dsf,
       )
       errors['_l1']['dsf']['direct'][dsf] = _get_err_trajectory(
         _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
@@ -646,6 +656,7 @@ def get_all_estimations(
         direct=False,
         apply_fn=apply_unroll_jit[dsf][tau_ratio_max],
         transform=(lambda b: _change_resolution(b, dsf)),
+        dsf=dsf,
       )
       errors['_l1']['dsf']['rollout'][dsf] = _get_err_trajectory(
         _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
@@ -665,6 +676,7 @@ def get_all_estimations(
         direct=False,
         apply_fn=apply_steppers_jit[dsf],
         transform=(lambda b: _change_resolution(b, dsf)),
+        dsf=dsf,
       )
       errors['_l1']['dsf'][dsf] = _get_err_trajectory(
         _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
@@ -708,6 +720,7 @@ def get_all_estimations(
         apply_fn=apply_steppers_jit[dsf],
         tau_ratio=tau_ratio,
         transform=transform,
+        dsf=dsf,
       )
       errors['_l1']['noise']['direct'][noise_level] = _get_err_trajectory(
         _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
@@ -727,6 +740,7 @@ def get_all_estimations(
         direct=False,
         apply_fn=apply_unroll_jit[dsf][tau_ratio_max],
         transform=transform,
+        dsf=dsf,
       )
       errors['_l1']['noise']['rollout'][noise_level] = _get_err_trajectory(
         _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
@@ -746,6 +760,7 @@ def get_all_estimations(
         direct=False,
         apply_fn=apply_steppers_jit[dsf],
         transform=transform,
+        dsf=dsf,
       )
       errors['_l1']['noise'][noise_level] = _get_err_trajectory(
         _u_gtr=_change_resolution(batch_test, space_downsample_factor=dsf).u,
@@ -977,8 +992,9 @@ def main(argv):
     overlap_factor_r2p=configs['flags']['overlap_factor_r2p'],
     node_coordinate_freqs=configs['flags']['node_coordinate_freqs'],
   )
-  dataset.build_graphs(graph_builder)
-  dataset_small.build_graphs(graph_builder)
+  correction_sdsf = configs['flags']['space_downsample_factor'] / 1
+  dataset.build_graphs(graph_builder, rmesh_correction_dsf=correction_sdsf)
+  dataset_small.build_graphs(graph_builder, rmesh_correction_dsf=correction_sdsf)
 
   # Profile
   # NOTE: One compilation
@@ -1012,8 +1028,8 @@ def main(argv):
   noise_levels = [0, .005, .01, .02] if FLAGS.noise else []
 
   # Set the ground-truth trajectories
-  batch_tst = next(dataset.batches(mode='test', batch_size=dataset.nums['test']))
-  batch_tst_small = next(dataset_small.batches(mode='test', batch_size=dataset_small.nums['test']))
+  batch_tst = next(dataset.batches(mode='test', batch_size=dataset.nums['test'], get_graphs=False))
+  batch_tst_small = next(dataset_small.batches(mode='test', batch_size=dataset_small.nums['test'], get_graphs=False))
 
   # Get model estimations with all settings
   errors, u_prd = get_all_estimations(

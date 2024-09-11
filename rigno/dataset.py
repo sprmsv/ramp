@@ -27,6 +27,7 @@ class Metadata:
   group_c: str
   group_x: str
   type: Literal['poseidon', 'rigno']
+  fix_x: bool
   domain_x: tuple[Sequence[int], Sequence[int]]
   domain_t: tuple[int, int]
   active_variables: Sequence[int]  # Index of variables in input/output
@@ -75,6 +76,7 @@ DATASET_METADATA = {
     type='poseidon',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
+    fix_x=True,
     active_variables=ACTIVE_VARS_NS,
     chunked_variables=CHUNKED_VARS_NS,
     num_variable_chunks=len(set(CHUNKED_VARS_NS)),
@@ -91,6 +93,7 @@ DATASET_METADATA = {
     type='poseidon',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
+    fix_x=True,
     active_variables=ACTIVE_VARS_NS,
     chunked_variables=CHUNKED_VARS_NS,
     num_variable_chunks=len(set(CHUNKED_VARS_NS)),
@@ -107,6 +110,7 @@ DATASET_METADATA = {
     type='poseidon',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
+    fix_x=True,
     active_variables=ACTIVE_VARS_NS,
     chunked_variables=CHUNKED_VARS_NS,
     num_variable_chunks=len(set(CHUNKED_VARS_NS)),
@@ -123,6 +127,7 @@ DATASET_METADATA = {
     type='poseidon',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
+    fix_x=True,
     active_variables=ACTIVE_VARS_NS,
     chunked_variables=CHUNKED_VARS_NS,
     num_variable_chunks=len(set(CHUNKED_VARS_NS)),
@@ -139,6 +144,7 @@ DATASET_METADATA = {
     type='poseidon',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
+    fix_x=True,
     active_variables=ACTIVE_VARS_NS,
     chunked_variables=CHUNKED_VARS_NS,
     num_variable_chunks=len(set(CHUNKED_VARS_NS)),
@@ -155,6 +161,7 @@ DATASET_METADATA = {
     type='poseidon',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
+    fix_x=True,
     active_variables=ACTIVE_VARS_NS,
     chunked_variables=CHUNKED_VARS_NS,
     num_variable_chunks=len(set(CHUNKED_VARS_NS)),
@@ -172,6 +179,7 @@ DATASET_METADATA = {
     type='poseidon',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
+    fix_x=True,
     active_variables=ACTIVE_VARS_CE,
     chunked_variables=CHUNKED_VARS_CE,
     num_variable_chunks=len(set(CHUNKED_VARS_CE)),
@@ -188,6 +196,7 @@ DATASET_METADATA = {
     type='poseidon',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
+    fix_x=True,
     active_variables=ACTIVE_VARS_CE,
     chunked_variables=CHUNKED_VARS_CE,
     num_variable_chunks=len(set(CHUNKED_VARS_CE)),
@@ -204,6 +213,7 @@ DATASET_METADATA = {
     type='poseidon',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 2),
+    fix_x=True,
     active_variables=ACTIVE_VARS_CE,
     chunked_variables=CHUNKED_VARS_CE,
     num_variable_chunks=len(set(CHUNKED_VARS_CE)),
@@ -220,6 +230,7 @@ DATASET_METADATA = {
     type='poseidon',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
+    fix_x=True,
     active_variables=ACTIVE_VARS_CE,
     chunked_variables=CHUNKED_VARS_CE,
     num_variable_chunks=len(set(CHUNKED_VARS_CE)),
@@ -236,6 +247,7 @@ DATASET_METADATA = {
     type='poseidon',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
+    fix_x=True,
     active_variables=ACTIVE_VARS_CE,
     chunked_variables=CHUNKED_VARS_CE,
     num_variable_chunks=len(set(CHUNKED_VARS_CE)),
@@ -252,6 +264,7 @@ DATASET_METADATA = {
     type='poseidon',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
+    fix_x=True,
     active_variables=ACTIVE_VARS_CE,
     chunked_variables=CHUNKED_VARS_CE,
     num_variable_chunks=len(set(CHUNKED_VARS_CE)),
@@ -268,6 +281,7 @@ DATASET_METADATA = {
     type='poseidon',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 5),
+    fix_x=True,
     active_variables=ACTIVE_VARS_GCE,
     chunked_variables=CHUNKED_VARS_GCE,
     num_variable_chunks=len(set(CHUNKED_VARS_GCE)),
@@ -285,6 +299,7 @@ DATASET_METADATA = {
     type='poseidon',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 0.0002),
+    fix_x=True,
     active_variables=ACTIVE_VARS_RD,
     chunked_variables=CHUNKED_VARS_RD,
     num_variable_chunks=len(set(CHUNKED_VARS_RD)),
@@ -302,6 +317,7 @@ DATASET_METADATA = {
     type='poseidon',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
+    fix_x=True,
     active_variables=ACTIVE_VARS_WE,
     chunked_variables=CHUNKED_VARS_WE,
     num_variable_chunks=len(set(CHUNKED_VARS_WE)),
@@ -318,6 +334,7 @@ DATASET_METADATA = {
     type='poseidon',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
+    fix_x=True,
     active_variables=ACTIVE_VARS_WE,
     chunked_variables=CHUNKED_VARS_WE,
     num_variable_chunks=len(set(CHUNKED_VARS_WE)),
@@ -335,6 +352,7 @@ DATASET_METADATA = {
     type='poseidon',
     domain_x=([0, 0], [1, 1]),
     domain_t=None,
+    fix_x=True,
     active_variables=ACTIVE_VARS_PE,
     chunked_variables=CHUNKED_VARS_PE,
     num_variable_chunks=len(set(CHUNKED_VARS_PE)),
@@ -351,6 +369,7 @@ DATASET_METADATA = {
     type='poseidon',
     domain_x=([0, 0], [1, 1]),
     domain_t=None,
+    fix_x=True,
     active_variables=ACTIVE_VARS_PE,
     chunked_variables=CHUNKED_VARS_PE,
     num_variable_chunks=len(set(CHUNKED_VARS_PE)),
@@ -367,6 +386,7 @@ DATASET_METADATA = {
     type='poseidon',
     domain_x=([0, 0], [1, 1]),
     domain_t=None,
+    fix_x=True,
     active_variables=ACTIVE_VARS_PE,
     chunked_variables=CHUNKED_VARS_PE,
     num_variable_chunks=len(set(CHUNKED_VARS_PE)),
@@ -383,6 +403,7 @@ DATASET_METADATA = {
     type='poseidon',
     domain_x=([0, 0], [1, 1]),
     domain_t=None,
+    fix_x=True,
     active_variables=ACTIVE_VARS_PE,
     chunked_variables=CHUNKED_VARS_PE,
     num_variable_chunks=len(set(CHUNKED_VARS_PE)),
@@ -400,6 +421,7 @@ DATASET_METADATA = {
     type='poseidon',
     domain_x=([-.75, -.75], [1.75, 1.75]),
     domain_t=None,
+    fix_x=True,
     active_variables=[0],
     chunked_variables=[0],
     num_variable_chunks=1,
@@ -417,6 +439,24 @@ DATASET_METADATA = {
     type='rigno',
     domain_x=([-1, -1], [2, 1]),
     domain_t=None,
+    fix_x=False,
+    active_variables=[0],  # Only the density
+    chunked_variables=[0, 1, 1, 2, 3],
+    num_variable_chunks=4,
+    signed={'u': [False, True, True, False, False], 'c': [False]},
+    names={'u': ['$\\rho$', '$v_x$', '$v_y$', '$p$', '$Ma$'], 'c': ['$d$']},
+    global_mean=[0.9637927979586245],
+    global_std=[0.11830822800242624],
+  ),
+  'rigno-unstructured/airfoil_li_large': Metadata(
+    periodic=False,
+    group_u='u',
+    group_c='c',
+    group_x='x',
+    type='rigno',
+    domain_x=([-3, -3], [+5, +3]),
+    domain_t=None,
+    fix_x=False,
     active_variables=[0],  # Only the density
     chunked_variables=[0, 1, 1, 2, 3],
     num_variable_chunks=4,
@@ -433,6 +473,7 @@ DATASET_METADATA = {
     type='rigno',
     domain_x=([0, 0], [1, 1]),
     domain_t=None,
+    fix_x=False,
     active_variables=[0],
     chunked_variables=[0],
     num_variable_chunks=1,
@@ -449,6 +490,7 @@ DATASET_METADATA = {
     type='rigno',
     domain_x=([-.5, -.5], [1.5, 1.5]),
     domain_t=None,
+    fix_x=True,
     active_variables=[0],
     chunked_variables=[0],
     num_variable_chunks=1,
@@ -465,6 +507,7 @@ DATASET_METADATA = {
     type='rigno',
     domain_x=([-.5, -.5], [1.5, 1.5]),
     domain_t=(0, 0.1),
+    fix_x=True,
     active_variables=[0],
     chunked_variables=[0],
     num_variable_chunks=1,
@@ -481,6 +524,7 @@ DATASET_METADATA = {
     type='rigno',
     domain_x=([0., 0.], [1., 1.]),
     domain_t=(0, 0.002),
+    fix_x=True,
     active_variables=[0],
     chunked_variables=[0],
     num_variable_chunks=1,
@@ -497,6 +541,7 @@ DATASET_METADATA = {
     type='rigno',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
+    fix_x=True,
     active_variables=ACTIVE_VARS_NS,
     chunked_variables=CHUNKED_VARS_NS,
     num_variable_chunks=len(set(CHUNKED_VARS_NS)),
@@ -513,6 +558,7 @@ DATASET_METADATA = {
     type='rigno',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
+    fix_x=True,
     active_variables=ACTIVE_VARS_NS,
     chunked_variables=CHUNKED_VARS_NS,
     num_variable_chunks=len(set(CHUNKED_VARS_NS)),
@@ -529,6 +575,7 @@ DATASET_METADATA = {
     type='rigno',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
+    fix_x=True,
     active_variables=ACTIVE_VARS_NS,
     chunked_variables=CHUNKED_VARS_NS,
     num_variable_chunks=len(set(CHUNKED_VARS_NS)),
@@ -545,6 +592,7 @@ DATASET_METADATA = {
     type='rigno',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
+    fix_x=True,
     active_variables=ACTIVE_VARS_NS,
     chunked_variables=CHUNKED_VARS_NS,
     num_variable_chunks=len(set(CHUNKED_VARS_NS)),
@@ -561,6 +609,7 @@ DATASET_METADATA = {
     type='rigno',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
+    fix_x=True,
     active_variables=ACTIVE_VARS_CE,
     chunked_variables=CHUNKED_VARS_CE,
     num_variable_chunks=len(set(CHUNKED_VARS_CE)),
@@ -577,6 +626,7 @@ DATASET_METADATA = {
     type='rigno',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
+    fix_x=True,
     active_variables=ACTIVE_VARS_CE,
     chunked_variables=CHUNKED_VARS_CE,
     num_variable_chunks=len(set(CHUNKED_VARS_CE)),
@@ -593,6 +643,7 @@ DATASET_METADATA = {
     type='rigno',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 0.0002),
+    fix_x=True,
     active_variables=ACTIVE_VARS_RD,
     chunked_variables=CHUNKED_VARS_RD,
     num_variable_chunks=len(set(CHUNKED_VARS_RD)),
@@ -609,6 +660,7 @@ DATASET_METADATA = {
     type='rigno',
     domain_x=([0, 0], [1, 1]),
     domain_t=(0, 1),
+    fix_x=True,
     active_variables=ACTIVE_VARS_WE,
     chunked_variables=CHUNKED_VARS_WE,
     num_variable_chunks=len(set(CHUNKED_VARS_WE)),
@@ -625,6 +677,7 @@ DATASET_METADATA = {
     type='rigno',
     domain_x=([0, 0], [1, 1]),
     domain_t=None,
+    fix_x=True,
     active_variables=ACTIVE_VARS_PE,
     chunked_variables=CHUNKED_VARS_PE,
     num_variable_chunks=len(set(CHUNKED_VARS_PE)),
@@ -753,10 +806,13 @@ class Dataset:
         c_tst = self.reader[self.coeff_group][np.arange((_len_dataset - n_test), (_len_dataset))]
         self.c = np.concatenate([c_trn, c_val, c_tst], axis=0)
       if self.coords_group is not None:
-        x_trn = self.reader[self.coords_group][np.arange(n_train)]
-        x_val = self.reader[self.coords_group][np.arange(n_train, (n_train + n_valid))]
-        x_tst = self.reader[self.coords_group][np.arange((_len_dataset - n_test), (_len_dataset))]
-        self.x = np.concatenate([x_trn, x_val, x_tst], axis=0)
+        if self.metadata.fix_x:
+          self.x = self.reader[self.coords_group]
+        else:
+          x_trn = self.reader[self.coords_group][np.arange(n_train)]
+          x_val = self.reader[self.coords_group][np.arange(n_train, (n_train + n_valid))]
+          x_tst = self.reader[self.coords_group][np.arange((_len_dataset - n_test), (_len_dataset))]
+          self.x = np.concatenate([x_trn, x_val, x_tst], axis=0)
 
   @property
   def time_dependent(self):
@@ -796,7 +852,7 @@ class Dataset:
       self.stats['der']['mean'] = np.mean(derivatives, axis=(0, 1, 2), keepdims=True)
       self.stats['der']['std'] = np.std(derivatives, axis=(0, 1, 2), keepdims=True)
 
-  def build_graphs(self, builder: RegionInteractionGraphBuilder) -> None:
+  def build_graphs(self, builder: RegionInteractionGraphBuilder, rmesh_correction_dsf: int = 1) -> None:
     """Builds RIGNO graphs for all samples and stores them in the object."""
     # NOTE: Each graph takes about 3 MB and 2 seconds to build.
     # It can cause memory issues for large datasets.
@@ -814,13 +870,19 @@ class Dataset:
       # Loop over all coordinates in the batch
       # NOTE: Assuming constant x in time
       for x in batch.x[:, 0]:
-        m = builder.build_metadata(x_inp=x, x_out=x, domain=np.array(self.metadata.domain_x), key=None)
+        m = builder.build_metadata(x_inp=x, x_out=x, domain=np.array(self.metadata.domain_x), rmesh_correction_dsf=rmesh_correction_dsf, key=None)
         metadata.append(m)
         # Store the maximum number of edges
         num_p2r_edges = max(num_p2r_edges, m.p2r_edge_indices.shape[1])
         num_r2r_edges = max(num_r2r_edges, m.r2r_edge_indices.shape[1])
         if m.r2p_edge_indices is not None:
           num_r2p_edges = max(num_r2p_edges, m.r2p_edge_indices.shape[1])
+        # Break the loop if the coordinates are fixed on the batch axis
+        if self.metadata.fix_x:
+          break
+      # Break the loop if the coordinates are fixed on the batch axis
+      if self.metadata.fix_x:
+        break
 
     # Pad the edge sets using dummy nodes
     # NOTE: Exploiting jax' behavior for out-of-dimension indexing
@@ -843,7 +905,7 @@ class Dataset:
     ## One way is to add another loop and write the graphs one by one in-place in the concatenated array
     self.rigs = tree.tree_map(lambda *v: jnp.concatenate(v), *metadata)
 
-  def _fetch(self, idx: Union[int, Sequence]) -> Batch:
+  def _fetch(self, idx: Union[int, Sequence], get_graphs: bool = True) -> Batch:
     """Fetches a sample from the dataset, given its global index."""
 
     # Check inputs
@@ -866,7 +928,7 @@ class Dataset:
       c = None
 
     # Get graphs
-    if self.rigs is not None:
+    if (self.rigs is not None) and get_graphs:
       g = tree.tree_map(lambda v: v[np.sort(idx)], self.rigs)
     else:
       g = None
@@ -895,6 +957,7 @@ class Dataset:
       # Concatenate the coordinates
       x = np.concatenate([_x, _y], axis=3)
       # Repeat along sample and time axes
+      assert self.metadata.fix_x
       x = np.tile(x, reps=(u.shape[0], u.shape[1], 1, 1))
 
       # Flatten the trajectory
@@ -915,13 +978,19 @@ class Dataset:
       # Read spatial coordinates
       assert self.coords_group is not None
       if self.x is not None:
-        x = self.x[np.sort(idx)]
+        x = self.x if self.metadata.fix_x else self.x[np.sort(idx)]
       else:
-        x = self.reader[self.coords_group][np.sort(idx)]
-      # repeat along the time axis
+        x = self.reader[self.coords_group] if self.metadata.fix_x else self.reader[self.coords_group][np.sort(idx)]
+      # Repeat along the time axis
       # NOTE: the coordinates are assumed to be constant in time
       assert x.shape[1] == 1
       x = np.tile(x, reps=(1, u.shape[1], 1, 1))
+      # Repeat along the batch axis
+      if self.metadata.fix_x:
+        assert x.shape[0] == 1
+        x = np.tile(x, reps=(u.shape[0], 1, 1, 1))
+      else:
+        assert x.shape[0] == u.shape[0]
 
       # Define temporal coordinates
       if self.metadata.domain_t is not None:
@@ -976,7 +1045,7 @@ class Dataset:
 
     return batch
 
-  def _fetch_mode(self, idx: Union[int, Sequence], mode: str):
+  def _fetch_mode(self, idx: Union[int, Sequence], mode: str, get_graphs: bool = True):
     # Check inputs
     if isinstance(idx, int):
       idx = [idx]
@@ -984,7 +1053,7 @@ class Dataset:
     assert all([i < len(self.idx_modes[mode]) for i in idx])
     _idx = self.idx_modes[mode][np.array(idx)]
 
-    return self._fetch(_idx)
+    return self._fetch(_idx, get_graphs=get_graphs)
 
   def train(self, idx: Union[int, Sequence]):
     return self._fetch_mode(idx, mode='train')
@@ -995,7 +1064,7 @@ class Dataset:
   def test(self, idx: Union[int, Sequence]):
     return self._fetch_mode(idx, mode='test')
 
-  def batches(self, mode: str, batch_size: int, key: flax.typing.PRNGKey = None):
+  def batches(self, mode: str, batch_size: int, get_graphs: bool = True, key: flax.typing.PRNGKey = None):
     assert batch_size > 0
     assert batch_size <= self.nums[mode]
 
@@ -1006,12 +1075,12 @@ class Dataset:
 
     len_dividable = self.nums[mode] - (self.nums[mode] % batch_size)
     for idx in np.split(_idx_mode_permuted[:len_dividable], len_dividable // batch_size):
-      batch = self._fetch_mode(idx, mode)
+      batch = self._fetch_mode(idx, mode, get_graphs=get_graphs)
       yield batch
 
     if (self.nums[mode] % batch_size):
       idx = _idx_mode_permuted[len_dividable:]
-      batch = self._fetch_mode(idx, mode)
+      batch = self._fetch_mode(idx, mode, get_graphs=get_graphs)
       yield batch
 
   def __len__(self):

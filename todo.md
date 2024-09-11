@@ -1,20 +1,22 @@
 # Project Updates
 
-# NEXT STEPS
+- Updated the datasets with fixed random points
+    - Only airfoil and elasticity have variable mesh --> A100 GPUs
+    - The rest of the datasets --> RTX3090
 
-- Try to make it resolution invariant again
+- Correction on the rmesh resolution -> resolution invariance
+
+# NEXT STEPS
 
 - Describe RIGNO v2.0 in the thesis (or a new document)
     - The whole unstructured mesh handling
     - New metrics for unstructured meshes
+    - Correction for the rmesh resolution
+        1. Construct a triangulation
+        2. Pick simplices randomly
+        3. Add middle points of the simplices
     - added support radius to the structural regional node features
     - Time-independent datasets: no t, no tau
-
-- Redo the faulty tests:
-    - E601/rigno-unstructured/Poisson-Gauss/240907-210509
-    - E602/rigno-unstructured/airfoil_grid/240907-210524
-    - E602/rigno-unstructured/Poisson-Gauss/240907-210524
-    - E603/rigno-unstructured/elasticity/240907-210532
 
 - Experiment with airfoil_li_large.nc
 
