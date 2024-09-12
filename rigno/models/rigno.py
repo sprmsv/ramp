@@ -925,7 +925,7 @@ def _upsample_pointset(key, x: Array, factor: float) -> Array:
 
   num_new_points = int(x.shape[0] * (factor - 1))
   tri = Delaunay(points=x)
-  simplices = jax.random.permutation(key=key, x=tri.simplices)[:num_new_points]
+  simplices = jax.random.permutation(key=key, x=tri.simplices)[jnp.arange(num_new_points)]
   x_ext = np.mean(x[simplices], axis=1)
   return np.concatenate([x, x_ext], axis=0)
 
