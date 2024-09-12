@@ -141,7 +141,8 @@ def profile_inferrence(
   graph_fn = lambda x: graph_builder.build_metadata(x, x, np.array(dataset.metadata.domain_x))
 
   # Get a batch and transform it
-  batch_size_per_device = FLAGS.batch_size // NUM_DEVICES
+  # batch_size_per_device = FLAGS.batch_size // NUM_DEVICES
+  batch_size_per_device = 8  # TMP
   batch = next(dataset.batches(mode='test', batch_size=batch_size_per_device))
 
   # Set model inputs
