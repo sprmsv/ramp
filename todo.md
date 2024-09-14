@@ -6,6 +6,17 @@
 
 - Correction on the rmesh resolution -> resolution invariance
 
+- Launched the experiments
+    - 10x slower than FNO
+        - With 3000 epochs, batch size 16, 2048 samples
+            - 40h      (50s) vs. 3h with GINO
+        - With 2500 epochs, batch size 16, 1024 trajectories
+            - 17h      (25s) for TAU=0
+            - 1.5 days (50s) for TAU=0
+            - 4.5 days (150s) for TAU=1
+            - 14 days  (450s) for TAU=4
+    - I think even 2500 epochs is not enough for convergence
+
 # NEXT STEPS
 
 - Describe RIGNO v2.0 in the thesis (or a new document)
@@ -17,8 +28,6 @@
         3. Add middle points of the simplices
     - added support radius to the structural regional node features
     - Time-independent datasets: no t, no tau
-
-- Experiment with airfoil_li_large.nc
 
 ## SOME UNANSWERED QUESTIONS
 

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Union, Sequence, NamedTuple, Literal
 from copy import deepcopy
 
-import flax.typing
+from flax.typing import PRNGKey
 import jax
 import jax.lax
 import jax.numpy as jnp
@@ -719,7 +719,7 @@ class Dataset:
     n_valid: int = 0,
     n_test: int = 0,
     preload: bool = False,
-    key: flax.typing.PRNGKey = None,
+    key: PRNGKey = None,
   ):
 
     # Set attributes
@@ -852,10 +852,15 @@ class Dataset:
       self.stats['der']['mean'] = np.mean(derivatives, axis=(0, 1, 2), keepdims=True)
       self.stats['der']['std'] = np.std(derivatives, axis=(0, 1, 2), keepdims=True)
 
-  def build_graphs(self, builder: RegionInteractionGraphBuilder, rmesh_correction_dsf: int = 1) -> None:
+  def build_graphs(self, builder: RegionInteractionGraphBuilder, rmesh_correction_dsf: int = 1, key: PRNGKey = None) -> None:
     """Builds RIGNO graphs for all samples and stores them in the object."""
     # NOTE: Each graph takes about 3 MB and 2 seconds to build.
     # It can cause memory issues for large datasets.
+
+    # NOTE: It is important to do the rmesh sub-sampling with a different key each time
+    # Otherwise, for some datasets, the rmeshes can end up being similar
+    if key is None:
+      key = jax.random.PRNGKey(0)
 
     # Build graph metadata with potentially different number of edges
     # NOTE: Stores all graphs in memory one by one
@@ -870,7 +875,8 @@ class Dataset:
       # Loop over all coordinates in the batch
       # NOTE: Assuming constant x in time
       for x in batch.x[:, 0]:
-        m = builder.build_metadata(x_inp=x, x_out=x, domain=np.array(self.metadata.domain_x), rmesh_correction_dsf=rmesh_correction_dsf, key=None)
+        key, subkey = jax.random.split(key)
+        m = builder.build_metadata(x_inp=x, x_out=x, domain=np.array(self.metadata.domain_x), rmesh_correction_dsf=rmesh_correction_dsf, key=subkey)
         metadata.append(m)
         # Store the maximum number of edges
         num_p2r_edges = max(num_p2r_edges, m.p2r_edge_indices.shape[1])
@@ -1064,7 +1070,7 @@ class Dataset:
   def test(self, idx: Union[int, Sequence]):
     return self._fetch_mode(idx, mode='test')
 
-  def batches(self, mode: str, batch_size: int, get_graphs: bool = True, key: flax.typing.PRNGKey = None):
+  def batches(self, mode: str, batch_size: int, get_graphs: bool = True, key: PRNGKey = None):
     assert batch_size > 0
     assert batch_size <= self.nums[mode]
 

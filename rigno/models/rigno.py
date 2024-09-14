@@ -923,6 +923,7 @@ def _subsample_pointset(key, x: Array, factor: float) -> Array:
 def _upsample_pointset(key, x: Array, factor: float) -> Array:
   """Upsamples a point cloud by adding the middle point of randomly selected simplices."""
 
+  factor = factor ** x.shape[-1]
   num_new_points = int(x.shape[0] * (factor - 1))
   tri = Delaunay(points=x)
   simplices = jax.random.permutation(key=key, x=tri.simplices)[jnp.arange(num_new_points)]

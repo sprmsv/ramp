@@ -852,6 +852,12 @@ def train(
     # Store the initial time
     time_int = time()
 
+    # Re-construct the graphs with a new PRNG key
+    # NOTE: In order to prevent always training with the same rmesh nodes
+    key, subkey = jax.random.split(key)
+    if dataset.metadata.fix_x:
+      dataset.build_graphs(builder=graph_builder, key=subkey)
+
     # Train one epoch
     subkey_0, subkey_1, key = jax.random.split(key, num=3)
     state, loss, grad = train_one_epoch(
@@ -1033,7 +1039,7 @@ def main(argv):
     node_coordinate_freqs=FLAGS.node_coordinate_freqs,
   )
   dataset.build_graphs(builder=graph_builder)
-  logging.info(f'Constructed {len(dataset.rigs)} graphs.')
+  logging.info(f'Constructed {len(dataset.rigs)} graph(s).')
 
   schedule_tau_max = True
   if (FLAGS.tau_max == 1):
