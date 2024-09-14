@@ -4,7 +4,10 @@
     - Only airfoil and elasticity have variable mesh --> A100 GPUs
     - The rest of the datasets --> RTX3090
 
-- Correction on the rmesh resolution -> resolution invariance
+- Resolution invariance
+    1. Correction on the rmesh resolution
+    2. Re-constructing the graph in every epoch for fix mesh
+    2. Different random rmeshes for variable mesh
 
 - Launched the experiments
     - 10x slower than FNO
@@ -26,6 +29,7 @@
         1. Construct a triangulation
         2. Pick simplices randomly
         3. Add middle points of the simplices
+    - Training with different rmeshes
     - added support radius to the structural regional node features
     - Time-independent datasets: no t, no tau
 
