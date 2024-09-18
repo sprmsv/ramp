@@ -8,30 +8,39 @@
     1. Correction on the rmesh resolution
     2. Re-constructing the graph in every epoch for fix mesh
     2. Different random rmeshes for variable mesh
+    * Still I am not sure about it.. waiting for experiments
 
-- Launched the experiments
-    - 10x slower than FNO
-        - With 3000 epochs, batch size 16, 2048 samples
-            - 40h      (50s) vs. 3h with GINO
-        - With 2500 epochs, batch size 16, 1024 trajectories
-            - 17h      (25s) for TAU=0
-            - 1.5 days (50s) for TAU=0
-            - 4.5 days (150s) for TAU=1
-            - 14 days  (450s) for TAU=4
-    - I think even 2500 epochs is not enough for convergence
+- State of the experiments
+
+- Huge downside: long training and inference times
+    - Message-passing, namely the segment_sum operation is to blame
+    - Most of the edges are in the encoder/decoder
+    - Solution: Fewer edges
+        1. Edge masking -> Would need more epochs then
+        2. Smaller overlaps
+            - Can reduce inference time by a factor of 2~3
+            - Might jeopardize discretization invariance
+    - 3x slower than GeoFNO and FNO-DSE
+    - Roughly 6x slower than GINO
+    - 10x slower than CNO (at inference)
+    - With 3000 epochs, batch size 16, 2048 samples
+        - 40h      (50s) vs. 6h with GINO
+    - With 2500 epochs, batch size 16, 1024 trajectories
+        - 17h      (25s) for TAU=0
+        - 1.5 days (50s) for TAU=0
+        - 4.5 days (150s) for TAU=1
+        - 14 days  (450s) for TAU=4
+    - Just realized: We only have results with CE-RPUI, I chose CE-RP
+
+- Limitations
+    - Speed
+    - Graph construction for non-periodic BC
+    - Imposing boundary conditions
 
 # NEXT STEPS
 
-- Describe RIGNO v2.0 in the thesis (or a new document)
-    - The whole unstructured mesh handling
-    - New metrics for unstructured meshes
-    - Correction for the rmesh resolution
-        1. Construct a triangulation
-        2. Pick simplices randomly
-        3. Add middle points of the simplices
-    - Training with different rmeshes
-    - added support radius to the structural regional node features
-    - Time-independent datasets: no t, no tau
+- Smaller overlap factor might be enough
+    - Can reduce inference time by a factor of 3
 
 ## SOME UNANSWERED QUESTIONS
 

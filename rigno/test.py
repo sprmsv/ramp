@@ -1025,7 +1025,7 @@ def main(argv):
   # NOTE: One compilation per tau_rollout
   taus_rollout = [.5, 1] + [time_downsample_factor * d for d in range(1, tau_max_train+1)]
   # NOTE: Two compilations per discretization  # TMP
-  space_dsfs = [4, 3, 2, 1.5, 1] if FLAGS.resolution else []
+  space_dsfs = [3, 2.5, 2, 1.7, 1.4, 1] if FLAGS.resolution else []
   noise_levels = [0, .005, .01, .02] if FLAGS.noise else []
 
   # Set the ground-truth trajectories
@@ -1063,7 +1063,7 @@ def main(argv):
         names=dataset.metadata.names['u'],
         domain=dataset.metadata.domain_x,
       )
-      fig.savefig(DIR_FIGS / 'samples' / f'rollout-fn-s{s:02d}.png', dpi=300, bbox_inches='tight')
+      fig.savefig(DIR_FIGS / 'samples' / f'rollout-fn-s{s:02d}.pdf', dpi=300, bbox_inches='tight')
       plt.close(fig)
       fig = plot_estimates(
         u_inp=_batch_tst.u[s, 0],
@@ -1075,7 +1075,7 @@ def main(argv):
         names=dataset.metadata.names['u'],
         domain=dataset.metadata.domain_x,
       )
-      fig.savefig(DIR_FIGS / 'samples' / f'rollout-ex-s{s:02d}.png', dpi=300, bbox_inches='tight')
+      fig.savefig(DIR_FIGS / 'samples' / f'rollout-ex-s{s:02d}.pdf', dpi=300, bbox_inches='tight')
       plt.close(fig)
     else:
       fig = plot_estimates(
@@ -1088,7 +1088,7 @@ def main(argv):
         names=dataset.metadata.names['u'],
         domain=dataset.metadata.domain_x,
       )
-      fig.savefig(DIR_FIGS / 'samples' / f's{s:02d}.png', dpi=300, bbox_inches='tight')
+      fig.savefig(DIR_FIGS / 'samples' / f's{s:02d}.pdf', dpi=300, bbox_inches='tight')
       plt.close(fig)
 
   # Store the errors
@@ -1125,14 +1125,14 @@ def main(argv):
       idx_fn=IDX_FN,
       variable_title='$\\dfrac{\\tau}{\Delta t}$',
     )
-    g.figure.savefig(DIR_FIGS / 'errors' / 'tau-direct.png', dpi=300, bbox_inches='tight')
+    g.figure.savefig(DIR_FIGS / 'errors' / 'tau-direct.pdf', dpi=300, bbox_inches='tight')
     plt.close(g.figure)
     g = plot_error_vs_time(
       df=errors_to_df(errors_plot['tau']['rollout']),
       idx_fn=IDX_FN,
       variable_title='$\\dfrac{\\tau_{max}}{\Delta t}$',
     )
-    g.figure.savefig(DIR_FIGS / 'errors' / 'tau-rollout.png', dpi=300, bbox_inches='tight')
+    g.figure.savefig(DIR_FIGS / 'errors' / 'tau-rollout.pdf', dpi=300, bbox_inches='tight')
     plt.close(g.figure)
     # Noise control
     g = plot_error_vs_time(
@@ -1140,14 +1140,14 @@ def main(argv):
       idx_fn=IDX_FN,
       variable_title='$\\dfrac{\\sigma_{noise}}{\\sigma_{data}}$',
     )
-    g.figure.savefig(DIR_FIGS / 'errors' / 'noise-direct.png', dpi=300, bbox_inches='tight')
+    g.figure.savefig(DIR_FIGS / 'errors' / 'noise-direct.pdf', dpi=300, bbox_inches='tight')
     plt.close(g.figure)
     g = plot_error_vs_time(
       df=errors_to_df(errors_plot['noise']['rollout']),
       idx_fn=IDX_FN,
       variable_title='$\\dfrac{\\sigma_{noise}}{\\sigma_{data}}$',
     )
-    g.figure.savefig(DIR_FIGS / 'errors' / 'noise-rollout.png', dpi=300, bbox_inches='tight')
+    g.figure.savefig(DIR_FIGS / 'errors' / 'noise-rollout.pdf', dpi=300, bbox_inches='tight')
     plt.close(g.figure)
     # Discretization invariance
     g = plot_error_vs_time(
@@ -1155,14 +1155,14 @@ def main(argv):
       idx_fn=IDX_FN,
       variable_title='Discretization',
     )
-    g.figure.savefig(DIR_FIGS / 'errors' / 'discretization-direct.png', dpi=300, bbox_inches='tight')
+    g.figure.savefig(DIR_FIGS / 'errors' / 'discretization-direct.pdf', dpi=300, bbox_inches='tight')
     plt.close(g.figure)
     g = plot_error_vs_time(
       df=errors_to_df(errors_plot['disc']['rollout']),
       idx_fn=IDX_FN,
       variable_title='Discretization',
     )
-    g.figure.savefig(DIR_FIGS / 'errors' / 'discretization-rollout.png', dpi=300, bbox_inches='tight')
+    g.figure.savefig(DIR_FIGS / 'errors' / 'discretization-rollout.pdf', dpi=300, bbox_inches='tight')
     plt.close(g.figure)
     # Resolution invariance
     g = plot_error_vs_time(
@@ -1170,14 +1170,14 @@ def main(argv):
       idx_fn=IDX_FN,
       variable_title='DSF',
     )
-    g.figure.savefig(DIR_FIGS / 'errors' / 'resolution-direct.png', dpi=300, bbox_inches='tight')
+    g.figure.savefig(DIR_FIGS / 'errors' / 'resolution-direct.pdf', dpi=300, bbox_inches='tight')
     plt.close(g.figure)
     g = plot_error_vs_time(
       df=errors_to_df(errors_plot['dsf']['rollout']),
       idx_fn=IDX_FN,
       variable_title='DSF',
     )
-    g.figure.savefig(DIR_FIGS / 'errors' / 'resolution-rollout.png', dpi=300, bbox_inches='tight')
+    g.figure.savefig(DIR_FIGS / 'errors' / 'resolution-rollout.pdf', dpi=300, bbox_inches='tight')
     plt.close(g.figure)
 
   # Get ensemble estimations with the default settings
@@ -1214,7 +1214,7 @@ def main(argv):
           names=dataset_small.metadata.names['u'],
           domain=dataset.metadata.domain_x,
         )
-        fig.savefig(DIR_FIGS / 'ensemble' / f'rollout-fn-s{s:02d}.png', dpi=300, bbox_inches='tight')
+        fig.savefig(DIR_FIGS / 'ensemble' / f'rollout-fn-s{s:02d}.pdf', dpi=300, bbox_inches='tight')
         plt.close(fig)
         fig = plot_ensemble(
           u_gtr=_batch_tst_small.u[:, [0, IDX_FN, -1]],
@@ -1226,7 +1226,7 @@ def main(argv):
           names=dataset_small.metadata.names['u'],
           domain=dataset.metadata.domain_x,
         )
-        fig.savefig(DIR_FIGS / 'ensemble' / f'rollout-ex-s{s:02d}.png', dpi=300, bbox_inches='tight')
+        fig.savefig(DIR_FIGS / 'ensemble' / f'rollout-ex-s{s:02d}.pdf', dpi=300, bbox_inches='tight')
         plt.close(fig)
       else:
         fig = plot_ensemble(
@@ -1239,7 +1239,7 @@ def main(argv):
           names=dataset_small.metadata.names['u'],
           domain=dataset.metadata.domain_x,
         )
-        fig.savefig(DIR_FIGS / 'ensemble' / f's{s:02d}.png', dpi=300, bbox_inches='tight')
+        fig.savefig(DIR_FIGS / 'ensemble' / f's{s:02d}.pdf', dpi=300, bbox_inches='tight')
         plt.close(fig)
 
 

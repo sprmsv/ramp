@@ -174,8 +174,8 @@ class RegionInteractionGraphBuilder:
       x_rnodes = _subsample_pointset(key=key, x=x_inp, factor=self.subsample_factor)
     else:
       # TODO: Keep boundary nodes for non-periodic BC
-      # NOTE: With the below implementation the number of x_rnodes might vary
       x_rnodes = _subsample_pointset(key=key, x=x_inp, factor=self.subsample_factor)
+      # NOTE: With the below implementation the number of x_rnodes might vary
       # idx_bound = np.where((x_inp[:, 0] == -1) | (x_inp[:, 0] == +1) | (x_inp[:, 1] == -1) | (x_inp[:, 1] == +1))
       # x_boundary = x_inp[idx_bound]
       # x_internal = np.delete(x_inp, idx_bound, axis=0)
