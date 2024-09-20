@@ -818,6 +818,7 @@ def train(
 
   # Report the initial evaluations
   time_tot_pre = time() - time_int_pre
+  tdsf = FLAGS.time_downsample_factor
   logging.info('\t'.join([
     f'DRCT: {tau_max : 02d}',
     f'EPCH: {epochs_before : 04d}/{FLAGS.epochs : 04d}',
@@ -825,11 +826,12 @@ def train(
     f'TIME: {time_tot_pre : 06.1f}s',
     f'GRAD: {0. : .2e}',
     f'LOSS: {0. : .2e}',
-    f'DR-0.5: {metrics_val.direct_tau_frac._l1 : .2%}' if metrics_val.direct_tau_frac._l1 else '',
-    f'DR-1: {metrics_val.direct_tau_min._l1 : .2%}' if metrics_val.direct_tau_min._l1 else '',
-    f'DR-{FLAGS.tau_max}: {metrics_val.direct_tau_max._l1 : .2%}' if metrics_val.direct_tau_max._l1 else '',
+    f'DR-{.5 * tdsf}: {metrics_val.direct_tau_frac._l1 : .2%}' if metrics_val.direct_tau_frac._l1 else '',
+    f'DR-{tdsf}: {metrics_val.direct_tau_min._l1 : .2%}' if metrics_val.direct_tau_min._l1 else '',
+    f'DR-{FLAGS.tau_max * tdsf}: {metrics_val.direct_tau_max._l1 : .2%}' if metrics_val.direct_tau_max._l1 else '',
     f'FN: {metrics_val.final._l1 : .2%}' if metrics_val.final._l1 else '',
-    f'TRN-DR-1: {metrics_trn.direct_tau_min._l1 : .2%}' if metrics_trn.direct_tau_min._l1 else '',
+    f'TRN-DR-{tdsf}: {metrics_trn.direct_tau_min._l1 : .2%}' if metrics_trn.direct_tau_min._l1 else '',
+    f'TRN-DR-{FLAGS.tau_max * tdsf}: {metrics_trn.direct_tau_max._l1 : .2%}' if metrics_trn.direct_tau_max._l1 else '',
     f'TRN-FN: {metrics_trn.final._l1 : .2%}' if metrics_trn.final._l1 else '',
   ]))
 
@@ -879,6 +881,7 @@ def train(
 
       # Log the results
       time_tot = time() - time_int
+      tdsf = FLAGS.time_downsample_factor
       logging.info('\t'.join([
         f'DRCT: {tau_max : 02d}',
         f'EPCH: {epochs_before + epoch : 04d}/{FLAGS.epochs : 04d}',
@@ -886,11 +889,12 @@ def train(
         f'TIME: {time_tot : 06.1f}s',
         f'GRAD: {grad.item() : .2e}',
         f'LOSS: {loss.item() : .2e}',
-        f'DR-0.5: {metrics_val.direct_tau_frac._l1 : .2%}' if metrics_val.direct_tau_frac._l1 else '',
-        f'DR-1: {metrics_val.direct_tau_min._l1 : .2%}' if metrics_val.direct_tau_min._l1 else '',
-        f'DR-{FLAGS.tau_max}: {metrics_val.direct_tau_max._l1 : .2%}' if metrics_val.direct_tau_max._l1 else '',
+        f'DR-{.5 * tdsf}: {metrics_val.direct_tau_frac._l1 : .2%}' if metrics_val.direct_tau_frac._l1 else '',
+        f'DR-{tdsf}: {metrics_val.direct_tau_min._l1 : .2%}' if metrics_val.direct_tau_min._l1 else '',
+        f'DR-{FLAGS.tau_max * tdsf}: {metrics_val.direct_tau_max._l1 : .2%}' if metrics_val.direct_tau_max._l1 else '',
         f'FN: {metrics_val.final._l1 : .2%}' if metrics_val.final._l1 else '',
-        f'TRN-DR-1: {metrics_trn.direct_tau_min._l1 : .2%}' if metrics_trn.direct_tau_min._l1 else '',
+        f'TRN-DR-{tdsf}: {metrics_trn.direct_tau_min._l1 : .2%}' if metrics_trn.direct_tau_min._l1 else '',
+        f'TRN-DR-{FLAGS.tau_max * tdsf}: {metrics_trn.direct_tau_max._l1 : .2%}' if metrics_trn.direct_tau_max._l1 else '',
         f'TRN-FN: {metrics_trn.final._l1 : .2%}' if metrics_trn.final._l1 else '',
       ]))
 
