@@ -285,12 +285,32 @@ def train(
 
           return loss_fn(*_loss_inputs)
 
+        # Split tau for unrolling
         if unroll:
-          # Split tau for unrolling
+          # Choose a random split fraction
           key, subkey = jax.random.split(key)
-          tau_cutoff = .2 * dataset.dt
-          tau_mid = tau_cutoff + jax.random.uniform(key=subkey, shape=tau.shape) * (tau - 2 * tau_cutoff)
-          # Get intermediary output
+          frac = jax.random.uniform(key=subkey, shape=tau.shape)
+          # Flip a coin to decide about splitting
+          if isinstance(stepper, TimeDerivativeStepper):
+            # NOTE: Only applicable with this implementation for derivative stepping
+            key, subkey = jax.random.split(key)
+            P = .5
+            coin = jax.random.uniform(key=subkey, shape=tau.shape) > P
+            frac = frac * coin
+          # Calculate the approximation tau
+          tau_cutoff_approximation = 1 * dataset.dt  # minimum approximation fractional tau
+          if isinstance(stepper, TimeDerivativeStepper):
+            tau_cutoff_inference = .2 * dataset.dt  # minimum inference fractional tau
+          else:
+            tau_cutoff_inference = .0 * dataset.dt  # minimum inference fractional tau
+          tau_splittable_part = jnp.clip((tau - tau_cutoff_approximation - tau_cutoff_inference), 0, None)
+          tau_inf = tau_cutoff_approximation + frac * tau_splittable_part
+          # Avoid inference with tau=0 if necessary
+          if isinstance(stepper, TimeDerivativeStepper):
+            # NOTE: approximation with tau=0 works fine with derivative stepping
+            # NOTE: inference with tau=0 does not work with derivative stepping
+            tau_inf = jnp.where(jnp.isclose(tau_inf, tau_cutoff_approximation), 0., tau_inf)
+          # Get intermediary output by inferring the model
           key, subkey = jax.random.split(key)
           inputs = Inputs(
             u=u_inp,
@@ -298,7 +318,7 @@ def train(
             x_inp=x_inp,
             x_out=x_out,
             t=t_inp,
-            tau=tau_mid,
+            tau=tau_inf,
           )
           u_int = stepper.apply(
             variables={'params': params},
@@ -309,19 +329,19 @@ def train(
           )
           c_int = c_inp  # TODO: Approximate c_int
           x_int = x_inp  # TODO: Support variable x
-          t_int = t_inp + tau_mid
-          tau_int = tau - tau_mid
+          t_int = t_inp + tau_inf
+          tau_trn = tau - tau_inf
         else:
           u_int = u_inp
           c_int = c_inp  # TODO: Approximate c_int
           x_int = x_inp  # TODO: Support variable x
           t_int = t_inp
-          tau_int = tau
+          tau_trn = tau
 
         # Compute gradients
         key, subkey = jax.random.split(key)
         loss, grads = jax.value_and_grad(_compute_loss)(
-          params, u_int, c_int, x_int, t_int, tau_int, u_tgt, x_out, key=subkey)
+          params, u_int, c_int, x_int, t_int, tau_trn, u_tgt, x_out, key=subkey)
 
         return loss, grads
 
@@ -820,7 +840,7 @@ def train(
   time_tot_pre = time() - time_int_pre
   tdsf = FLAGS.time_downsample_factor
   logging.info('\t'.join([
-    f'DRCT: {tau_max : 02d}',
+    f'DRCT: {tau_max * tdsf : 02d}dt',
     f'EPCH: {epochs_before : 04d}/{FLAGS.epochs : 04d}',
     f'LR: {state.opt_state[-1].hyperparams["learning_rate"][0].item() : .2e}',
     f'TIME: {time_tot_pre : 06.1f}s',
@@ -883,7 +903,7 @@ def train(
       time_tot = time() - time_int
       tdsf = FLAGS.time_downsample_factor
       logging.info('\t'.join([
-        f'DRCT: {tau_max : 02d}',
+        f'DRCT: {tau_max * tdsf : 02d}dt',
         f'EPCH: {epochs_before + epoch : 04d}/{FLAGS.epochs : 04d}',
         f'LR: {state.opt_state[-1].hyperparams["learning_rate"][0].item() : .2e}',
         f'TIME: {time_tot : 06.1f}s',
@@ -918,8 +938,9 @@ def train(
     else:
       # Log the results
       time_tot = time() - time_int
+      tdsf = FLAGS.time_downsample_factor
       logging.info('\t'.join([
-        f'DRCT: {tau_max : 02d}',
+        f'DRCT: {tau_max * tdsf : 02d}dt',
         f'EPCH: {epochs_before + epoch : 04d}/{FLAGS.epochs : 04d}',
         f'LR: {state.opt_state[-1].hyperparams["learning_rate"][0].item() : .2e}',
         f'TIME: {time_tot : 06.1f}s',
@@ -1194,7 +1215,7 @@ def main(argv):
     epochs_trained += epochs_without_unrolling
     # Train with unrolling
     logging.info('-' * 80)
-    logging.info('WITH UNROLLING')
+    logging.info('FRACTIONAL PAIRING')
     logging.info('-' * 80)
     state = train(
       key=subkey,

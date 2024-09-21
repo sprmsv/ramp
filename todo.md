@@ -15,11 +15,29 @@
     - Checked the graphs visually
     - Verifying with E614
 
+- Improvement in fractional pairing (more robust)
+    - Derivative stepping
+        - (tau = 1)
+            - Infer with (tau_mid=0)
+            - Train with (tau_int=1)
+            * Alternative: infer with (tau_mid > 1) train with (tau_int < 0)
+        - (tau >= 2)
+            - Infer with (tau_mid >= 1)
+            - Train with fractional (tau_int > .2)
+    - Output and residual stepping
+        - (tau = 1)
+            - Infer with (tau_mid=1)
+            - Train with (tau_int=0)
+        - (tau >= 2)
+            - Infer with (tau_mid >= 1)
+            - Train with fractional (tau_int > 0)
+
 # NEXT STEPS
 
 - Check E614
+- Check E615
 - Check E81x results
-- Check metrics of Poisson-Gauss and run with smaller LR if necessary
+- Check learning curves of Poisson-Gauss and run with smaller LR if necessary
 
 - Repeat E613 with new baseline architecture
     - OF=1.5
