@@ -3,48 +3,20 @@
 - Limitations
     - Speed
     - Graph construction for non-periodic BC
+        - Needs better methods
     - Imposing boundary conditions
-
-- Inference is always without edge masking
-
-- Direct evaluation works best for wave equation
-- For some of the other datasets, a larger tau max is used
-
-- OF=1 is actually pretty good, unline the previous settings
-    - OF=1.5 might be just enough (2x faster)
-    - Checked the graphs visually
-    - Verifying with E614
-
-- Improvement in fractional pairing (more robust)
-    - Derivative stepping
-        - (tau = 1)
-            - Infer with (tau_mid=0)
-            - Train with (tau_int=1)
-            * Alternative: infer with (tau_mid > 1) train with (tau_int < 0)
-        - (tau >= 2)
-            - Infer with (tau_mid >= 1)
-            - Train with fractional (tau_int > .2)
-    - Output and residual stepping
-        - (tau = 1)
-            - Infer with (tau_mid=1)
-            - Train with (tau_int=0)
-        - (tau >= 2)
-            - Infer with (tau_mid >= 1)
-            - Train with fractional (tau_int > 0)
+        - Can improve performance a lot
 
 # NEXT STEPS
 
-- Check E614
-- Check E615
-- Check E81x results
-- Check learning curves of Poisson-Gauss and run with smaller LR if necessary
+- Check E617
+    - Replace the E612 table with plots
+    - Replace E615 plots
 
-- Repeat E613 with new baseline architecture
-    - OF=1.5
-    - RML=6  # Fewer MPS
-    - MPS=(18 or 12)
-- Tune number of epochs with the new hyperparameters
-- Experiment with the new settings (all datasets)
+- Check E821 (NS-SL and SVS) with 2500 epochs -- is it any better?
+- Update data scaling with E82x (?)
+
+- Write the updates on fractional pairing strategy on the updates document
 
 ## SOME UNANSWERED QUESTIONS
 
@@ -52,32 +24,11 @@
 
 # Future work
 
-## Experiments
-
-- Add more discretization invariance tests
-    1. Shuffle nodes and edges
-    2. Multiple random sub-samples of the full mesh
-    3. Super-resolution and sub-resolution
-    4. Trained on grid, validated on unstructured mesh
-    5. Different x_inp and x_out (not supported currently)
-
-## Literature
-
-- Quick overview of the recent literature
-- Read gladstone2024mesh + li2020multipole and present them to Mishra
-    - Read them with details and be careful !
-    - The ideas are VERY similar and the performance is close
-    - Maybe we need to benchmark gladstone2024mesh too
-    - We should be careful with what we focus on:
-        - a possibility is focusing on this new paradigm for down and up-scaling layers
-
 ## Architectural Experiments
 
 - experiment with num_processor_repetitions !!
     - Check overfitting and overall performance
     - Compute parameter efficiency
-
-- Try Encode-FNO/CNO-Decode (exactly like GINO)
 
 ## Uncertainty
 
@@ -88,13 +39,6 @@
 - Inspect uncertainty with extrapolation
 
 
-## Benchmarks
-
-- Compare model size
-    - Number of parameters
-    - FLOPs / MADD
-    - Inference time (improve your benchmarking)
-
 ## General Boundary Conditions
 - Extend for general boundary conditions (e.g., open, Robin)
 - Impose Dirichlet boundary conditions differently
@@ -103,6 +47,22 @@
 
 - Try shifting first (approved)
 - Try repeating (physically incorrect)
+
+## Thorough study on the time stepping strategies
+
+- A more general approach using the SOTA neural operators
+
+- Tests
+    - Continuity in time tests
+    - Fractional time delta
+    - Inter- and extrapolation in t (from both ends)
+    - Inter- and extrapolation in tau (from both ends)
+
+- Fractional pairing strategy
+    - Fine-tuning or from scratch?
+    - Warm-up when fine-tuning?
+    - Try to assure robustness
+
 
 ## Variable known parameters
 

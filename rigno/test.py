@@ -142,7 +142,7 @@ def profile_inferrence(
 
   # Get a batch and transform it
   # batch_size_per_device = FLAGS.batch_size // NUM_DEVICES
-  batch_size_per_device = 8  # TMP
+  batch_size_per_device = 1  # TMP
   batch = next(dataset.batches(mode='test', batch_size=batch_size_per_device))
 
   # Set model inputs
