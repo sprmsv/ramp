@@ -2,6 +2,8 @@
 
 - Limitations
     - Speed
+        - Message passing
+        - Graph building overhead
     - Graph construction for non-periodic BC
         - Needs better methods
     - Imposing boundary conditions
@@ -9,14 +11,18 @@
 
 # NEXT STEPS
 
-- Check E617
-    - Replace the E612 table with plots
-    - Replace E615 plots
+- Measure inference times with batch size 8, 16, or more
+- Experiment with smaller latent size in the encoder/decoder only
 
-- Check E821 (NS-SL and SVS) with 2500 epochs -- is it any better?
-- Update data scaling with E82x (?)
+- Improve the noise control plots
 
-- Write the updates on fractional pairing strategy on the updates document
+- Check E833 and replace RIGNO-2x
+- Check E84x and update RIGNO-4x table
+- Check E84x and update the data scaling plots
+
+- Move all experiments to /cluster/scratch/smousav/archive/experiments
+
+- Write the updates on fractional pairing strategy in the updates document
 
 ## SOME UNANSWERED QUESTIONS
 

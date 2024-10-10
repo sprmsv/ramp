@@ -29,15 +29,13 @@ from rigno.models.operator import AbstractOperator, Inputs
 from rigno.models.rigno import RIGNO
 from rigno.models.rigno import RegionInteractionGraphBuilder
 from rigno.stepping import AutoregressiveStepper
-from rigno.stepping import TimeDerivativeStepper
-from rigno.stepping import ResidualStepper
-from rigno.stepping import OutputStepper
+from rigno.stepping import TimeDerivativeStepper, ResidualStepper, OutputStepper
 from rigno.test import get_direct_estimations
 from rigno.utils import disable_logging, Array, shuffle_arrays, split_arrays, is_multiple
 
 
 NUM_DEVICES = jax.local_device_count()
-EVAL_FREQ = 50
+EVAL_FREQ = 100
 IDX_FN = 14
 
 FLAGS = flags.FLAGS

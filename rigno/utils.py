@@ -29,10 +29,12 @@ class disable_logging:
 def is_multiple(b, a):
   return abs(int(b / a) * a - b) < 1e-08
 
-def profile(f: Callable, kwargs: dict, repeats: int = 1):
+def profile(f: Callable, kwargs: dict, repeats: int = 1, block_until_ready: bool = False):
   t_0 = time()
   for _ in range(repeats):
-    _ = f(**kwargs)
+    u = f(**kwargs)
+  if block_until_ready:
+    u = u.block_until_ready()
   return ((time() - t_0) / repeats)
 
 def shuffle_arrays(key: flax.typing.PRNGKey, arrays: Sequence[Array], axis: int = 0) -> Sequence[Array]:

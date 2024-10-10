@@ -141,8 +141,7 @@ def profile_inferrence(
   graph_fn = lambda x: graph_builder.build_metadata(x, x, np.array(dataset.metadata.domain_x))
 
   # Get a batch and transform it
-  # batch_size_per_device = FLAGS.batch_size // NUM_DEVICES
-  batch_size_per_device = 1  # TMP
+  batch_size_per_device = FLAGS.batch_size // NUM_DEVICES
   batch = next(dataset.batches(mode='test', batch_size=batch_size_per_device))
 
   # Set model inputs
@@ -178,9 +177,9 @@ def profile_inferrence(
   # Profile graph building
   t_graph = profile(graph_fn, kwargs=dict(x=batch.x[0, 0]), repeats=10)
   # Profile compilation
-  t_compilation = profile(f=apply_fn, kwargs=model_kwargs, repeats=1)
+  t_compilation = profile(f=apply_fn, kwargs=model_kwargs, repeats=1, block_until_ready=True)
   # Profile inferrence after compilation
-  t = profile(f=apply_fn, kwargs=model_kwargs, repeats=repeats)
+  t = profile(f=apply_fn, kwargs=model_kwargs, repeats=repeats, block_until_ready=True)
 
   general_info = [
     'NUMBER OF DEVICES: 1',
@@ -434,7 +433,7 @@ def get_all_estimations(
     res: {tau: None for tau in taus_rollout} for res in all_dsfs}
 
   # Instantiate the steppers
-  # TMP TODO: Same stepper for all resolutions !!
+  # TODO: Same stepper for all resolutions !!
   for dsf in all_dsfs:
     # Configure and build new model
     model_configs = model.configs
@@ -1024,7 +1023,7 @@ def main(argv):
   taus_direct = [.5] + list(range(tau_min, tau_max + 1))
   # NOTE: One compilation per tau_rollout
   taus_rollout = [.5, 1] + [time_downsample_factor * d for d in range(1, tau_max_train+1)]
-  # NOTE: Two compilations per discretization  # TMP
+  # NOTE: Two compilations per discretization
   space_dsfs = [3, 2.5, 2, 1.7, 1.4, 1] if FLAGS.resolution else []
   noise_levels = [0, .005, .01, .02] if FLAGS.noise else []
 
