@@ -1,5 +1,11 @@
 # Project Updates
 
+- Remedy for faster message-passing:
+    - Replace segment_sum with axis_sum by using masks and padding the edge features
+    - Increases memory consumption ~3x
+    - Can make inference and training time significantly faster
+        - Hard to estimate but I expect at least 10x
+
 - Limitations
     - Speed
         - Message passing
@@ -8,25 +14,6 @@
         - Needs better methods
     - Imposing boundary conditions
         - Can improve performance a lot
-
-# NEXT STEPS
-
-- Measure inference times with batch size 8, 16, or more
-- Experiment with smaller latent size in the encoder/decoder only
-
-- Improve the noise control plots
-
-- Check E833 and replace RIGNO-2x
-- Check E84x and update RIGNO-4x table
-- Check E84x and update the data scaling plots
-
-- Move all experiments to /cluster/scratch/smousav/archive/experiments
-
-- Write the updates on fractional pairing strategy in the updates document
-
-## SOME UNANSWERED QUESTIONS
-
-- Why NS-SVS and NS-Sines do not generalize on time??
 
 # Future work
 
@@ -48,11 +35,6 @@
 ## General Boundary Conditions
 - Extend for general boundary conditions (e.g., open, Robin)
 - Impose Dirichlet boundary conditions differently
-
-## Data Augmentation
-
-- Try shifting first (approved)
-- Try repeating (physically incorrect)
 
 ## Thorough study on the time stepping strategies
 
