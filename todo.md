@@ -4,7 +4,7 @@
     - Replace segment_sum with axis_sum by using masks and padding the edge features
     - Increases memory consumption ~3x
     - Can make inference and training time significantly faster
-        - Hard to estimate but I expect at least 10x
+        - I expect at least 10x to 20x speedup (8h training time instead of 7 days)
 
 - Limitations
     - Speed

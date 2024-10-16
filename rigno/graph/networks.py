@@ -1,47 +1,73 @@
 # Adopted from https://github.com/google-deepmind/graphcast
 # Accessed on 16 February 2024, commit 8debd7289bb2c498485f79dbd98d8b4933bfc6a7
-# Codes are slightly modified
+# Codes are modified
 """A library of typed Graph Neural Networks."""
 
-from typing import Callable, Mapping, Optional, Union
+from typing import Callable, Mapping, Optional, Union, Tuple
 
-import jax
 import jax.numpy as jnp
 import jax.tree_util as tree
-import jraph
 
-from rigno.graph.entities import (
-    TypedGraph, EdgesIndices, EdgeSetKey,
-    EdgeSet, NodeSet, Context)
-
+from rigno.graph.entities import TypedGraph, EdgeSetKey, EdgeSet, NodeSet, Context
+from rigno.models.utils import mean_aggregation_edge
+from rigno.utils import Array
 
 # All features will be an ArrayTree
-NodeFeatures = EdgeFeatures = SenderFeatures = ReceiverFeatures = Globals = (jraph.ArrayTree)
+NodeFeatures = EdgeFeatures = SenderFeatures = ReceiverFeatures = EdgeMask = Globals = Array
 
+EmbedEdgeFn = Callable[
+  [EdgeFeatures],
+  EdgeFeatures
+]
+EmbedNodeFn = Callable[
+  [NodeFeatures],
+  NodeFeatures
+]
+EmbedGlobalFn = Callable[
+  [Globals],
+  Globals
+]
+GNUpdateEdgeFn = Callable[
+  [EdgeFeatures, Mapping[str, ReceiverFeatures], Globals],
+  EdgeFeatures
+]
 GNUpdateNodeFn = Callable[
-  [NodeFeatures, Mapping[str, SenderFeatures], Mapping[str, ReceiverFeatures], Globals],
+  [NodeFeatures, Mapping[str, ReceiverFeatures], Globals],
   NodeFeatures
 ]
 GNUpdateGlobalFn = Callable[
   [Mapping[str, NodeFeatures], Mapping[str, EdgeFeatures], Globals],
   Globals
 ]
-InteractionUpdateNodeFn = Callable[
-  [jraph.NodeFeatures, Mapping[str, SenderFeatures], Mapping[str, ReceiverFeatures]],
-  jraph.NodeFeatures
+InteractionUpdateEdgeFn = Callable[
+  [EdgeFeatures, Mapping[str, ReceiverFeatures]],
+  EdgeFeatures
 ]
-InteractionUpdateNodeFnNoSentEdges = Callable[
-  [jraph.NodeFeatures, Mapping[str, ReceiverFeatures]],
-  jraph.NodeFeatures
+InteractionUpdateNodeFn = Callable[
+  [NodeFeatures, Mapping[str, ReceiverFeatures]],
+  NodeFeatures
+]
+
+AggregateEdgesToNodesFn = Callable[
+  [ReceiverFeatures, EdgeMask, Tuple],
+  NodeFeatures
+]
+AggregateNodesToGlobalsFn = Callable[
+  [NodeFeatures, Tuple],
+  Globals
+]
+AggregateEdgesToGlobalsFn = Callable[
+  [ReceiverFeatures, EdgeMask, Tuple],
+  Globals
 ]
 
 def GraphNetwork(
-    update_edge_fn: Mapping[str, jraph.GNUpdateEdgeFn],
+    update_edge_fn: Mapping[str, GNUpdateEdgeFn],
     update_node_fn: Mapping[str, GNUpdateNodeFn],
     update_global_fn: Optional[GNUpdateGlobalFn] = None,
-    aggregate_edges_for_nodes_fn: jraph.AggregateEdgesToNodesFn = jraph.segment_mean,
-    aggregate_nodes_for_globals_fn: jraph.AggregateNodesToGlobalsFn = jraph.segment_mean,
-    aggregate_edges_for_globals_fn: jraph.AggregateEdgesToGlobalsFn = jraph.segment_mean,
+    aggregate_edges_for_nodes_fn: AggregateEdgesToNodesFn = mean_aggregation_edge,
+    aggregate_nodes_for_globals_fn: AggregateNodesToGlobalsFn = jnp.mean,
+    aggregate_edges_for_globals_fn: AggregateEdgesToGlobalsFn = mean_aggregation_edge,
   ):
   """Returns a method that applies a configured GraphNetwork.
 
@@ -122,36 +148,29 @@ def GraphNetwork(
 
   return _apply_graph_net
 
-def _edge_update(graph: TypedGraph, edge_fn: jraph.GNUpdateEdgeFn,
+def _edge_update(graph: TypedGraph, edge_fn: GNUpdateEdgeFn,
   edge_set_key: EdgeSetKey, fn_kwargs: dict) -> EdgeSet:
   """Updates an edge set of a given key."""
 
   # Get sender and receivers
-  sender_nodes = graph.nodes[edge_set_key.node_sets[0]]
   receiver_nodes = graph.nodes[edge_set_key.node_sets[1]]
   edge_set = graph.edges[edge_set_key]
-  senders = edge_set.indices.senders
-  receivers = edge_set.indices.receivers
 
-  # Get sent and received features
-  batched_index = jax.vmap(lambda f, idx: f[idx])
-  sent_attributes = tree.tree_map(
-    lambda f: batched_index(f, senders),
-    sender_nodes.features
-  )
-  received_attributes = tree.tree_map(
-    lambda f: batched_index(f, receivers),
-    receiver_nodes.features
+  # Get received features
+  received_attributes = jnp.tile(
+    jnp.expand_dims(receiver_nodes.features, axis=2),
+    reps=(1, 1, edge_set.features.shape[2], 1)
   )
 
   # Get new edge features
-  n_edge = edge_set.n_edge[0]
-  sum_n_edge = senders.shape[1]
   global_features = tree.tree_map(
-    lambda g: jnp.repeat(g, n_edge, axis=1, total_repeat_length=sum_n_edge),
+    lambda g: jnp.tile(
+      jnp.expand_dims(g, axis=(1, 2)),
+      reps=(1, edge_set.features.shape[1], edge_set.features.shape[2], 1),
+    ),
     graph.context.features
   )
-  new_features = edge_fn(edge_set.features, sent_attributes, received_attributes, global_features, **fn_kwargs)
+  new_features = edge_fn(edge_set.features, received_attributes, global_features, **fn_kwargs)
 
   return edge_set._replace(features=new_features)
 
@@ -163,87 +182,37 @@ def _node_update(graph: TypedGraph, node_fn: GNUpdateNodeFn,
   node_set = graph.nodes[node_set_key]
   sum_n_node = tree.tree_leaves(node_set.features)[0].shape[1]
 
-  # Wrap the aggregation function
-  batched_aggregation_fn = jax.vmap(
-    lambda f, idx, n: aggregation_fn(f, idx, n),
-    in_axes=(0, 0, None)
-  )
-
-  # Aggregate sent features
-  sent_features = {}
-  for edge_set_key, edge_set in graph.edges.items():
-    sender_node_set_key = edge_set_key.node_sets[0]
-    if sender_node_set_key == node_set_key:
-      assert isinstance(edge_set.indices, EdgesIndices)
-      senders = edge_set.indices.senders
-      sent_features[edge_set_key.name] = tree.tree_map(
-        lambda e: batched_aggregation_fn(e, senders, sum_n_node),
-        edge_set.features
-      )
-
   # Aggregate received features
   received_features = {}
   for edge_set_key, edge_set in graph.edges.items():
     receiver_node_set_key = edge_set_key.node_sets[1]
     if receiver_node_set_key == node_set_key:
-      assert isinstance(edge_set.indices, EdgesIndices)
-      receivers = edge_set.indices.receivers
-      received_features[edge_set_key.name] = tree.tree_map(
-        lambda e: batched_aggregation_fn(e, receivers, sum_n_node),
-        edge_set.features
-      )
+      received_features[edge_set_key.name] = aggregation_fn(edge_set.features, edge_set.mask, axis=2)
 
   # Get new node features
   n_node = node_set.n_node[0]
   global_features = tree.tree_map(
     lambda g: jnp.repeat(g, n_node, axis=1, total_repeat_length=sum_n_node),
-    graph.context.features
+    graph.context.features,
   )
-  new_features = node_fn(node_set.features, sent_features, received_features, global_features, **fn_kwargs)
+  new_features = node_fn(node_set.features, received_features, global_features, **fn_kwargs)
 
   return node_set._replace(features=new_features)
 
 def _global_update(graph: TypedGraph, global_fn: GNUpdateGlobalFn,
-  edge_aggregation_fn: jraph.AggregateEdgesToGlobalsFn,
-  node_aggregation_fn: jraph.AggregateNodesToGlobalsFn, fn_kwargs: dict) -> Context:
+  edge_aggregation_fn: AggregateEdgesToGlobalsFn,
+  node_aggregation_fn: AggregateNodesToGlobalsFn, fn_kwargs: dict) -> Context:
   """Updates an edge set of a given key."""
-
-  # Get graph index
-  n_graph = graph.context.n_graph.shape[1]
-  graph_idx = jnp.arange(n_graph)
-
-  # Wrap the aggregation functions
-  batched_edge_aggregation_fn = jax.vmap(
-    lambda f, idx, n: edge_aggregation_fn(f, idx, n),
-    in_axes=(0, 0, None)
-  )
-  batched_node_aggregation_fn = jax.vmap(
-    lambda f, idx, n: node_aggregation_fn(f, idx, n),
-    in_axes=(0, 0, None)
-  )
 
   # Aggregate edge features
   edge_features = {}
   for edge_set_key, edge_set in graph.edges.items():
-    assert isinstance(edge_set.indices, EdgesIndices)
-    sum_n_edge = edge_set.indices.senders.shape[1]
-    n_edge = edge_set.n_edge[0]
-    edge_gr_idx = jnp.repeat(graph_idx, n_edge, axis=1, total_repeat_length=sum_n_edge)
-    edge_features[edge_set_key.name] = tree.tree_map(
-      lambda e: batched_edge_aggregation_fn(e, edge_gr_idx, n_graph),
-      edge_set.features
-    )
+    edge_features[edge_set_key.name] = edge_aggregation_fn(edge_set.features, edge_set.mask, axis=(1, 2))
 
   # Aggregate node features
   node_features = {}
   for node_set_key, node_set in graph.nodes.items():
-    sum_n_node = tree.tree_leaves(node_set.features)[0].shape[0]
-    n_node = node_set.n_node[0]
-    node_gr_idx = jnp.repeat(graph_idx, n_node, axis=1, total_repeat_length=sum_n_node)
-    node_features[node_set_key] = tree.tree_map(
-      lambda n: batched_node_aggregation_fn(n, node_gr_idx, n_graph),
-      node_set.features
-    )
+    node_features[node_set_key] = node_aggregation_fn(node_set.features, axis=1)
 
   # Get new global features
   new_features = global_fn(node_features, edge_features, graph.context.features, **fn_kwargs)
@@ -251,10 +220,9 @@ def _global_update(graph: TypedGraph, global_fn: GNUpdateGlobalFn,
   return graph.context._replace(features=new_features)
 
 def InteractionNetwork(
-    update_edge_fn: Mapping[str, jraph.InteractionUpdateEdgeFn],
-    update_node_fn: Mapping[str, Union[InteractionUpdateNodeFn, InteractionUpdateNodeFnNoSentEdges]],
-    aggregate_edges_for_nodes_fn: jraph.AggregateEdgesToNodesFn = jraph.segment_mean,
-    include_sent_messages_in_node_update: bool = False,
+    update_edge_fn: Mapping[str, InteractionUpdateEdgeFn],
+    update_node_fn: Mapping[str, InteractionUpdateNodeFn],
+    aggregate_edges_for_nodes_fn: AggregateEdgesToNodesFn = mean_aggregation_edge,
   ):
   """Returns a method that applies a configured InteractionNetwork.
 
@@ -274,24 +242,19 @@ def InteractionNetwork(
       types, indexed by node type name.
     aggregate_edges_for_nodes_fn: function used to aggregate messages to each
       node.
-    include_sent_messages_in_node_update: pass edge features for which a node is
-      a sender to the node update function.
   """
   # An InteractionNetwork is a GraphNetwork without globals features,
   # so we implement the InteractionNetwork as a configured GraphNetwork.
 
-  # TRY: Consider using the global features instead of keyword arguments
+  # TODO: TRY: Consider using the global features instead of keyword arguments
 
   # An InteractionNetwork edge function does not have global feature inputs,
   # so we filter the passed global argument in the GraphNetwork.
-  wrapped_update_edge_fn = tree.tree_map(lambda fn: lambda e, s, r, g, **kw: fn(e, s, r, **kw), update_edge_fn)
+  wrapped_update_edge_fn = tree.tree_map(lambda fn: lambda e, r, g, **kw: fn(e, r, **kw), update_edge_fn)
 
   # Similarly, we wrap the update_node_fn to ensure only the expected
   # arguments are passed to the Interaction net.
-  if include_sent_messages_in_node_update:
-    wrapped_update_node_fn = tree.tree_map(lambda fn: lambda n, s, r, g, **kw: fn(n, s, r, **kw), update_node_fn)
-  else:
-    wrapped_update_node_fn = tree.tree_map(lambda fn: lambda n, s, r, g, **kw: fn(n, r, **kw), update_node_fn)
+  wrapped_update_node_fn = tree.tree_map(lambda fn: lambda n, r, g, **kw: fn(n, r, **kw), update_node_fn)
 
   # We build a graph network using the wrapped update functions
   interaction_network = GraphNetwork(
@@ -303,9 +266,9 @@ def InteractionNetwork(
   return interaction_network
 
 def GraphMapFeatures(
-    embed_edge_fn: Optional[Mapping[str, jraph.EmbedEdgeFn]] = None,
-    embed_node_fn: Optional[Mapping[str, jraph.EmbedNodeFn]] = None,
-    embed_global_fn: Optional[jraph.EmbedGlobalFn] = None,
+    embed_edge_fn: Optional[Mapping[str, EmbedEdgeFn]] = None,
+    embed_node_fn: Optional[Mapping[str, EmbedNodeFn]] = None,
+    embed_global_fn: Optional[EmbedGlobalFn] = None,
   ):
   """Returns function which embeds the components of a graph independently.
 

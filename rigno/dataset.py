@@ -883,14 +883,22 @@ class Dataset:
     # NOTE: Stores all graphs in memory one by one
     metadata = []
     num_p2r_edges = 0
+    max_p2r_edges_per_receiver = 0
     num_r2r_edges = 0
+    max_r2r_edges_per_receiver = 0
     num_r2p_edges = 0
+    max_r2p_edges_per_receiver = 0
     if self.rigs is not None:
       # NOTE: Use the old number of edges in order to avoid re-compilation
       num_p2r_edges = self.rigs.p2r_edge_indices.shape[1]
       num_r2r_edges = self.rigs.r2r_edge_indices.shape[1]
       if self.rigs.r2p_edge_indices is not None:
         num_r2p_edges = self.rigs.r2p_edge_indices.shape[1]
+      # NOTE: Use the old maximum number of edges per receiver in order to avoid re-compilation
+      # NOTE: 
+      max_p2r_edges_per_receiver = self.rigs.p2r_edges_per_receiver.shape[1]
+      max_r2r_edges_per_receiver = self.rigs.r2r_edges_per_receiver.shape[1]
+      max_r2p_edges_per_receiver = self.rigs.r2p_edges_per_receiver.shape[1]
     for mode in ['train', 'valid', 'test']:
       if not self.nums[mode] > 0: continue
       batch = self._fetch_mode(idx=np.arange(self.nums[mode]), mode=mode)
@@ -900,12 +908,16 @@ class Dataset:
         key, subkey = jax.random.split(key)
         m = builder.build_metadata(x_inp=x, x_out=x, domain=np.array(self.metadata.domain_x), rmesh_correction_dsf=rmesh_correction_dsf, key=subkey)
         metadata.append(m)
-        # Store the maximum number of edges
         if self.rigs is None:
+          # Store the maximum number of edges
           num_p2r_edges = max(num_p2r_edges, m.p2r_edge_indices.shape[1])
           num_r2r_edges = max(num_r2r_edges, m.r2r_edge_indices.shape[1])
           if m.r2p_edge_indices is not None:
             num_r2p_edges = max(num_r2p_edges, m.r2p_edge_indices.shape[1])
+          # Store the maximum number of incoming edges per receiver node
+          max_p2r_edges_per_receiver = max(max_p2r_edges_per_receiver, m.p2r_edges_per_receiver.shape[1])
+          max_r2r_edges_per_receiver = max(max_r2r_edges_per_receiver, m.r2r_edges_per_receiver.shape[1])
+          max_r2p_edges_per_receiver = max(max_r2p_edges_per_receiver, m.r2p_edges_per_receiver.shape[1])
         # Break the loop if the coordinates are fixed on the batch axis
         if self.metadata.fix_x:
           break
@@ -923,9 +935,12 @@ class Dataset:
         x_rnodes=m.x_rnodes,
         r_rnodes=m.r_rnodes,
         p2r_edge_indices=m.p2r_edge_indices[:, jnp.arange(num_p2r_edges), :],
+        p2r_edges_per_receiver=jnp.zeros(shape=(1, max_p2r_edges_per_receiver), dtype=jnp.uint8),
         r2r_edge_indices=m.r2r_edge_indices[:, jnp.arange(num_r2r_edges), :],
         r2r_edge_domains=m.r2r_edge_domains[:, jnp.arange(num_r2r_edges), :],
+        r2r_edges_per_receiver=jnp.zeros(shape=(1, max_r2r_edges_per_receiver), dtype=jnp.uint8),
         r2p_edge_indices=m.r2p_edge_indices[:, jnp.arange(num_r2p_edges), :] if (m.r2p_edge_indices is not None) else None,
+        r2p_edges_per_receiver=jnp.zeros(shape=(1, max_r2p_edges_per_receiver), dtype=jnp.uint8),
       )
 
     # Concatenate all padded graph sets and store them

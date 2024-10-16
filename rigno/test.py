@@ -67,8 +67,11 @@ def _build_graph_metadata(batch: Batch, graph_builder: RegionInteractionGraphBui
   # Build graph metadata with transformed coordinates
   metadata = []
   num_p2r_edges = 0
+  max_p2r_edges_per_receiver = 0
   num_r2r_edges = 0
+  max_r2r_edges_per_receiver = 0
   num_r2p_edges = 0
+  max_r2p_edges_per_receiver = 0
   # Loop over all coordinates in the batch
   # NOTE: Assuming constant x in time
   for x in batch.x[:, 0]:
@@ -79,6 +82,10 @@ def _build_graph_metadata(batch: Batch, graph_builder: RegionInteractionGraphBui
     num_r2r_edges = max(num_r2r_edges, m.r2r_edge_indices.shape[1])
     if m.r2p_edge_indices is not None:
       num_r2p_edges = max(num_r2p_edges, m.r2p_edge_indices.shape[1])
+    # Store the maximum number of incoming edges per receiver node
+    max_p2r_edges_per_receiver = max(max_p2r_edges_per_receiver, m.p2r_edges_per_receiver.max())
+    max_r2r_edges_per_receiver = max(max_r2r_edges_per_receiver, m.r2r_edges_per_receiver.max())
+    max_r2p_edges_per_receiver = max(max_r2p_edges_per_receiver, m.r2p_edges_per_receiver.max())
   # Pad the edge sets using dummy nodes
   # NOTE: Exploiting jax' behavior for out-of-dimension indexing
   for i, m in enumerate(metadata):
@@ -89,9 +96,12 @@ def _build_graph_metadata(batch: Batch, graph_builder: RegionInteractionGraphBui
       x_rnodes=m.x_rnodes,
       r_rnodes=m.r_rnodes,
       p2r_edge_indices=m.p2r_edge_indices[:, jnp.arange(num_p2r_edges), :],
+      p2r_edges_per_receiver=jnp.zeros(shape=(1, max_p2r_edges_per_receiver), dtype=jnp.uint8),
       r2r_edge_indices=m.r2r_edge_indices[:, jnp.arange(num_r2r_edges), :],
       r2r_edge_domains=m.r2r_edge_domains[:, jnp.arange(num_r2r_edges), :],
+      r2r_edges_per_receiver=jnp.zeros(shape=(1, max_r2r_edges_per_receiver), dtype=jnp.uint8),
       r2p_edge_indices=m.r2p_edge_indices[:, jnp.arange(num_r2p_edges), :] if (m.r2p_edge_indices is not None) else None,
+      r2p_edges_per_receiver=jnp.zeros(shape=(1, max_r2p_edges_per_receiver), dtype=jnp.uint8),
     )
   # Concatenate all padded graph sets and store them
   g = tree.tree_map(lambda *v: jnp.concatenate(v), *metadata)

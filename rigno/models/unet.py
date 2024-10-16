@@ -23,7 +23,6 @@ class Encoder(nn.Module):
     z1 = ConditionedNorm(
       latent_size=self.cond_norm_hidden_size,
       correction_size=(self.features * 2),
-      convolutional=True,
     )(tau, z1)
     z1 = nn.swish(z1)
     z1_pool = nn.avg_pool(z1, window_shape=(2, 2), strides=(2, 2))
@@ -35,7 +34,6 @@ class Encoder(nn.Module):
     z2 = ConditionedNorm(
       latent_size=self.cond_norm_hidden_size,
       correction_size=(self.features * 4),
-      convolutional=True,
     )(tau, z2)
     z2 = nn.swish(z2)
     z2_pool = nn.avg_pool(z2, window_shape=(2, 2), strides=(2, 2))
@@ -47,7 +45,6 @@ class Encoder(nn.Module):
     z3 = ConditionedNorm(
       latent_size=self.cond_norm_hidden_size,
       correction_size=(self.features * 8),
-      convolutional=True,
     )(tau, z3)
     z3 = nn.swish(z3)
     # z3_dropout = nn.Dropout(0.5, deterministic=False)(z3)
@@ -61,7 +58,6 @@ class Encoder(nn.Module):
     z4 = ConditionedNorm(
       latent_size=self.cond_norm_hidden_size,
       correction_size=(self.features * 16),
-      convolutional=True,
     )(tau, z4)
     z4 = nn.swish(z4)
     # z4_dropout = nn.Dropout(0.5, deterministic=False)(z4)
@@ -91,7 +87,6 @@ class Decoder(nn.Module):
     z5 = ConditionedNorm(
       latent_size=self.cond_norm_hidden_size,
       correction_size=(self.features * 8),
-      convolutional=True,
     )(tau, z5)
     z5 = nn.swish(z5)
 
@@ -110,7 +105,6 @@ class Decoder(nn.Module):
     z6 = ConditionedNorm(
       latent_size=self.cond_norm_hidden_size,
       correction_size=(self.features * 4),
-      convolutional=True,
     )(tau, z6)
     z6 = nn.swish(z6)
 
@@ -129,7 +123,6 @@ class Decoder(nn.Module):
     z7 = ConditionedNorm(
       latent_size=self.cond_norm_hidden_size,
       correction_size=(self.features * 2),
-      convolutional=True,
     )(tau, z7)
     z7 = nn.swish(z7)
 

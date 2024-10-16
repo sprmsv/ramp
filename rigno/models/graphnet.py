@@ -1,40 +1,16 @@
 # Adopted from https://github.com/google-deepmind/graphcast
 # Accessed on 16 February 2024, commit 8debd7289bb2c498485f79dbd98d8b4933bfc6a7
-# Codes are slightly modified to be compatible with Flax
-
-"""JAX implementation of Graph Networks Simulator.
-
-Generalization to TypedGraphs of the deep Graph Neural Network from:
-
-@inproceedings{pfaff2021learning,
-  title={Learning Mesh-Based Simulation with Graph Networks},
-  author={Pfaff, Tobias and Fortunato, Meire and Sanchez-Gonzalez, Alvaro and
-      Battaglia, Peter},
-  booktitle={International Conference on Learning Representations},
-  year={2021}
-}
-
-@inproceedings{sanchez2020learning,
-  title={Learning to simulate complex physics with graph networks},
-  author={Sanchez-Gonzalez, Alvaro and Godwin, Jonathan and Pfaff, Tobias and
-      Ying, Rex and Leskovec, Jure and Battaglia, Peter},
-  booktitle={International conference on machine learning},
-  pages={8459--8468},
-  year={2020},
-  organization={PMLR}
-}
-"""
+# Codes are modified
 
 from typing import Mapping, Optional, Union, Callable
 
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
-import jraph
 
 from rigno.graph.entities import TypedGraph
 from rigno.graph.networks import GraphMapFeatures, InteractionNetwork
-from rigno.models.utils import AugmentedMLP
+from rigno.models.utils import AugmentedMLP, mean_aggregation_edge
 
 
 class DeepTypedGraphNet(nn.Module):
@@ -81,13 +57,10 @@ class DeepTypedGraphNet(nn.Module):
     edge_output_size: Size of the output edge representations for
         each edge type. For edge types not specified here, the latent edge
         representation from the output of the processor will be returned.
-    include_sent_messages_in_node_update: Whether to include pooled sent
-        messages from each node in the node update.
     use_layer_norm: Whether it uses layer norm or not.
     activation: name of activation function.
     f32_aggregation: Use float32 in the edge aggregation.
-    aggregate_edges_for_nodes_fn: function used to aggregate messages to each
-      node.
+    aggregate_edges_for_nodes_fn: function used to aggregate messages to each node.
     name: Name of the model.
 
   """
@@ -102,13 +75,12 @@ class DeepTypedGraphNet(nn.Module):
   embed_edges: bool = True
   node_output_size: Optional[Mapping[str, int]] = None
   edge_output_size: Optional[Mapping[str, int]] = None
-  include_sent_messages_in_node_update: bool = False
   use_layer_norm: bool = True
   conditioned_normalization: bool = False
   cond_norm_hidden_size: int = 16
   activation: str = 'swish'
   f32_aggregation: bool = False
-  aggregate_edges_for_nodes_fn: Callable = jraph.segment_mean
+  aggregate_edges_for_nodes_fn: Callable = mean_aggregation_edge
 
   def setup(self):
     self._activation = _get_activation_fn(self.activation)
@@ -200,7 +172,6 @@ class DeepTypedGraphNet(nn.Module):
           for node_set_name in self.node_latent_size.keys()
         },
         aggregate_edges_for_nodes_fn=aggregate_fn,
-        include_sent_messages_in_node_update=self.include_sent_messages_in_node_update,
       )
       for step_i in range(self.num_message_passing_steps)
     ]

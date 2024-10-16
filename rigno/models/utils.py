@@ -12,6 +12,20 @@ def concatenate_args(args, kwargs, axis: int = -1):
   concat_args = jnp.concatenate(combined_args, axis=axis)
   return concat_args
 
+def mean_aggregation_edge(features, mask, axis):
+  # Set features of dummy edges to zero
+  features = features * mask
+  # Compute the number of existing edges
+  num_true_edges = jnp.sum(mask, axis=axis)
+  # Replace zeros with one (avoid division by zero)
+  # NOTE: When there are no edges, the sum is zero
+  num_true_edges = jnp.where((num_true_edges == 0), 1, num_true_edges)
+  # Compute the mean of existing edges
+  sum_features = jnp.sum(features, axis=axis)
+  mean_features = sum_features / num_true_edges
+
+  return mean_features
+
 class AugmentedMLP(nn.Module):
   """
   Multi-layer perceptron with optional layer norm and learned correction on the last layer.
@@ -68,7 +82,6 @@ class ConditionedNorm(nn.Module):
 
   latent_size: Sequence[int]
   correction_size: int = 1
-  convolutional: bool = False
 
   def setup(self):
     self.mlp_scale = nn.Sequential(
@@ -92,15 +105,11 @@ class ConditionedNorm(nn.Module):
     scale = 1 + c * self.mlp_scale(c)
     bias = c * self.mlp_bias(c)
     shape = x.shape
-    if self.convolutional:
-      x = x.reshape(shape[0], -1, shape[3])
-      x = x.swapaxes(0, 1)
+    x = x.reshape(shape[0], -1, shape[-1])
     scale = jnp.expand_dims(scale, axis=1)
     bias = jnp.expand_dims(bias, axis=1)
     x = x * scale + bias
-    if self.convolutional:
-      x = x.swapaxes(0, 1)
-      x = x.reshape(*shape)
+    x = x.reshape(*shape)
     return x
 
 class LinearConditionedNorm(nn.Module):
