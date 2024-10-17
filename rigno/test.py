@@ -1010,7 +1010,6 @@ def main(argv):
 
   # Profile inference time
   # NOTE: One compilation per each profiling
-  print('Test with p_edge_masking=0')
   profile_inference(
     dataset=dataset,
     graph_builder=graph_builder,
@@ -1020,7 +1019,6 @@ def main(argv):
     stats=stats,
     p_edge_masking=0,
   )
-  print('Test with p_edge_masking=0.5')
   profile_inference(
     dataset=dataset,
     graph_builder=graph_builder,
@@ -1030,7 +1028,6 @@ def main(argv):
     stats=stats,
     p_edge_masking=.5,
   )
-  print('Test with p_edge_masking=0.8')
   profile_inference(
     dataset=dataset,
     graph_builder=graph_builder,
