@@ -895,7 +895,6 @@ class Dataset:
       if self.rigs.r2p_edge_indices is not None:
         num_r2p_edges = self.rigs.r2p_edge_indices.shape[1]
       # NOTE: Use the old maximum number of edges per receiver in order to avoid re-compilation
-      # NOTE: 
       max_p2r_edges_per_receiver = self.rigs.p2r_edges_per_receiver.shape[1]
       max_r2r_edges_per_receiver = self.rigs.r2r_edges_per_receiver.shape[1]
       max_r2p_edges_per_receiver = self.rigs.r2p_edges_per_receiver.shape[1]

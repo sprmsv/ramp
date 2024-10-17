@@ -45,8 +45,8 @@ def define_flags():
   flags.DEFINE_integer(name='n_test', default=(2**8), required=False,
     help='Number of test samples'
   )
-  flags.DEFINE_boolean(name='profile', default=False, required=False,
-    help='If passed, inference is profiled using 1 GPU'
+  flags.DEFINE_boolean(name='only_profile', default=False, required=False,
+    help='If passed, the tests are skipped'
   )
   flags.DEFINE_boolean(name='resolution', default=False, required=False,
     help='If passed, estimations with different discretizations are computed'
@@ -83,9 +83,9 @@ def _build_graph_metadata(batch: Batch, graph_builder: RegionInteractionGraphBui
     if m.r2p_edge_indices is not None:
       num_r2p_edges = max(num_r2p_edges, m.r2p_edge_indices.shape[1])
     # Store the maximum number of incoming edges per receiver node
-    max_p2r_edges_per_receiver = max(max_p2r_edges_per_receiver, m.p2r_edges_per_receiver.max())
-    max_r2r_edges_per_receiver = max(max_r2r_edges_per_receiver, m.r2r_edges_per_receiver.max())
-    max_r2p_edges_per_receiver = max(max_r2p_edges_per_receiver, m.r2p_edges_per_receiver.max())
+    max_p2r_edges_per_receiver = max(max_p2r_edges_per_receiver, m.p2r_edges_per_receiver.shape[1])
+    max_r2r_edges_per_receiver = max(max_r2r_edges_per_receiver, m.r2r_edges_per_receiver.shape[1])
+    max_r2p_edges_per_receiver = max(max_r2p_edges_per_receiver, m.r2p_edges_per_receiver.shape[1])
   # Pad the edge sets using dummy nodes
   # NOTE: Exploiting jax' behavior for out-of-dimension indexing
   for i, m in enumerate(metadata):
@@ -129,7 +129,7 @@ def _change_resolution(batch: Batch, space_downsample_factor: int):
   _g = None
   return Batch(u=_u, c=_c, x=_x, t=batch.t, g=_g)
 
-def profile_inferrence(
+def profile_inference(
   dataset: Dataset,
   graph_builder: RegionInteractionGraphBuilder,
   model: AbstractOperator,
@@ -151,7 +151,7 @@ def profile_inferrence(
   graph_fn = lambda x: graph_builder.build_metadata(x, x, np.array(dataset.metadata.domain_x))
 
   # Get a batch and transform it
-  batch_size_per_device = FLAGS.batch_size // NUM_DEVICES
+  batch_size_per_device = 1
   batch = next(dataset.batches(mode='test', batch_size=batch_size_per_device))
 
   # Set model inputs
@@ -168,6 +168,7 @@ def profile_inferrence(
         tau=dataset.dt,
       ),
       graphs=graph_builder.build_graphs(batch.g),
+      key=jax.random.PRNGKey(0),
     )
   else:
     model_kwargs = dict(
@@ -182,6 +183,7 @@ def profile_inferrence(
         tau=None,
       ),
       graphs=graph_builder.build_graphs(batch.g),
+      key=jax.random.PRNGKey(0),
     )
 
   # Profile graph building
@@ -1006,18 +1008,40 @@ def main(argv):
   dataset.build_graphs(graph_builder, rmesh_correction_dsf=correction_sdsf)
   dataset_small.build_graphs(graph_builder, rmesh_correction_dsf=correction_sdsf)
 
-  # Profile
-  # NOTE: One compilation
-  if FLAGS.profile:
-    profile_inferrence(
-      dataset=dataset,
-      graph_builder=graph_builder,
-      model=model,
-      stepping=stepping,
-      state=state,
-      stats=stats,
-      p_edge_masking=.0,
-    )
+  # Profile inference time
+  # NOTE: One compilation per each profiling
+  print('Test with p_edge_masking=0')
+  profile_inference(
+    dataset=dataset,
+    graph_builder=graph_builder,
+    model=model,
+    stepping=stepping,
+    state=state,
+    stats=stats,
+    p_edge_masking=0,
+  )
+  print('Test with p_edge_masking=0.5')
+  profile_inference(
+    dataset=dataset,
+    graph_builder=graph_builder,
+    model=model,
+    stepping=stepping,
+    state=state,
+    stats=stats,
+    p_edge_masking=.5,
+  )
+  print('Test with p_edge_masking=0.8')
+  profile_inference(
+    dataset=dataset,
+    graph_builder=graph_builder,
+    model=model,
+    stepping=stepping,
+    state=state,
+    stats=stats,
+    p_edge_masking=.8,
+  )
+  if FLAGS.only_profile:
+    return
 
   # Create a clean directory for tests
   DIR_TESTS = DIR / 'tests'

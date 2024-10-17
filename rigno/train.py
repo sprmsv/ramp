@@ -886,7 +886,7 @@ def train(
       batches=dataset.batches(mode='train', batch_size=FLAGS.batch_size, key=subkey_0),
     )
 
-    if (epoch % evaluation_frequency) == 0:
+    if ((epoch % evaluation_frequency) == 0) or (epoch == epochs):
       # Evaluate
       metrics_trn = evaluate(
         state=state,
