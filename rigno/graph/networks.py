@@ -3,8 +3,9 @@
 # Codes are modified
 """A library of typed Graph Neural Networks."""
 
-from typing import Callable, Mapping, Optional, Union, Tuple
+from typing import Callable, Mapping, Optional, Tuple
 
+import jax
 import jax.numpy as jnp
 import jax.tree_util as tree
 
@@ -153,11 +154,16 @@ def _edge_update(graph: TypedGraph, edge_fn: GNUpdateEdgeFn,
   """Updates an edge set of a given key."""
 
   # Get sender and receivers
+  sender_nodes = graph.nodes[edge_set_key.node_sets[0]]
   receiver_nodes = graph.nodes[edge_set_key.node_sets[1]]
   edge_set = graph.edges[edge_set_key]
 
-  # Get received features
-  received_attributes = jnp.tile(
+  # Get sender node features
+  batched_index = jax.vmap(lambda f, idx: f[idx])
+  node_features_sen = batched_index(sender_nodes.features, edge_set.senders)
+
+  # Get receiver node features
+  node_features_rec = jnp.tile(
     jnp.expand_dims(receiver_nodes.features, axis=2),
     reps=(1, 1, edge_set.features.shape[2], 1)
   )
@@ -170,7 +176,7 @@ def _edge_update(graph: TypedGraph, edge_fn: GNUpdateEdgeFn,
     ),
     graph.context.features
   )
-  new_features = edge_fn(edge_set.features, received_attributes, global_features, **fn_kwargs)
+  new_features = edge_fn(edge_set.features, node_features_sen, node_features_rec, global_features, **fn_kwargs)
 
   return edge_set._replace(features=new_features)
 
@@ -185,8 +191,7 @@ def _node_update(graph: TypedGraph, node_fn: GNUpdateNodeFn,
   # Aggregate received features
   received_features = {}
   for edge_set_key, edge_set in graph.edges.items():
-    receiver_node_set_key = edge_set_key.node_sets[1]
-    if receiver_node_set_key == node_set_key:
+    if edge_set_key.node_sets[1] == node_set_key:
       received_features[edge_set_key.name] = aggregation_fn(edge_set.features, edge_set.mask, axis=2)
 
   # Get new node features
@@ -250,7 +255,7 @@ def InteractionNetwork(
 
   # An InteractionNetwork edge function does not have global feature inputs,
   # so we filter the passed global argument in the GraphNetwork.
-  wrapped_update_edge_fn = tree.tree_map(lambda fn: lambda e, r, g, **kw: fn(e, r, **kw), update_edge_fn)
+  wrapped_update_edge_fn = tree.tree_map(lambda fn: lambda e, s, r, g, **kw: fn(e, s, r, **kw), update_edge_fn)
 
   # Similarly, we wrap the update_node_fn to ensure only the expected
   # arguments are passed to the Interaction net.

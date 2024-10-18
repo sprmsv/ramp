@@ -976,6 +976,7 @@ def train(
             ax.grid(which='both')
           file = DIR / 'metrics/plots' / f'{filename}.pdf'
           fig.savefig(file, dpi=500, bbox_inches='tight')
+          plt.close(fig)
 
     else:
       # Log the results

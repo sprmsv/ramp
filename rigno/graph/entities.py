@@ -18,7 +18,8 @@ class NodeSet(NamedTuple):
 class EdgeSet(NamedTuple):
   """Represents a set of edges."""
   features: ArrayLikeTree  # [bsz, n_receivers, n_edges_per_receiver, n_feats]
-  mask: ArrayLikeTree  # [bsz, n_receivers, n_edges_per_receiver]
+  mask: ArrayLikeTree  # [bsz, n_receivers, n_edges_per_receiver, 1]
+  senders: ArrayLikeTree  # [bsz, n_receivers, n_edges_per_receiver]
 
 class Context(NamedTuple):
   # `n_graph` always contains ones but it is useful to query the leading shape

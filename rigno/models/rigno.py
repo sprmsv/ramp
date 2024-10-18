@@ -333,12 +333,13 @@ class RegionInteractionGraphBuilder:
     d_ij = d_ij / max_edge_length
     edge_feats = jnp.concatenate([z_ij, d_ij], axis=-1)
 
-    def _build_features_per_receiver(idx_rec: Array, edge_feats: Array, num_rec: int, max_edges_per_receiver: int):
+    def _build_features_per_receiver(idx_rec: Array, idx_sen: Array, edge_feats: Array, num_rec: int, max_edges_per_receiver: int):
       # Sort the indices and the edge features
       batched_argsort = jax.vmap(jnp.argsort)
       batched_index = jax.vmap(lambda f, idx: f[idx])
       p = batched_argsort(idx_rec)
       _idx_rec = batched_index(idx_rec, p)
+      _idx_sen = batched_index(idx_sen, p)
       _edge_feats = batched_index(edge_feats, p)
 
       # Get the number of edges per receiver
@@ -370,16 +371,23 @@ class RegionInteractionGraphBuilder:
         return m.at[ii, jj].set(1)
       mask = jax.vmap(set_by_index)(_idx_rec, _idx_edg)
 
-      return features, mask
+      # Store the sender indices
+      def set_by_index(ii, jj, s):
+        m = jnp.zeros(shape=(num_rec, max_edges_per_receiver), dtype=np.uint32)
+        return m.at[ii, jj].set(s)
+      senders = jax.vmap(set_by_index)(_idx_rec, _idx_edg, _idx_sen)
+
+      return features, mask, senders
 
     # Convert flat edge array to the per-receiver format
-    edge_feats_per_receiver, edge_mask_per_receiver = _build_features_per_receiver(
-      idx_rec, edge_feats, num_rec, max_edges_per_receiver)
+    edge_feats_per_receiver, edge_mask_per_receiver, edge_senders_per_receiver = _build_features_per_receiver(
+      idx_rec, idx_sen, edge_feats, num_rec, max_edges_per_receiver)
 
     # Build an edge set
     edge_set = EdgeSet(
       features=edge_feats_per_receiver,
       mask=edge_mask_per_receiver,
+      senders=edge_senders_per_receiver,
     )
 
     return edge_set, sender_node_set, receiver_node_set
@@ -547,19 +555,23 @@ class Encoder(nn.Module):
       n_edges_per_receiver_after = int((1 - self.p_edge_masking) * edges.features.shape[2])
       wrapped_shuffle = jax.vmap(jax.vmap(shuffle_arrays))
       keys = jax.random.split(key, num=(batch_size, edges.features.shape[1]))
-      [new_edge_features, new_edge_mask] = wrapped_shuffle(key=keys, arrays=[edges.features, edges.mask])
+      [new_edge_features, new_edge_mask, new_edge_senders] = wrapped_shuffle(
+        key=keys, arrays=[edges.features, edges.mask, edges.senders])
       new_edge_features = new_edge_features[:, :, :n_edges_per_receiver_after]
       new_edge_mask = new_edge_mask[:, :, :n_edges_per_receiver_after]
+      new_edge_senders = new_edge_senders[:, :, :n_edges_per_receiver_after]
     else:
       n_edges_per_receiver_after = edges.features.shape[2]
       new_edge_features = edges.features
       new_edge_mask = edges.mask
+      new_edge_senders = edges.senders
     # Change edge feature dtype
     new_edge_features = new_edge_features.astype(dummy_rnode_features.dtype)
     # Build new edge set
     new_edges = EdgeSet(
       features=new_edge_features,
       mask=new_edge_mask,
+      senders=new_edge_senders,
     )
 
     input_graph = graph._replace(
@@ -636,19 +648,23 @@ class Processor(nn.Module):
       n_edges_per_receiver_after = int((1 - self.p_edge_masking) * edges.features.shape[2])
       wrapped_shuffle = jax.vmap(jax.vmap(shuffle_arrays))
       keys = jax.random.split(key, num=(batch_size, edges.features.shape[1]))
-      [new_edge_features, new_edge_mask] = wrapped_shuffle(key=keys, arrays=[edges.features, edges.mask])
+      [new_edge_features, new_edge_mask, new_edge_senders] = wrapped_shuffle(
+        key=keys, arrays=[edges.features, edges.mask, edges.senders])
       new_edge_features = new_edge_features[:, :, :n_edges_per_receiver_after]
       new_edge_mask = new_edge_mask[:, :, :n_edges_per_receiver_after]
+      new_edge_senders = new_edge_senders[:, :, :n_edges_per_receiver_after]
     else:
       n_edges_per_receiver_after = edges.features.shape[2]
       new_edge_features = edges.features
       new_edge_mask = edges.mask
+      new_edge_senders = edges.senders
     # Change edge feature dtype
     new_edge_features = new_edge_features.astype(rnode_features.dtype)
     # Build new edge set
     new_edges = EdgeSet(
       features=new_edge_features,
       mask=new_edge_mask,
+      senders=new_edge_senders,
     )
 
     # Build the graph
@@ -729,19 +745,23 @@ class Decoder(nn.Module):
       n_edges_per_receiver_after = int((1 - self.p_edge_masking) * edges.features.shape[2])
       wrapped_shuffle = jax.vmap(jax.vmap(shuffle_arrays))
       keys = jax.random.split(key, num=(batch_size, edges.features.shape[1]))
-      [new_edge_features, new_edge_mask] = wrapped_shuffle(key=keys, arrays=[edges.features, edges.mask])
+      [new_edge_features, new_edge_mask, new_edge_senders] = wrapped_shuffle(
+        key=keys, arrays=[edges.features, edges.mask, edges.senders])
       new_edge_features = new_edge_features[:, :, :n_edges_per_receiver_after]
       new_edge_mask = new_edge_mask[:, :, :n_edges_per_receiver_after]
+      new_edge_senders = new_edge_senders[:, :, :n_edges_per_receiver_after]
     else:
       n_edges_per_receiver_after = edges.features.shape[2]
       new_edge_features = edges.features
       new_edge_mask = edges.mask
+      new_edge_senders = edges.senders
     # Change edge feature dtype
     new_edge_features = new_edge_features.astype(pnode_features.dtype)
     # Build new edge set
     new_edges = EdgeSet(
       features=new_edge_features,
       mask=new_edge_mask,
+      senders=new_edge_senders,
     )
 
     # Build the new graph
