@@ -952,8 +952,8 @@ def train(
             {'label': 'Validation error [%]', 'values': lambda m: m['valid']['final']['_l1'] * 100}
           ),
           'direct': (
-            {'label': 'Training error [%]', 'values': lambda m: m['train']['direct_tau_min']['_l1'] * 100},
-            {'label': 'Validation error [%]', 'values': lambda m: m['valid']['direct_tau_min']['_l1'] * 100}
+            {'label': 'Training error [%]', 'values': lambda m: m['train']['direct_tau_min']['_l1'] * 100 if dataset.time_dependent else 1},
+            {'label': 'Validation error [%]', 'values': lambda m: m['valid']['direct_tau_min']['_l1'] * 100 if dataset.time_dependent else 1}
           ),
         }
         steps = [m['step'] for m in checkpointed_metrics]
