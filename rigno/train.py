@@ -18,6 +18,7 @@ from flax.training.train_state import TrainState
 from flax.training.common_utils import shard, shard_prng_key
 from flax.jax_utils import replicate, unreplicate
 from jax.tree_util import PyTreeDef
+from matplotlib import pyplot as plt
 
 from rigno.dataset import Dataset, Batch
 from rigno.experiments import DIR_EXPERIMENTS
@@ -837,10 +838,11 @@ def train(
   # Report the initial evaluations
   time_tot_pre = time() - time_int_pre
   tdsf = FLAGS.time_downsample_factor
+  lr = state.opt_state[-1].hyperparams["learning_rate"][0].item()
   logging.info('\t'.join([
     f'DRCT: {tau_max * tdsf : 02d}dt',
     f'EPCH: {epochs_before : 04d}/{FLAGS.epochs : 04d}',
-    f'LR: {state.opt_state[-1].hyperparams["learning_rate"][0].item() : .2e}',
+    f'LR: {lr : .2e}',
     f'TIME: {time_tot_pre : 06.1f}s',
     f'GRAD: {0. : .2e}',
     f'LOSS: {0. : .2e}',
@@ -857,6 +859,7 @@ def train(
   DIR = DIR_EXPERIMENTS / f'E{FLAGS.exp}' / FLAGS.datapath / FLAGS.datetime
   with disable_logging(level=logging.FATAL):
     (DIR / 'metrics').mkdir(exist_ok=True)
+    (DIR / 'metrics/plots').mkdir(exist_ok=True)
     checkpointer = orbax.checkpoint.PyTreeCheckpointer()
     checkpointer_options = orbax.checkpoint.CheckpointManagerOptions(
       max_to_keep=1,
@@ -868,6 +871,8 @@ def train(
     checkpoint_manager = orbax.checkpoint.CheckpointManager(
       (DIR / 'checkpoints'), checkpointer, checkpointer_options)
 
+
+  checkpointed_metrics = []
   for epoch in range(1, epochs+1):
     # Store the initial time
     time_int = time()
@@ -900,10 +905,11 @@ def train(
       # Log the results
       time_tot = time() - time_int
       tdsf = FLAGS.time_downsample_factor
+      lr = state.opt_state[-1].hyperparams["learning_rate"][0].item()
       logging.info('\t'.join([
         f'DRCT: {tau_max * tdsf : 02d}dt',
         f'EPCH: {epochs_before + epoch : 04d}/{FLAGS.epochs : 04d}',
-        f'LR: {state.opt_state[-1].hyperparams["learning_rate"][0].item() : .2e}',
+        f'LR: {lr : .2e}',
         f'TIME: {time_tot : 06.1f}s',
         f'GRAD: {grad.item() : .2e}',
         f'LOSS: {loss.item() : .2e}',
@@ -917,13 +923,16 @@ def train(
       ]))
 
       with disable_logging(level=logging.FATAL):
+        step = epochs_before + epoch
         checkpoint_metrics = {
+          'step': step,
           'loss': loss.item(),
+          'lr': lr,
           'train': metrics_trn.to_dict(),
           'valid': metrics_val.to_dict(),
         }
+        checkpointed_metrics.append(checkpoint_metrics)
         # Store the state and the metrics
-        step = epochs_before + epoch
         checkpoint_manager.save(
           step=step,
           items={'state': jax.device_get(unreplicate(state)),},
@@ -932,6 +941,41 @@ def train(
         )
         with open(DIR / 'metrics' / f'{str(step)}.json', 'w') as f:
           json.dump(checkpoint_metrics, f)
+        # Plot the history of the metrics
+        metrics_to_plot = {
+          'optimization': (
+            {'label': 'Training loss', 'values': lambda m: m['loss']},
+            {'label': 'Training loss', 'values': lambda m: m['loss']},
+          ),
+          'final': (
+            {'label': 'Training error [%]', 'values': lambda m: m['train']['final']['_l1'] * 100},
+            {'label': 'Validation error [%]', 'values': lambda m: m['valid']['final']['_l1'] * 100}
+          ),
+          'direct': (
+            {'label': 'Training error [%]', 'values': lambda m: m['train']['direct_tau_min']['_l1'] * 100},
+            {'label': 'Validation error [%]', 'values': lambda m: m['valid']['direct_tau_min']['_l1'] * 100}
+          ),
+        }
+        steps = [m['step'] for m in checkpointed_metrics]
+        for filename, mtp in metrics_to_plot.items():
+          fig, axs = plt.subplots(
+            ncols=2,
+            figsize=(10, 3),
+            sharex=True,
+            sharey=(filename != 'optimization'),
+            tight_layout=True,
+          )
+          for i, item in enumerate(mtp):
+            values = [item['values'](m) for m in checkpointed_metrics]
+            ax: plt.Axes = axs[i]
+            ax.scatter(steps, values, s=10, color='black', zorder=3)
+            ax.set(
+              ylabel=item['label'],
+              yscale='log',
+            )
+            ax.grid(which='both')
+          file = DIR / 'metrics/plots' / f'{filename}.pdf'
+          fig.savefig(file, dpi=500, bbox_inches='tight')
 
     else:
       # Log the results
