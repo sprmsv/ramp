@@ -6,3 +6,4 @@ h5py
 jax
 flax
 optax
+jraph

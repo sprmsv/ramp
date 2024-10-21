@@ -56,5 +56,5 @@ python -m virtualenv venv-NAME
 source venv-NAME/bin/activate
 pip install --upgrade pip
 pip install --upgrade "jax[cuda12]"
-pip install flax matplotlib h5py optax pandas seaborn
+pip install jraph flax matplotlib h5py optax pandas seaborn
 ```

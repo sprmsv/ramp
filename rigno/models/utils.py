@@ -12,20 +12,6 @@ def concatenate_args(args, kwargs, axis: int = -1):
   concat_args = jnp.concatenate(combined_args, axis=axis)
   return concat_args
 
-def mean_aggregation_edge(features, mask, axis):
-  # Set features of dummy edges to zero
-  features = features * mask
-  # Compute the number of existing edges
-  num_true_edges = jnp.sum(mask, axis=axis)
-  # Replace zeros with one (avoid division by zero)
-  # NOTE: When there are no edges, the sum is zero
-  num_true_edges = jnp.where((num_true_edges == 0), 1, num_true_edges)
-  # Compute the mean of existing edges
-  sum_features = jnp.sum(features, axis=axis)
-  mean_features = sum_features / num_true_edges
-
-  return mean_features
-
 class AugmentedMLP(nn.Module):
   """
   Multi-layer perceptron with optional layer norm and learned correction on the last layer.

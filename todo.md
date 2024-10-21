@@ -1,12 +1,12 @@
 # Project Updates
 
-- Remedy for faster message-passing:
+- Per-receiver edge features:
     - Replace segment_sum with axis_sum by using masks and padding the edge features
-    - Increases memory consumption ~3x
-    - Computational overhead
-        - Can be reduced with more careful graph building
-    - Can make inference and training time significantly faster
-        - I expect at least 10x to 20x speedup (8h training time instead of 7 days)
+    - The inference time was even longer
+        - Computational overhead
+        - Memory overhead
+    - Conclusion: the computational bottleneck is sender/receiver feature concatenation
+        for computing the messages
 
 - Limitations
     - Speed

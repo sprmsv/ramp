@@ -4,13 +4,15 @@ import flax.typing
 import jax.numpy as jnp
 import jax.random
 import numpy as np
+import jraph
 from flax import linen as nn
 from scipy.spatial import Delaunay
 
-from rigno.graph.entities import TypedGraph, EdgeSet, EdgeSetKey, NodeSet, Context
+from rigno.graph.entities import (
+    TypedGraph, EdgeSet, EdgeSetKey,
+    EdgesIndices, NodeSet, Context)
 from rigno.models.graphnet import DeepTypedGraphNet
 from rigno.models.operator import AbstractOperator, Inputs
-from rigno.models.utils import mean_aggregation_edge
 from rigno.utils import Array, shuffle_arrays
 
 
@@ -30,12 +32,9 @@ class RegionInteractionGraphMetadata(NamedTuple):
   x_rnodes: Array
   r_rnodes: Array
   p2r_edge_indices: Array
-  p2r_edges_per_receiver: Array
   r2r_edge_indices: Array
   r2r_edge_domains: Array
-  r2r_edges_per_receiver: Array
   r2p_edge_indices: Array
-  r2p_edges_per_receiver: Array
 
   def __len__(self) -> int:
     return self.x_pnodes_inp.shape[0]
@@ -222,14 +221,7 @@ class RegionInteractionGraphBuilder:
       p2r_edge_indices=p2r_edge_indices.astype(jnp.uint16)
       r2r_edge_indices=r2r_edge_indices.astype(jnp.uint16)
       r2p_edge_indices=r2p_edge_indices.astype(jnp.uint16)
-
-    # Compute maximum number of incoming edges per receiver node
-    p2r_max_edges_per_receiver = jnp.bincount(p2r_edge_indices[:, 1], length=x_rnodes.shape[0]).max()
-    r2r_max_edges_per_receiver = jnp.bincount(r2r_edge_indices[:, 1], length=x_rnodes.shape[0]).max()
-    r2p_max_edges_per_receiver = jnp.bincount(r2p_edge_indices[:, 1], length=x_out.shape[0]).max()
-
     # Ommit storing duplicated edge indices
-    # NOTE: Only possible if x_inp == x_out
     if self.overlap_factor_p2r == self.overlap_factor_r2p:
       # NOTE: it will be the inverse of p2r edges
       r2p_edge_indices = None
@@ -241,12 +233,9 @@ class RegionInteractionGraphBuilder:
       x_rnodes=jnp.expand_dims(x_rnodes, axis=0),
       r_rnodes=jnp.expand_dims(r_rnodes, axis=0),
       p2r_edge_indices=jnp.expand_dims(p2r_edge_indices, axis=0),
-      p2r_edges_per_receiver=jnp.zeros(shape=(1, p2r_max_edges_per_receiver), dtype=jnp.uint8),
       r2r_edge_indices=jnp.expand_dims(r2r_edge_indices, axis=0),
       r2r_edge_domains=jnp.expand_dims(r2r_edge_domains, axis=0),
-      r2r_edges_per_receiver=jnp.zeros(shape=(1, r2r_max_edges_per_receiver), dtype=jnp.uint8),
       r2p_edge_indices=(jnp.expand_dims(r2p_edge_indices, axis=0) if (r2p_edge_indices is not None) else None),
-      r2p_edges_per_receiver=jnp.zeros(shape=(1, r2p_max_edges_per_receiver), dtype=jnp.uint8),
     )
 
     return graph_metadata
@@ -257,7 +246,6 @@ class RegionInteractionGraphBuilder:
     idx_sen: Array,
     idx_rec: Array,
     max_edge_length: float,
-    max_edges_per_receiver: int,
     feats_sen: Array = None,
     feats_rec: Array = None,
     shift: bool = False,
@@ -269,6 +257,8 @@ class RegionInteractionGraphBuilder:
     batch_size = x_sen.shape[0]
     num_sen = x_sen.shape[1]
     num_rec = x_rec.shape[1]
+    assert idx_sen.shape[1] == idx_rec.shape[1]
+    num_edg = idx_sen.shape[1]
 
     # Process coordinates
     phi_sen = jnp.pi * (x_sen + 1)  # [0, 2pi]
@@ -333,66 +323,19 @@ class RegionInteractionGraphBuilder:
     d_ij = d_ij / max_edge_length
     edge_feats = jnp.concatenate([z_ij, d_ij], axis=-1)
 
-    def _build_features_per_receiver(idx_rec: Array, idx_sen: Array, edge_feats: Array, num_rec: int, max_edges_per_receiver: int):
-      # Sort the indices and the edge features
-      batched_argsort = jax.vmap(jnp.argsort)
-      batched_index = jax.vmap(lambda f, idx: f[idx])
-      p = batched_argsort(idx_rec)
-      _idx_rec = batched_index(idx_rec, p)
-      _idx_sen = batched_index(idx_sen, p)
-      _edge_feats = batched_index(edge_feats, p)
-
-      # Get the number of edges per receiver
-      # batched_bincount = jax.vmap(lambda arr, length: jnp.bincount(arr, length=length), in_axes=(0, None))
-      # edges_per_receiver = batched_bincount(_idx_rec, num_rec)
-      # assert edges_per_receiver.max() == max_edges_per_receiver
-
-      # Get the edge indices for each receiver node
-      # NOTE: Using a small algorithm based on two assumptions:
-      # 1. There are at least 2*max_edges_per_receiver edges;
-      # 2. The receiver indices are sorted in ascending order.
-      def acc_rep(v, max_rep):
-        def _roll_diff(s):
-          return (jnp.roll(v, shift=s, axis=1) != v)
-        vectorized_roll_diff = jax.vmap(_roll_diff)
-        diffs = vectorized_roll_diff(jnp.arange(max_rep))
-        return jnp.sum(diffs, axis=0)
-      _idx_edg = acc_rep(_idx_rec, max_rep=max_edges_per_receiver)
-
-      # Put the existing edge features in their place
-      def set_by_index(ii, jj, ef):
-        f = jnp.zeros(shape=(num_rec, max_edges_per_receiver, edge_feats.shape[-1]))
-        return f.at[ii, jj].set(ef)
-      features = jax.vmap(set_by_index)(_idx_rec, _idx_edg, _edge_feats)
-
-      # Build a mask indicating the position of existing edges
-      def set_by_index(ii, jj):
-        m = jnp.zeros(shape=(num_rec, max_edges_per_receiver, 1), dtype=np.int8)
-        return m.at[ii, jj].set(1)
-      mask = jax.vmap(set_by_index)(_idx_rec, _idx_edg)
-
-      # Store the sender indices
-      def set_by_index(ii, jj, s):
-        m = jnp.zeros(shape=(num_rec, max_edges_per_receiver), dtype=np.uint32)
-        return m.at[ii, jj].set(s)
-      senders = jax.vmap(set_by_index)(_idx_rec, _idx_edg, _idx_sen)
-
-      return features, mask, senders
-
-    # Convert flat edge array to the per-receiver format
-    edge_feats_per_receiver, edge_mask_per_receiver, edge_senders_per_receiver = _build_features_per_receiver(
-      idx_rec, idx_sen, edge_feats, num_rec, max_edges_per_receiver)
-
-    # Build an edge set
+    # Build edge set
     edge_set = EdgeSet(
-      features=edge_feats_per_receiver,
-      mask=edge_mask_per_receiver,
-      senders=edge_senders_per_receiver,
+      n_edge=jnp.tile(jnp.array([num_edg]), reps=(batch_size, 1)),
+      indices=EdgesIndices(
+        senders=idx_sen,
+        receivers=idx_rec,
+      ),
+      features=edge_feats,
     )
 
     return edge_set, sender_node_set, receiver_node_set
 
-  def _build_p2r_graph(self, x_pnodes: Array, x_rnodes: Array, idx_edges: Array, max_edges_per_receiver: int, r_rmesh: Array) -> TypedGraph:
+  def _build_p2r_graph(self, x_pnodes: Array, x_rnodes: Array, idx_edges: Array, r_rmesh: Array) -> TypedGraph:
     """Constructs the encoder graph (pmesh to rmesh)"""
 
     # Get the initial features
@@ -402,7 +345,6 @@ class RegionInteractionGraphBuilder:
       idx_sen=idx_edges[..., 0],
       idx_rec=idx_edges[..., 1],
       max_edge_length=(2. * jnp.sqrt(x_rnodes.shape[-1])),
-      max_edges_per_receiver=max_edges_per_receiver,
       feats_rec=jnp.expand_dims(self.overlap_factor_p2r * r_rmesh, axis=-1),
     )
 
@@ -415,7 +357,7 @@ class RegionInteractionGraphBuilder:
 
     return graph
 
-  def _build_r2r_graph(self, x_rnodes: Array, idx_edges: Array, idx_domains: Array, max_edges_per_receiver: int, r_rmesh: Array) -> TypedGraph:
+  def _build_r2r_graph(self, x_rnodes: Array, idx_edges: Array, idx_domains: Array, r_rmesh: Array) -> TypedGraph:
     """Constructs the processor graph (rmesh to rmesh)"""
 
     # Set the initial features
@@ -425,7 +367,6 @@ class RegionInteractionGraphBuilder:
       idx_sen=idx_edges[..., 0],
       idx_rec=idx_edges[..., 1],
       max_edge_length=(2. * jnp.sqrt(x_rnodes.shape[-1])),
-      max_edges_per_receiver=max_edges_per_receiver,
       feats_sen=jnp.expand_dims(self.overlap_factor_p2r * r_rmesh, axis=-1),
       feats_rec=jnp.expand_dims(self.overlap_factor_r2p * r_rmesh, axis=-1),
       shift=True,
@@ -442,7 +383,7 @@ class RegionInteractionGraphBuilder:
 
     return graph
 
-  def _build_r2p_graph(self, x_pnodes: Array, x_rnodes: Array, idx_edges: Array, max_edges_per_receiver: int, r_rmesh: Array) -> TypedGraph:
+  def _build_r2p_graph(self, x_pnodes: Array, x_rnodes: Array, idx_edges: Array, r_rmesh: Array) -> TypedGraph:
     """Constructs the decoder graph (rmesh to pmesh)"""
 
     # Get the initial features
@@ -452,7 +393,6 @@ class RegionInteractionGraphBuilder:
       idx_sen=idx_edges[..., 0],
       idx_rec=idx_edges[..., 1],
       max_edge_length=(2. * jnp.sqrt(x_rnodes.shape[-1])),
-      max_edges_per_receiver=max_edges_per_receiver,
       feats_sen=jnp.expand_dims(self.overlap_factor_r2p * r_rmesh, axis=-1),
     )
 
@@ -473,21 +413,18 @@ class RegionInteractionGraphBuilder:
     x_rnodes = metadata.x_rnodes
     r_rnodes = metadata.r_rnodes
     p2r_edge_indices = metadata.p2r_edge_indices
-    p2r_max_edges_per_receiver = metadata.p2r_edges_per_receiver.shape[1]
     r2r_edge_indices = metadata.r2r_edge_indices
     r2r_edge_domains = metadata.r2r_edge_domains
-    r2r_max_edges_per_receiver = metadata.r2r_edges_per_receiver.shape[1]
     r2p_edge_indices = metadata.r2p_edge_indices
-    r2p_max_edges_per_receiver = metadata.r2p_edges_per_receiver.shape[1]
     # Flip p2r indices if r2p is None
     if r2p_edge_indices is None:
       r2p_edge_indices = jnp.flip(metadata.p2r_edge_indices, axis=-1)
 
     # Build the graphs
     graphs = RegionInteractionGraphSet(
-      p2r=self._build_p2r_graph(x_pnodes_inp, x_rnodes, p2r_edge_indices, p2r_max_edges_per_receiver, r_rnodes),
-      r2r=self._build_r2r_graph(x_rnodes, r2r_edge_indices, r2r_edge_domains, r2r_max_edges_per_receiver, r_rnodes),
-      r2p=self._build_r2p_graph(x_pnodes_out, x_rnodes, r2p_edge_indices, r2p_max_edges_per_receiver, r_rnodes),
+      p2r=self._build_p2r_graph(x_pnodes_inp, x_rnodes, p2r_edge_indices, r_rnodes),
+      r2r=self._build_r2r_graph(x_rnodes, r2r_edge_indices, r2r_edge_domains, r_rnodes),
+      r2p=self._build_r2p_graph(x_pnodes_out, x_rnodes, r2p_edge_indices, r_rnodes),
     )
 
     return graphs
@@ -514,9 +451,10 @@ class Encoder(nn.Module):
       use_layer_norm=self.use_layer_norm,
       conditioned_normalization=self.conditioned_normalization,
       cond_norm_hidden_size=self.cond_norm_hidden_size,
+      include_sent_messages_in_node_update=False,
       activation='swish',
       f32_aggregation=True,
-      aggregate_edges_for_nodes_fn=mean_aggregation_edge,
+      aggregate_edges_for_nodes_fn=jraph.segment_mean,
     )
 
   def __call__(self,
@@ -552,26 +490,27 @@ class Encoder(nn.Module):
     edges = graph.edges[p2r_edges_key]
     # Drop out edges randomly with the given probability
     if key is not None:
-      n_edges_per_receiver_after = int((1 - self.p_edge_masking) * edges.features.shape[2])
-      wrapped_shuffle = jax.vmap(jax.vmap(shuffle_arrays))
-      keys = jax.random.split(key, num=(batch_size, edges.features.shape[1]))
-      [new_edge_features, new_edge_mask, new_edge_senders] = wrapped_shuffle(
-        key=keys, arrays=[edges.features, edges.mask, edges.senders])
-      new_edge_features = new_edge_features[:, :, :n_edges_per_receiver_after]
-      new_edge_mask = new_edge_mask[:, :, :n_edges_per_receiver_after]
-      new_edge_senders = new_edge_senders[:, :, :n_edges_per_receiver_after]
+      n_edges_after = int((1 - self.p_edge_masking) * edges.features.shape[1])
+      [new_edge_features, new_edge_senders, new_edge_receivers] = shuffle_arrays(
+        key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers], axis=1)
+      new_edge_features = new_edge_features[:, :n_edges_after]
+      new_edge_senders = new_edge_senders[:, :n_edges_after]
+      new_edge_receivers = new_edge_receivers[:, :n_edges_after]
     else:
-      n_edges_per_receiver_after = edges.features.shape[2]
+      n_edges_after = edges.features.shape[1]
       new_edge_features = edges.features
-      new_edge_mask = edges.mask
-      new_edge_senders = edges.senders
+      new_edge_senders = edges.indices.senders
+      new_edge_receivers = edges.indices.receivers
     # Change edge feature dtype
     new_edge_features = new_edge_features.astype(dummy_rnode_features.dtype)
     # Build new edge set
     new_edges = EdgeSet(
+      n_edge=jnp.tile(jnp.array([n_edges_after]), reps=(batch_size, 1)),
+      indices=EdgesIndices(
+        senders=new_edge_senders,
+        receivers=new_edge_receivers,
+      ),
       features=new_edge_features,
-      mask=new_edge_mask,
-      senders=new_edge_senders,
     )
 
     input_graph = graph._replace(
@@ -611,10 +550,11 @@ class Processor(nn.Module):
       use_layer_norm=True,
       conditioned_normalization=self.conditioned_normalization,
       cond_norm_hidden_size=self.cond_norm_hidden_size,
+      include_sent_messages_in_node_update=False,
       activation='swish',
       f32_aggregation=False,
-      # NOTE: Mean because number of edges is not balanced
-      aggregate_edges_for_nodes_fn=mean_aggregation_edge,
+      # NOTE: segment_mean because number of edges is not balanced
+      aggregate_edges_for_nodes_fn=jraph.segment_mean,
     )
 
   def __call__(self,
@@ -645,26 +585,27 @@ class Processor(nn.Module):
     # NOTE: We need the structural edge features, because it is the first
     # time we are seeing this particular set of edges.
     if key is not None:
-      n_edges_per_receiver_after = int((1 - self.p_edge_masking) * edges.features.shape[2])
-      wrapped_shuffle = jax.vmap(jax.vmap(shuffle_arrays))
-      keys = jax.random.split(key, num=(batch_size, edges.features.shape[1]))
-      [new_edge_features, new_edge_mask, new_edge_senders] = wrapped_shuffle(
-        key=keys, arrays=[edges.features, edges.mask, edges.senders])
-      new_edge_features = new_edge_features[:, :, :n_edges_per_receiver_after]
-      new_edge_mask = new_edge_mask[:, :, :n_edges_per_receiver_after]
-      new_edge_senders = new_edge_senders[:, :, :n_edges_per_receiver_after]
+      n_edges_after = int((1 - self.p_edge_masking) * edges.features.shape[1])
+      [new_edge_features, new_edge_senders, new_edge_receivers] = shuffle_arrays(
+        key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers], axis=1)
+      new_edge_features = new_edge_features[:, :n_edges_after]
+      new_edge_senders = new_edge_senders[:, :n_edges_after]
+      new_edge_receivers = new_edge_receivers[:, :n_edges_after]
     else:
-      n_edges_per_receiver_after = edges.features.shape[2]
+      n_edges_after = edges.features.shape[1]
       new_edge_features = edges.features
-      new_edge_mask = edges.mask
-      new_edge_senders = edges.senders
+      new_edge_senders = edges.indices.senders
+      new_edge_receivers = edges.indices.receivers
     # Change edge feature dtype
     new_edge_features = new_edge_features.astype(rnode_features.dtype)
     # Build new edge set
     new_edges = EdgeSet(
+      n_edge=jnp.tile(jnp.array([n_edges_after]), reps=(batch_size, 1)),
+      indices=EdgesIndices(
+        senders=new_edge_senders,
+        receivers=new_edge_receivers,
+      ),
       features=new_edge_features,
-      mask=new_edge_mask,
-      senders=new_edge_senders,
     )
 
     # Build the graph
@@ -707,9 +648,11 @@ class Decoder(nn.Module):
     use_layer_norm=True,
     conditioned_normalization=self.conditioned_normalization,
     cond_norm_hidden_size=self.cond_norm_hidden_size,
+    include_sent_messages_in_node_update=False,
     activation='swish',
     f32_aggregation=False,
-    aggregate_edges_for_nodes_fn=mean_aggregation_edge,
+    # NOTE: segment_mean because number of edges is not balanced
+    aggregate_edges_for_nodes_fn=jraph.segment_mean,
   )
 
   def __call__(self,
@@ -742,26 +685,27 @@ class Decoder(nn.Module):
     edges = graph.edges[r2p_edges_key]
     # Drop out edges randomly with the given probability
     if key is not None:
-      n_edges_per_receiver_after = int((1 - self.p_edge_masking) * edges.features.shape[2])
-      wrapped_shuffle = jax.vmap(jax.vmap(shuffle_arrays))
-      keys = jax.random.split(key, num=(batch_size, edges.features.shape[1]))
-      [new_edge_features, new_edge_mask, new_edge_senders] = wrapped_shuffle(
-        key=keys, arrays=[edges.features, edges.mask, edges.senders])
-      new_edge_features = new_edge_features[:, :, :n_edges_per_receiver_after]
-      new_edge_mask = new_edge_mask[:, :, :n_edges_per_receiver_after]
-      new_edge_senders = new_edge_senders[:, :, :n_edges_per_receiver_after]
+      n_edges_after = int((1 - self.p_edge_masking) * edges.features.shape[1])
+      [new_edge_features, new_edge_senders, new_edge_receivers] = shuffle_arrays(
+        key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers], axis=1)
+      new_edge_features = new_edge_features[:, :n_edges_after]
+      new_edge_senders = new_edge_senders[:, :n_edges_after]
+      new_edge_receivers = new_edge_receivers[:, :n_edges_after]
     else:
-      n_edges_per_receiver_after = edges.features.shape[2]
+      n_edges_after = edges.features.shape[1]
       new_edge_features = edges.features
-      new_edge_mask = edges.mask
-      new_edge_senders = edges.senders
+      new_edge_senders = edges.indices.senders
+      new_edge_receivers = edges.indices.receivers
     # Change edge feature dtype
     new_edge_features = new_edge_features.astype(pnode_features.dtype)
     # Build new edge set
     new_edges = EdgeSet(
+      n_edge=jnp.tile(jnp.array([n_edges_after]), reps=(batch_size, 1)),
+      indices=EdgesIndices(
+        senders=new_edge_senders,
+        receivers=new_edge_receivers,
+      ),
       features=new_edge_features,
-      mask=new_edge_mask,
-      senders=new_edge_senders,
     )
 
     # Build the new graph
