@@ -131,9 +131,6 @@ def define_flags():
   flags.DEFINE_integer(name='mlp_hidden_layers', default=1, required=False,
     help='Number of hidden layers of all MLPs'
   )
-  flags.DEFINE_integer(name='mlp_hidden_size', default=128, required=False,
-    help='Size of latent edge features'
-  )
   flags.DEFINE_integer(name='processor_steps', default=18, required=False,
     help='Number of message-passing steps in the processor'
   )
@@ -1006,7 +1003,6 @@ def get_model(model_configs: Mapping[str, Any], dataset: Dataset) -> AbstractOpe
       node_latent_size=FLAGS.node_latent_size,
       edge_latent_size=FLAGS.edge_latent_size,
       mlp_hidden_layers=FLAGS.mlp_hidden_layers,
-      mlp_hidden_size=FLAGS.mlp_hidden_size,
       concatenate_tau=(True if dataset.time_dependent else False),
       concatenate_t=(True if dataset.time_dependent else False),
       conditioned_normalization=(True if dataset.time_dependent else False),

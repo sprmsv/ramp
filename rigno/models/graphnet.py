@@ -67,7 +67,6 @@ class DeepTypedGraphNet(nn.Module):
   Args:
     node_latent_size: Size of the node latent representations.
     edge_latent_size: Size of the edge latent representations.
-    mlp_hidden_size: Hidden layer size for all MLPs.
     mlp_num_hidden_layers: Number of hidden layers in all MLPs.
     num_message_passing_steps: Number of unshared message passing steps
         in the processor steps.
@@ -94,7 +93,6 @@ class DeepTypedGraphNet(nn.Module):
 
   node_latent_size: Mapping[str, int]
   edge_latent_size: Mapping[str, int]
-  mlp_hidden_size: int
   mlp_num_hidden_layers: int
   num_message_passing_steps: int
   num_processor_repetitions: int = 1
@@ -118,7 +116,7 @@ class DeepTypedGraphNet(nn.Module):
       embed_edge_fn = {
         edge_set_name: AugmentedMLP(
           layer_sizes=(
-            [self.mlp_hidden_size] * self.mlp_num_hidden_layers
+            [self.edge_latent_size[edge_set_name]] * self.mlp_num_hidden_layers
             + [self.edge_latent_size[edge_set_name]]
           ),
           activation=self._activation,
@@ -134,7 +132,7 @@ class DeepTypedGraphNet(nn.Module):
       embed_node_fn = {
         node_set_name: AugmentedMLP(
           layer_sizes=(
-            [self.mlp_hidden_size] * self.mlp_num_hidden_layers
+            [self.node_latent_size[node_set_name]] * self.mlp_num_hidden_layers
             + [self.node_latent_size[node_set_name]]
           ),
           activation=self._activation,
@@ -174,7 +172,7 @@ class DeepTypedGraphNet(nn.Module):
         update_edge_fn={
           edge_set_name: AugmentedMLP(
             layer_sizes=(
-              [self.mlp_hidden_size] * self.mlp_num_hidden_layers
+              [self.edge_latent_size[edge_set_name]] * self.mlp_num_hidden_layers
               + [self.edge_latent_size[edge_set_name]]
             ),
             activation=self._activation,
@@ -188,7 +186,7 @@ class DeepTypedGraphNet(nn.Module):
         update_node_fn={
           node_set_name: AugmentedMLP(
             layer_sizes=(
-              [self.mlp_hidden_size] * self.mlp_num_hidden_layers
+              [self.node_latent_size[node_set_name]] * self.mlp_num_hidden_layers
               + [self.node_latent_size[node_set_name]]
             ),
             activation=self._activation,
@@ -210,7 +208,7 @@ class DeepTypedGraphNet(nn.Module):
       embed_edge_fn={
         edge_set_name: AugmentedMLP(
           layer_sizes=(
-            [self.mlp_hidden_size] * self.mlp_num_hidden_layers
+            [self.edge_output_size[edge_set_name]] * self.mlp_num_hidden_layers
             + [self.edge_output_size[edge_set_name]]
           ),
           activation=self._activation,
@@ -223,7 +221,7 @@ class DeepTypedGraphNet(nn.Module):
       embed_node_fn={
         node_set_name: AugmentedMLP(
           layer_sizes=(
-            [self.mlp_hidden_size] * self.mlp_num_hidden_layers
+            [self.node_output_size[node_set_name]] * self.mlp_num_hidden_layers
             + [self.node_output_size[node_set_name]]
           ),
           activation=self._activation,

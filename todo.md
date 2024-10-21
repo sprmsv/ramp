@@ -6,7 +6,7 @@
         - Computational overhead
         - Memory overhead
     - Conclusion: the computational bottleneck is sender/receiver feature concatenation
-        for computing the messages
+        when computing the messages
 
 - Limitations
     - Speed

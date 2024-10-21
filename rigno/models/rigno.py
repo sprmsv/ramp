@@ -432,7 +432,6 @@ class RegionInteractionGraphBuilder:
 class Encoder(nn.Module):
   node_latent_size: int
   edge_latent_size: int
-  mlp_hidden_size: int
   mlp_hidden_layers: int = 1
   use_layer_norm: bool = True
   conditioned_normalization: bool = True
@@ -445,7 +444,6 @@ class Encoder(nn.Module):
       embed_edges=True,  # Embed raw features of the edges
       edge_latent_size=dict(p2r=self.edge_latent_size),
       node_latent_size=dict(rnodes=self.node_latent_size, pnodes=self.node_latent_size),
-      mlp_hidden_size=self.mlp_hidden_size,
       mlp_num_hidden_layers=self.mlp_hidden_layers,
       num_message_passing_steps=1,
       use_layer_norm=self.use_layer_norm,
@@ -531,7 +529,6 @@ class Processor(nn.Module):
   steps: int
   node_latent_size: int
   edge_latent_size: int
-  mlp_hidden_size: int
   mlp_hidden_layers: int = 1
   use_layer_norm: bool = True
   conditioned_normalization: bool = True
@@ -544,7 +541,6 @@ class Processor(nn.Module):
       embed_edges=True,  # Embed raw features of the edges
       edge_latent_size=dict(r2r=self.edge_latent_size),
       node_latent_size=dict(rnodes=self.node_latent_size),
-      mlp_hidden_size=self.mlp_hidden_size,
       mlp_num_hidden_layers=self.mlp_hidden_layers,
       num_message_passing_steps=self.steps,
       use_layer_norm=True,
@@ -625,7 +621,6 @@ class Decoder(nn.Module):
   num_outputs: int
   node_latent_size: int
   edge_latent_size: int
-  mlp_hidden_size: int
   mlp_hidden_layers: int = 1
   use_layer_norm: bool = True
   conditioned_normalization: bool = True
@@ -642,7 +637,6 @@ class Decoder(nn.Module):
     node_output_size=dict(pnodes=self.num_outputs),
     edge_latent_size=dict(r2p=self.edge_latent_size),
     node_latent_size=dict(rnodes=self.node_latent_size, pnodes=self.node_latent_size),
-    mlp_hidden_size=self.mlp_hidden_size,
     mlp_num_hidden_layers=self.mlp_hidden_layers,
     num_message_passing_steps=1,
     use_layer_norm=True,
@@ -730,7 +724,6 @@ class RIGNO(AbstractOperator):
   node_latent_size: int = 128
   edge_latent_size: int = 128
   mlp_hidden_layers: int = 1
-  mlp_hidden_size: int = 128
   concatenate_t: bool = True
   concatenate_tau: bool = True
   conditioned_normalization: bool = True
@@ -759,7 +752,6 @@ class RIGNO(AbstractOperator):
     self.encoder = Encoder(
       edge_latent_size=self.edge_latent_size,
       node_latent_size=self.node_latent_size,
-      mlp_hidden_size=self.mlp_hidden_size,
       mlp_hidden_layers=self.mlp_hidden_layers,
       conditioned_normalization=self.conditioned_normalization,
       cond_norm_hidden_size=self.cond_norm_hidden_size,
@@ -771,7 +763,6 @@ class RIGNO(AbstractOperator):
       steps=self.processor_steps,
       edge_latent_size=self.edge_latent_size,
       node_latent_size=self.node_latent_size,
-      mlp_hidden_size=self.mlp_hidden_size,
       mlp_hidden_layers=self.mlp_hidden_layers,
       conditioned_normalization=self.conditioned_normalization,
       cond_norm_hidden_size=self.cond_norm_hidden_size,
@@ -784,7 +775,6 @@ class RIGNO(AbstractOperator):
       num_outputs=self.num_outputs,
       edge_latent_size=self.edge_latent_size,
       node_latent_size=self.node_latent_size,
-      mlp_hidden_size=self.mlp_hidden_size,
       mlp_hidden_layers=self.mlp_hidden_layers,
       conditioned_normalization=self.conditioned_normalization,
       cond_norm_hidden_size=self.cond_norm_hidden_size,
