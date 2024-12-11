@@ -106,6 +106,8 @@
 
 # Code and Performance
 
+- Update the logging formatter
+
 - Get rid of the NVIDIA driver compatiblity message: parallel compilation possibly faster
 
 - Add setup.py with setuptools and read use cases:

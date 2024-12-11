@@ -20,7 +20,7 @@ from flax.jax_utils import replicate, unreplicate
 from jax.tree_util import PyTreeDef
 from matplotlib import pyplot as plt
 
-from rigno.dataset import Dataset, Batch
+from rigno.dataset.dataset import Dataset, Batch
 from rigno.experiments import DIR_EXPERIMENTS
 from rigno.metrics import BatchMetrics, Metrics, EvalMetrics
 from rigno.metrics import rel_lp_loss, mse_loss

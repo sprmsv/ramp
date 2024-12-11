@@ -16,7 +16,7 @@ from flax.training.common_utils import shard, shard_prng_key
 from flax.typing import PRNGKey
 from flax.jax_utils import replicate
 
-from rigno.dataset import Dataset, Batch
+from rigno.dataset.dataset import Dataset, Batch
 from rigno.experiments import DIR_EXPERIMENTS
 from rigno.metrics import rel_lp_error
 from rigno.models.operator import AbstractOperator, Inputs
