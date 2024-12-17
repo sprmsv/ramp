@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 
 from rigno.utils import Array, ScalarArray
-from rigno.dataset.dataset import Metadata
+from rigno.dataset.metadata import Metadata
 
 EPSILON = 1e-10
 

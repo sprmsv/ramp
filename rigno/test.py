@@ -142,7 +142,7 @@ def profile_inference(
 
   # Get a batch and transform it
   batch_size_per_device = 1
-  batch = next(dataset.batches(mode='test', batch_size=batch_size_per_device))
+  batch = next(dataset.batches(split='test', batch_size=batch_size_per_device))
 
   # Set model inputs
   if dataset.time_dependent:
@@ -358,7 +358,7 @@ def get_all_estimations(
 
     # Loop over the batches
     u_prd = []
-    for batch in dataset.batches(mode='test', batch_size=FLAGS.batch_size):
+    for batch in dataset.batches(split='test', batch_size=FLAGS.batch_size):
       batch: Batch
       # Transform the batch
       if transform is not None:
@@ -457,7 +457,7 @@ def get_all_estimations(
         unrollers[dsf][tau_ratio_max].unroll, static_argnums=(2,))
 
   # Set the ground-truth solutions
-  batch_test = next(dataset.batches(mode='test', batch_size=dataset.nums['test'], get_graphs=False))
+  batch_test = next(dataset.batches(split='test', batch_size=dataset.nums['test'], get_graphs=False))
 
   # Instantiate the outputs
   errors = {error_type: {
@@ -809,7 +809,7 @@ def get_ensemble_estimations(
   ):
     # Loop over the batches
     u_prd = []
-    for batch in dataset.batches(mode='test', batch_size=FLAGS.batch_size):
+    for batch in dataset.batches(split='test', batch_size=FLAGS.batch_size):
       # Transform the batch
       if transform is not None:
         batch = transform(batch)
@@ -925,8 +925,8 @@ def main(argv):
 
   # Set the dataset
   dataset = Dataset(
-    datadir=FLAGS.datadir,
-    datapath=datapath,
+    dir=FLAGS.datadir,
+    name=datapath,
     include_passive_variables=False,
     concatenate_coeffs=False,
     time_downsample_factor=1,
@@ -937,8 +937,8 @@ def main(argv):
     preload=True,
   )
   dataset_small = Dataset(
-    datadir=FLAGS.datadir,
-    datapath=datapath,
+    dir=FLAGS.datadir,
+    name=datapath,
     include_passive_variables=False,
     concatenate_coeffs=False,
     time_downsample_factor=1,
@@ -1049,8 +1049,8 @@ def main(argv):
   noise_levels = [0, .005, .01, .02] if FLAGS.noise else []
 
   # Set the ground-truth trajectories
-  batch_tst = next(dataset.batches(mode='test', batch_size=dataset.nums['test'], get_graphs=False))
-  batch_tst_small = next(dataset_small.batches(mode='test', batch_size=dataset_small.nums['test'], get_graphs=False))
+  batch_tst = next(dataset.batches(split='test', batch_size=dataset.nums['test'], get_graphs=False))
+  batch_tst_small = next(dataset_small.batches(split='test', batch_size=dataset_small.nums['test'], get_graphs=False))
 
   # Get model estimations with all settings
   errors, u_prd = get_all_estimations(

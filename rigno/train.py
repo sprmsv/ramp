@@ -825,11 +825,11 @@ def train(
   # Evaluate before training
   metrics_trn = evaluate(
     state=state,
-    batches=dataset.batches(mode='train', batch_size=FLAGS.batch_size),
+    batches=dataset.batches(split='train', batch_size=FLAGS.batch_size),
   )
   metrics_val = evaluate(
     state=state,
-    batches=dataset.batches(mode='valid', batch_size=FLAGS.batch_size),
+    batches=dataset.batches(split='valid', batch_size=FLAGS.batch_size),
   )
 
   # Report the initial evaluations
@@ -885,18 +885,18 @@ def train(
     state, loss, grad = train_one_epoch(
       key=subkey_1,
       state=state,
-      batches=dataset.batches(mode='train', batch_size=FLAGS.batch_size, key=subkey_0),
+      batches=dataset.batches(split='train', batch_size=FLAGS.batch_size, key=subkey_0),
     )
 
     if ((epoch % evaluation_frequency) == 0) or (epoch == epochs):
       # Evaluate
       metrics_trn = evaluate(
         state=state,
-        batches=dataset.batches(mode='train', batch_size=FLAGS.batch_size),
+        batches=dataset.batches(split='train', batch_size=FLAGS.batch_size),
       )
       metrics_val = evaluate(
         state=state,
-        batches=dataset.batches(mode='valid', batch_size=FLAGS.batch_size),
+        batches=dataset.batches(split='valid', batch_size=FLAGS.batch_size),
       )
 
       # Log the results
@@ -1039,8 +1039,8 @@ def main(argv):
   # Read the dataset
   subkey, key = jax.random.split(key)
   dataset = Dataset(
-    datadir=FLAGS.datadir,
-    datapath=FLAGS.datapath,
+    dir=FLAGS.datadir,
+    name=FLAGS.datapath,
     include_passive_variables=False,
     concatenate_coeffs=False,
     time_cutoff_idx=(IDX_FN + 1),
