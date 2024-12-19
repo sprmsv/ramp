@@ -142,9 +142,8 @@ class Dataset:
         self.stats_der[key].mean = np.mean(derivatives[:, :, np.where(mask)[2], :], axis=(0, 1, 2), keepdims=True)
         self.stats_der[key].std = np.std(derivatives[:, :, np.where(mask)[2], :], axis=(0, 1, 2), keepdims=True)
 
-  # TMP TODO: Update
   def build_graphs(self, builder: RegionInteractionGraphBuilder, rmesh_correction_dsf: int = 1, key: PRNGKey = None) -> None:
-    """Builds RIGNO graphs for all samples and stores them in the object."""
+    """Builds RIGNO graphs for all the samples in the dataset and stores them in the object."""
     # NOTE: Each graph takes about 3 MB and 2 seconds to build.
     # It can cause memory issues for large datasets.
 
@@ -165,14 +164,14 @@ class Dataset:
       num_r2r_edges = self.rigs.r2r_edge_indices.shape[1]
       if self.rigs.r2p_edge_indices is not None:
         num_r2p_edges = self.rigs.r2p_edge_indices.shape[1]
-    for mode in ['train', 'valid', 'test']:
-      if not self.nums[mode] > 0: continue
-      batch = self._fetch_mode(idx=np.arange(self.nums[mode]), mode=mode)
+    for split in self.splits:
+      if not (split[1] - split[0]) > 0: continue
+      batch = self._get_batch(idx=np.arange(*split), get_graphs=False)
       # Loop over all coordinates in the batch
       # NOTE: Assuming constant x in time
       for x in batch.x[:, 0]:
         key, subkey = jax.random.split(key)
-        m = builder.build_metadata(x_inp=x, x_out=x, domain=np.array(self.metadata.domain_x), rmesh_correction_dsf=rmesh_correction_dsf, key=subkey)
+        m = builder.build_metadata(x_inp=x, x_out=x, domain=np.array(self.metadata.bbox_x), rmesh_correction_dsf=rmesh_correction_dsf, key=subkey)
         metadata.append(m)
         # Store the maximum number of edges
         if self.rigs is None:
