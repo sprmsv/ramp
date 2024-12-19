@@ -15,10 +15,6 @@ class BatchMetrics:
     mse: Array = None
     l1: Array = None
     l2: Array = None
-    # Poseidon's l1-error
-    _l1: float = None
-    # Poseidon's l2-error
-    _l2: float = None
 
     def map(self, f):
         for key in self.__dict__.keys():
@@ -38,10 +34,6 @@ class Metrics:
     mse: float = None
     l1: float = None
     l2: float = None
-    # Poseidon's l1-error
-    _l1: float = None
-    # Poseidon's l2-error
-    _l2: float = None
 
 @dataclass
 class EvalMetrics:
@@ -205,19 +197,3 @@ def mse_loss(gtr: Array, prd: Array) -> ScalarArray:
     """
 
     return jnp.mean(jnp.power(prd - gtr, 2))
-
-def normalized_rel_lp_error_mean(gtr: Array, prd: Array, metadata: Metadata, p: int = 2) -> ScalarArray:
-    """Compute mean relative lp-error of normalized vectors"""
-
-    mean = jnp.array(metadata.global_mean)
-    std = jnp.array(metadata.global_std)
-    gtr_nrm = (gtr - mean) / std
-    prd_nrm = (prd - mean) / std
-
-    err = rel_lp_error_mean(
-        gtr_nrm, prd_nrm, p=p,
-        chunks=metadata.chunked_variables,
-        num_chunks=metadata.num_variable_chunks,
-    )
-
-    return err

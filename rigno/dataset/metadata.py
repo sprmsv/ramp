@@ -47,7 +47,7 @@ DATASET_METADATA = {
   'poisson-circle-bc3': Metadata(
     periodic=False,
     fix=True,
-    shape=(2304, 1, 16646, 1),  # CHECK: The number of samples changes actually
+    shape=(-1, 1, 16646, -1),
     x=ArrayMetadata(path='coordinates', indices=[0, 1], names=['$x$, $y$'], signed=[True, True]),
     t=None,
     bbox_x=((-1., -1.), (+1., +1.)),

@@ -846,7 +846,6 @@ class RIGNO(AbstractOperator):
     self._check_function(inputs.u, x=inputs.x_inp)
     if inputs.c is not None:
       self._check_function(inputs.c, x=inputs.x_inp)
-    assert inputs.u.shape[3] == self.num_outputs
 
     # Read dimensions
     batch_size = inputs.u.shape[0]

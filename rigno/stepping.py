@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Union
+from typing import Union, Mapping
 
 import flax.typing
 import jax
@@ -7,29 +7,32 @@ import jax.numpy as jnp
 
 from rigno.models.operator import AbstractOperator, Inputs
 from rigno.utils import Array, is_multiple, normalize, unnormalize
+from rigno.dataset.dataset import Stats
 
 class Stepper(ABC):
 
   def __init__(self, operator: AbstractOperator):
     self._apply_operator = operator.apply
 
-  def normalize_inputs(self, stats, inputs: Inputs) -> Inputs:
+  def normalize_inputs(self, stats: Mapping[str, Stats], inputs: Inputs) -> Inputs:
 
-    u_nrm = normalize(inputs.u, shift=stats['u']['mean'], scale=stats['u']['std'])
+    # TMP TODO: CHECK: For time-independent datasets, it reads the wrong field 'u' !
+    # TMP TODO: Normalize boundary functions as well
+    u_nrm = normalize(inputs.u, shift=stats['u'].mean, scale=stats['u'].std)
     if inputs.c is None:
       c_nrm = None
     else:
-      c_nrm = normalize(inputs.c, shift=stats['c']['mean'], scale=stats['c']['std'])
-    x_inp_nrm = 2 * ((inputs.x_inp - stats['x']['min']) / (stats['x']['max'] - stats['x']['min'])) - 1
-    x_out_nrm = 2 * ((inputs.x_out - stats['x']['min']) / (stats['x']['max'] - stats['x']['min'])) - 1
+      c_nrm = normalize(inputs.c, shift=stats['c'].mean, scale=stats['c'].std)
+    x_inp_nrm = 2 * ((inputs.x_inp - stats['x'].min) / (stats['x'].max - stats['x'].min)) - 1
+    x_out_nrm = 2 * ((inputs.x_out - stats['x'].min) / (stats['x'].max - stats['x'].min)) - 1
     if inputs.t is None:
       t_nrm = None
     else:
-      t_nrm = (inputs.t - stats['t']['min']) / (stats['t']['max'] - stats['t']['min'])
+      t_nrm = (inputs.t - stats['t'].min) / (stats['t'].max - stats['t'].min)
     if inputs.tau is None:
       tau_nrm = None
     else:
-      tau_nrm = (inputs.tau) / (stats['t']['max'] - stats['t']['min'])
+      tau_nrm = (inputs.tau) / (stats['t'].max - stats['t']['min'])
 
     inputs_nrm = Inputs(
       u=u_nrm,
@@ -45,7 +48,7 @@ class Stepper(ABC):
   @abstractmethod
   def apply(self,
     variables,
-    stats,
+    stats: Mapping[str, Stats],
     inputs: Inputs,
     **kwargs,
   ):
@@ -59,7 +62,7 @@ class Stepper(ABC):
 
   def unroll(self,
     variables,
-    stats,
+    stats: Mapping[str, Stats],
     num_steps: int,
     inputs: Inputs,
     **kwargs,
@@ -103,7 +106,7 @@ class Stepper(ABC):
   @abstractmethod
   def get_loss_inputs(self,
     variables,
-    stats,
+    stats: Mapping[str, Stats],
     inputs: Inputs,
     **kwargs,
   ):
@@ -117,7 +120,7 @@ class Stepper(ABC):
 
   def get_intermediates(self,
     variables,
-    stats,
+    stats: Mapping[str, Stats],
     inputs: Inputs,
     **kwargs,
   ):
@@ -138,7 +141,7 @@ class TimeDerivativeStepper(Stepper):
 
   def apply(self,
     variables,
-    stats,
+    stats: Mapping[str, Stats],
     inputs: Inputs,
     **kwargs,
   ):
@@ -173,7 +176,7 @@ class TimeDerivativeStepper(Stepper):
 
   def get_loss_inputs(self,
     variables,
-    stats,
+    stats: Mapping[str, Stats],
     u_tgt: Array,
     inputs: Inputs,
     **kwargs,
@@ -209,7 +212,7 @@ class ResidualStepper(Stepper):
 
   def apply(self,
     variables,
-    stats,
+    stats: Mapping[str, Stats],
     inputs: Inputs,
     **kwargs,
   ):
@@ -244,7 +247,7 @@ class ResidualStepper(Stepper):
 
   def get_loss_inputs(self,
     variables,
-    stats,
+    stats: Mapping[str, Stats],
     u_tgt: Array,
     inputs: Inputs,
     **kwargs,
@@ -280,7 +283,7 @@ class OutputStepper(Stepper):
 
   def apply(self,
     variables,
-    stats,
+    stats: Mapping[str, Stats],
     inputs: Inputs,
     **kwargs,
   ):
@@ -304,15 +307,15 @@ class OutputStepper(Stepper):
     # Unnormalize predicted output
     u_prd = unnormalize(
       u_prd_nrm,
-      mean=stats['u']['mean'],
-      std=stats['u']['std'],
+      mean=stats['u'].mean,
+      std=stats['u'].std,
     )
 
     return u_prd
 
   def get_loss_inputs(self,
     variables,
-    stats,
+    stats: Mapping[str, Stats],
     u_tgt: Array,
     inputs: Inputs,
     **kwargs,
@@ -337,8 +340,8 @@ class OutputStepper(Stepper):
     # Get target normalized output
     u_tgt_nrm = normalize(
       u_tgt,
-      shift=stats['u']['mean'],
-      scale=stats['u']['std'],
+      shift=stats['u'].mean,
+      scale=stats['u'].std,
     )
 
     return (u_tgt_nrm, u_prd_nrm)

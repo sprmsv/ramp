@@ -21,8 +21,7 @@ from rigno.models.rigno import (
   RegionInteractionGraphBuilder)
 
 
-@dataclass
-class DiscretizedFunction:
+class DiscretizedFunction(NamedTuple):
   mask: Array
   values: Array
 
@@ -42,8 +41,7 @@ class Batch(NamedTuple):
   def __len__(self) -> int:
     return self.shape[0]
 
-@dataclass
-class Stats:
+class Stats(NamedTuple):
   mean: Array = None
   std: Array = None
   min: Array = None
@@ -84,6 +82,12 @@ class Dataset:
     else:
       self.reader = file
 
+    # Load a sample
+    self.sample = self._get_batch(idx=[0])
+
+    # Change metadata based on the file
+    self.metadata.shape = (self.reader['count'], *self.metadata.shape[1:])
+
     if self.time_dependent:
       raise NotImplementedError
       self.dt = ... # NOTE: Assuming fix dt
@@ -119,8 +123,10 @@ class Dataset:
     for key in self.metadata.functions.keys():
       mask = batch.functions[key].mask
       values = batch.functions[key].values
-      self.stats[key].mean = np.mean(values[:, :, np.where(mask)[2], :], axis=(0, 1, 2), keepdims=True)
-      self.stats[key].std = np.std(values[:, :, np.where(mask)[2], :], axis=(0, 1, 2), keepdims=True)
+      self.stats[key] = Stats(
+        mean=np.mean(values[:, :, np.where(mask)[2], :], axis=(0, 1, 2), keepdims=True),
+        std=np.std(values[:, :, np.where(mask)[2], :], axis=(0, 1, 2), keepdims=True),
+      )
 
     # Compute statistics of the residuals and time derivatives
     if self.time_dependent:
@@ -137,10 +143,14 @@ class Dataset:
           derivatives.append(res / tau)
         residuals = np.concatenate(residuals, axis=1)
         derivatives = np.concatenate(derivatives, axis=1)
-        self.stats_res[key].mean = np.mean(residuals[:, :, np.where(mask)[2], :], axis=(0, 1, 2), keepdims=True)
-        self.stats_res[key].std = np.std(residuals[:, :, np.where(mask)[2], :], axis=(0, 1, 2), keepdims=True)
-        self.stats_der[key].mean = np.mean(derivatives[:, :, np.where(mask)[2], :], axis=(0, 1, 2), keepdims=True)
-        self.stats_der[key].std = np.std(derivatives[:, :, np.where(mask)[2], :], axis=(0, 1, 2), keepdims=True)
+        self.stats_res[key] = Stats(
+          mean=np.mean(residuals[:, :, np.where(mask)[2], :], axis=(0, 1, 2), keepdims=True),
+          std=np.std(residuals[:, :, np.where(mask)[2], :], axis=(0, 1, 2), keepdims=True),
+        )
+        self.stats_der[key] = Stats(
+          mean=np.mean(derivatives[:, :, np.where(mask)[2], :], axis=(0, 1, 2), keepdims=True),
+          std=np.std(derivatives[:, :, np.where(mask)[2], :], axis=(0, 1, 2), keepdims=True),
+        )
 
   def build_graphs(self, builder: RegionInteractionGraphBuilder, rmesh_correction_dsf: int = 1, key: PRNGKey = None) -> None:
     """Builds RIGNO graphs for all the samples in the dataset and stores them in the object."""
@@ -325,13 +335,12 @@ class Dataset:
     if self.time_dependent: t = np.concatenate(t, axis=0)
 
     # Get graphs
-    # TODO: Implement with the new structure
-    # if (self.rigs is not None) and get_graphs:
-    #   g = tree.tree_map(lambda v: v[idx], self.rigs)
-    # else:
-    #   g = None
+    if (self.rigs is not None) and get_graphs:
+      g = tree.tree_map(lambda v: v[idx], self.rigs)
+    else:
+      g = None
 
-    batch = Batch(x=x, t=t, g=None, functions=functions)
+    batch = Batch(x=x, t=t, g=g, functions=functions)
 
     return batch
 

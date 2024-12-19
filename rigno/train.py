@@ -20,12 +20,11 @@ from flax.jax_utils import replicate, unreplicate
 from jax.tree_util import PyTreeDef
 from matplotlib import pyplot as plt
 
-from rigno.dataset.dataset import Dataset, Batch
+from rigno.dataset.dataset import Dataset, Batch, Stats
 from rigno.experiments import DIR_EXPERIMENTS
 from rigno.metrics import BatchMetrics, Metrics, EvalMetrics
 from rigno.metrics import rel_lp_loss, mse_loss
 from rigno.metrics import mse_error, rel_lp_error_norm
-from rigno.metrics import normalized_rel_lp_error_mean
 from rigno.models.operator import AbstractOperator, Inputs
 from rigno.models.rigno import RIGNO
 from rigno.models.rigno import RegionInteractionGraphBuilder
@@ -87,7 +86,7 @@ def define_flags():
   flags.DEFINE_float(name='lr_lowr', default=1e-06, required=False,
     help='Final learning rate in the exponential decay'
   )
-  flags.DEFINE_string(name='stepper', default='der', required=False,
+  flags.DEFINE_string(name='stepper', default='out', required=False,
     help='Type of the stepper'
   )
   flags.DEFINE_integer(name='tau_max', default=1, required=False,
@@ -153,10 +152,9 @@ def train(
   """Trains a model and returns the state."""
 
   # Set constants
-  num_samples_trn = dataset.nums['train']
-  num_times = dataset.shape[1]
-  num_pnodes = dataset.shape[2]
-  num_vars = dataset.shape[3]
+  num_samples_trn = (dataset.splits[0][1] - dataset.splits[0][0])
+  num_times = dataset.metadata.shape[1]
+  num_pnodes = dataset.metadata.shape[2]
   assert num_samples_trn % FLAGS.batch_size == 0
   num_batches = num_samples_trn // FLAGS.batch_size
   assert FLAGS.batch_size % NUM_DEVICES == 0
@@ -195,13 +193,14 @@ def train(
     autoregressive = AutoregressiveStepper(stepper=stepper, dt=dataset.dt)
 
   # Set the normalization statistics
-  stats = {
-    key: {
-      k: (jnp.array(v) if (v is not None) else None)
-      for k, v in val.items()
-    }
-    for key, val in dataset.stats.items()
-  }
+  if FLAGS.stepper == 'out':
+    stats = dataset.stats
+  elif FLAGS.stepper == 'der':
+    stats = dataset.stats_der
+  elif FLAGS.stepper == 'res':
+    stats = dataset.stats_res
+  else:
+    raise ValueError(f'Stepper "{FLAGS.stepper}" is not recognized.')
 
   # Replicate state, stats, and graphs
   # NOTE: Internally uses jax.device_put_replicate
@@ -456,12 +455,12 @@ def train(
       num_valid_pairs = 1
       # Prepare time-independent input-output pairs
       # -> [1, batch_size_per_device, ...]
-      u_inp_batch = jnp.expand_dims(batch.c, axis=0)
+      u_inp_batch = jnp.expand_dims(batch.functions['c'].values, axis=0)
       x_inp_batch = jnp.expand_dims(batch.x, axis=0)
       c_inp_batch = None
       t_inp_batch = None
       tau_batch = None
-      u_tgt_batch = jnp.expand_dims(batch.u, axis=0)
+      u_tgt_batch = jnp.expand_dims(batch.functions['u'].values, axis=0)
       x_out_batch = jnp.expand_dims(batch.x, axis=0)
 
     # Add loss and gradients for each subbatch
@@ -519,11 +518,10 @@ def train(
       # Split the batch between devices
       # -> [NUM_DEVICES, batch_size_per_device, ...]
       batch = Batch(
-        u=shard(batch.u),
-        c=shard(batch.c),
         x=shard(batch.x),
         t=shard(batch.t),
         g=shard(batch.g),
+        functions=shard(batch.functions),
       )
 
       # Get loss and updated state
@@ -537,11 +535,12 @@ def train(
 
     return state, loss_epoch, grad_epoch
 
+  # TMP TODO: Update
   @functools.partial(jax.pmap, static_broadcasted_argnums=(0,))
   def _evaluate_direct_prediction(
     tau_ratio: Union[None, float, int],
     state: TrainState,
-    stats,
+    stats: Mapping[str, Stats],
     batch: Batch
   ) -> Mapping:
 
@@ -569,16 +568,15 @@ def train(
       mse=mse_error(*_u_pair),
       l1=rel_lp_error_norm(*_u_pair, p=1),
       l2=rel_lp_error_norm(*_u_pair, p=2),
-      _l1=normalized_rel_lp_error_mean(*_u_pair, dataset.metadata, p=1),
-      _l2=normalized_rel_lp_error_mean(*_u_pair, dataset.metadata, p=2),
     )
 
     return batch_metrics.__dict__
 
+  # TMP TODO: Update
   @jax.pmap
   def _evaluate_rollout_prediction(
     state: TrainState,
-    stats,
+    stats: Mapping[str, Stats],
     batch: Batch
   ) -> Mapping:
     """
@@ -614,8 +612,6 @@ def train(
       mse=mse_error(u_tgt, u_prd),
       l1=rel_lp_error_norm(u_tgt, u_prd, p=1),
       l2=rel_lp_error_norm(u_tgt, u_prd, p=2),
-      _l1=normalized_rel_lp_error_mean(u_tgt, u_prd, dataset.metadata, p=1),
-      _l2=normalized_rel_lp_error_mean(u_tgt, u_prd, dataset.metadata, p=2),
     )
 
     return batch_metrics.__dict__
@@ -623,7 +619,7 @@ def train(
   @jax.pmap
   def _evaluate_final_prediction(
     state: TrainState,
-    stats,
+    stats: Mapping[str, Stats],
     batch: Batch
   ) -> Mapping:
 
@@ -672,12 +668,12 @@ def train(
         )
 
     else:
-      u_tgt = batch.u[:, [0]]
+      u_tgt = batch.functions['u'].values[:, [0]]
       u_prd = stepper.apply(
         variables={'params': state.params},
         stats=stats,
         inputs=Inputs(
-          u=batch.c[:, [0]],
+          u=batch.functions['c'].values[:, [0]],
           c=None,
           x_inp=batch.x,
           x_out=batch.x,
@@ -692,8 +688,6 @@ def train(
       mse=mse_error(u_tgt, u_prd),
       l1=rel_lp_error_norm(u_tgt, u_prd, p=1),
       l2=rel_lp_error_norm(u_tgt, u_prd, p=2),
-      _l1=normalized_rel_lp_error_mean(u_tgt, u_prd, dataset.metadata, p=1),
-      _l2=normalized_rel_lp_error_mean(u_tgt, u_prd, dataset.metadata, p=2),
     )
 
     return batch_metrics.__dict__
@@ -722,11 +716,10 @@ def train(
       # Split the batch between devices
       # -> [NUM_DEVICES, batch_size_per_device, ...]
       batch = Batch(
-        u=shard(batch.u),
-        c=shard(batch.c),
         x=shard(batch.x),
         t=shard(batch.t),
         g=shard(batch.g),
+        functions=shard(batch.functions),
       )
 
       # Evaluate direct prediction
@@ -779,36 +772,26 @@ def train(
       mse=jnp.median(jnp.concatenate([m.mse for m in metrics_direct_tau_frac]), axis=0).item(),
       l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_direct_tau_frac]), axis=0).item(),
       l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_direct_tau_frac]), axis=0).item(),
-      _l1=jnp.median(jnp.concatenate([m._l1 for m in metrics_direct_tau_frac]), axis=0).item(),
-      _l2=jnp.median(jnp.concatenate([m._l2 for m in metrics_direct_tau_frac]), axis=0).item(),
     ) if direct else None
     metrics_direct_tau_min = Metrics(
       mse=jnp.median(jnp.concatenate([m.mse for m in metrics_direct_tau_min]), axis=0).item(),
       l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_direct_tau_min]), axis=0).item(),
       l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_direct_tau_min]), axis=0).item(),
-      _l1=jnp.median(jnp.concatenate([m._l1 for m in metrics_direct_tau_min]), axis=0).item(),
-      _l2=jnp.median(jnp.concatenate([m._l2 for m in metrics_direct_tau_min]), axis=0).item(),
     ) if direct else None
     metrics_direct_tau_max = Metrics(
       mse=jnp.median(jnp.concatenate([m.mse for m in metrics_direct_tau_max]), axis=0).item(),
       l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_direct_tau_max]), axis=0).item(),
       l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_direct_tau_max]), axis=0).item(),
-      _l1=jnp.median(jnp.concatenate([m._l1 for m in metrics_direct_tau_max]), axis=0).item(),
-      _l2=jnp.median(jnp.concatenate([m._l2 for m in metrics_direct_tau_max]), axis=0).item(),
     ) if direct else None
     metrics_rollout = Metrics(
       mse=jnp.median(jnp.concatenate([m.mse for m in metrics_rollout]), axis=0).item(),
       l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_rollout]), axis=0).item(),
       l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_rollout]), axis=0).item(),
-      _l1=jnp.median(jnp.concatenate([m._l1 for m in metrics_rollout]), axis=0).item(),
-      _l2=jnp.median(jnp.concatenate([m._l2 for m in metrics_rollout]), axis=0).item(),
     ) if rollout else None
     metrics_final = Metrics(
       mse=jnp.median(jnp.concatenate([m.mse for m in metrics_final]), axis=0).item(),
       l1=jnp.median(jnp.concatenate([m.l1 for m in metrics_final]), axis=0).item(),
       l2=jnp.median(jnp.concatenate([m.l2 for m in metrics_final]), axis=0).item(),
-      _l1=jnp.median(jnp.concatenate([m._l1 for m in metrics_final]), axis=0).item(),
-      _l2=jnp.median(jnp.concatenate([m._l2 for m in metrics_final]), axis=0).item(),
     ) if final else None
 
     # Build the metrics object
@@ -825,11 +808,11 @@ def train(
   # Evaluate before training
   metrics_trn = evaluate(
     state=state,
-    batches=dataset.batches(split='train', batch_size=FLAGS.batch_size),
+    batches=dataset.batches(split=0, batch_size=FLAGS.batch_size),
   )
   metrics_val = evaluate(
     state=state,
-    batches=dataset.batches(split='valid', batch_size=FLAGS.batch_size),
+    batches=dataset.batches(split=1, batch_size=FLAGS.batch_size),
   )
 
   # Report the initial evaluations
@@ -843,13 +826,13 @@ def train(
     f'TIME: {time_tot_pre : 06.1f}s',
     f'GRAD: {0. : .2e}',
     f'LOSS: {0. : .2e}',
-    f'DR-{.5 * tdsf}: {metrics_val.direct_tau_frac._l1 : .2%}' if metrics_val.direct_tau_frac._l1 else '',
-    f'DR-{tdsf}: {metrics_val.direct_tau_min._l1 : .2%}' if metrics_val.direct_tau_min._l1 else '',
-    f'DR-{FLAGS.tau_max * tdsf}: {metrics_val.direct_tau_max._l1 : .2%}' if metrics_val.direct_tau_max._l1 else '',
-    f'FN: {metrics_val.final._l1 : .2%}' if metrics_val.final._l1 else '',
-    f'TRN-DR-{tdsf}: {metrics_trn.direct_tau_min._l1 : .2%}' if metrics_trn.direct_tau_min._l1 else '',
-    f'TRN-DR-{FLAGS.tau_max * tdsf}: {metrics_trn.direct_tau_max._l1 : .2%}' if metrics_trn.direct_tau_max._l1 else '',
-    f'TRN-FN: {metrics_trn.final._l1 : .2%}' if metrics_trn.final._l1 else '',
+    f'DR-{.5 * tdsf}: {metrics_val.direct_tau_frac.l1 : .2%}' if metrics_val.direct_tau_frac.l1 else '',
+    f'DR-{tdsf}: {metrics_val.direct_tau_min.l1 : .2%}' if metrics_val.direct_tau_min.l1 else '',
+    f'DR-{FLAGS.tau_max * tdsf}: {metrics_val.direct_tau_max.l1 : .2%}' if metrics_val.direct_tau_max.l1 else '',
+    f'FN: {metrics_val.final.l1 : .2%}' if metrics_val.final.l1 else '',
+    f'TRN-DR-{tdsf}: {metrics_trn.direct_tau_min.l1 : .2%}' if metrics_trn.direct_tau_min.l1 else '',
+    f'TRN-DR-{FLAGS.tau_max * tdsf}: {metrics_trn.direct_tau_max.l1 : .2%}' if metrics_trn.direct_tau_max.l1 else '',
+    f'TRN-FN: {metrics_trn.final.l1 : .2%}' if metrics_trn.final.l1 else '',
   ]))
 
   # Set up the checkpoint manager
@@ -861,7 +844,7 @@ def train(
     checkpointer_options = orbax.checkpoint.CheckpointManagerOptions(
       max_to_keep=1,
       keep_period=None,
-      best_fn=(lambda metrics: metrics['valid']['final']['_l1']),
+      best_fn=(lambda metrics: metrics['valid']['final']['l1']),
       best_mode='min',
       create=True,)
     checkpointer_save_args = orbax_utils.save_args_from_target(target={'state': state})
@@ -877,7 +860,7 @@ def train(
     # Re-construct the graphs with a new PRNG key
     # NOTE: In order to prevent always training with the same rmesh nodes
     key, subkey = jax.random.split(key)
-    if dataset.metadata.fix_x:
+    if dataset.metadata.fix:
       dataset.build_graphs(builder=graph_builder, key=subkey)
 
     # Train one epoch
@@ -885,18 +868,18 @@ def train(
     state, loss, grad = train_one_epoch(
       key=subkey_1,
       state=state,
-      batches=dataset.batches(split='train', batch_size=FLAGS.batch_size, key=subkey_0),
+      batches=dataset.batches(split=0, batch_size=FLAGS.batch_size, key=subkey_0),
     )
 
     if ((epoch % evaluation_frequency) == 0) or (epoch == epochs):
       # Evaluate
       metrics_trn = evaluate(
         state=state,
-        batches=dataset.batches(split='train', batch_size=FLAGS.batch_size),
+        batches=dataset.batches(split=0, batch_size=FLAGS.batch_size),
       )
       metrics_val = evaluate(
         state=state,
-        batches=dataset.batches(split='valid', batch_size=FLAGS.batch_size),
+        batches=dataset.batches(split=1, batch_size=FLAGS.batch_size),
       )
 
       # Log the results
@@ -910,13 +893,13 @@ def train(
         f'TIME: {time_tot : 06.1f}s',
         f'GRAD: {grad.item() : .2e}',
         f'LOSS: {loss.item() : .2e}',
-        f'DR-{.5 * tdsf}: {metrics_val.direct_tau_frac._l1 : .2%}' if metrics_val.direct_tau_frac._l1 else '',
-        f'DR-{tdsf}: {metrics_val.direct_tau_min._l1 : .2%}' if metrics_val.direct_tau_min._l1 else '',
-        f'DR-{FLAGS.tau_max * tdsf}: {metrics_val.direct_tau_max._l1 : .2%}' if metrics_val.direct_tau_max._l1 else '',
-        f'FN: {metrics_val.final._l1 : .2%}' if metrics_val.final._l1 else '',
-        f'TRN-DR-{tdsf}: {metrics_trn.direct_tau_min._l1 : .2%}' if metrics_trn.direct_tau_min._l1 else '',
-        f'TRN-DR-{FLAGS.tau_max * tdsf}: {metrics_trn.direct_tau_max._l1 : .2%}' if metrics_trn.direct_tau_max._l1 else '',
-        f'TRN-FN: {metrics_trn.final._l1 : .2%}' if metrics_trn.final._l1 else '',
+        f'DR-{.5 * tdsf}: {metrics_val.direct_tau_frac.l1 : .2%}' if metrics_val.direct_tau_frac.l1 else '',
+        f'DR-{tdsf}: {metrics_val.direct_tau_min.l1 : .2%}' if metrics_val.direct_tau_min.l1 else '',
+        f'DR-{FLAGS.tau_max * tdsf}: {metrics_val.direct_tau_max.l1 : .2%}' if metrics_val.direct_tau_max.l1 else '',
+        f'FN: {metrics_val.final.l1 : .2%}' if metrics_val.final.l1 else '',
+        f'TRN-DR-{tdsf}: {metrics_trn.direct_tau_min.l1 : .2%}' if metrics_trn.direct_tau_min.l1 else '',
+        f'TRN-DR-{FLAGS.tau_max * tdsf}: {metrics_trn.direct_tau_max.l1 : .2%}' if metrics_trn.direct_tau_max.l1 else '',
+        f'TRN-FN: {metrics_trn.final.l1 : .2%}' if metrics_trn.final.l1 else '',
       ]))
 
       with disable_logging(level=logging.FATAL):
@@ -945,12 +928,12 @@ def train(
             {'label': 'Training loss', 'values': lambda m: m['loss']},
           ),
           'final': (
-            {'label': 'Training error [%]', 'values': lambda m: m['train']['final']['_l1'] * 100},
-            {'label': 'Validation error [%]', 'values': lambda m: m['valid']['final']['_l1'] * 100}
+            {'label': 'Training error [%]', 'values': lambda m: m['train']['final']['l1'] * 100},
+            {'label': 'Validation error [%]', 'values': lambda m: m['valid']['final']['l1'] * 100}
           ),
           'direct': (
-            {'label': 'Training error [%]', 'values': lambda m: m['train']['direct_tau_min']['_l1'] * 100 if dataset.time_dependent else 1},
-            {'label': 'Validation error [%]', 'values': lambda m: m['valid']['direct_tau_min']['_l1'] * 100 if dataset.time_dependent else 1}
+            {'label': 'Training error [%]', 'values': lambda m: m['train']['direct_tau_min']['l1'] * 100 if dataset.time_dependent else 1},
+            {'label': 'Validation error [%]', 'values': lambda m: m['valid']['direct_tau_min']['l1'] * 100 if dataset.time_dependent else 1}
           ),
         }
         steps = [m['step'] for m in checkpointed_metrics]
@@ -998,7 +981,7 @@ def get_model(model_configs: Mapping[str, Any], dataset: Dataset) -> AbstractOpe
   # Set model kwargs
   if not model_configs:
     model_configs = dict(
-      num_outputs=dataset.shape[-1],
+      num_outputs=dataset.sample.functions['u'].values.shape[-1],
       processor_steps=FLAGS.processor_steps,
       node_latent_size=FLAGS.node_latent_size,
       edge_latent_size=FLAGS.edge_latent_size,
@@ -1041,14 +1024,11 @@ def main(argv):
   dataset = Dataset(
     dir=FLAGS.datadir,
     name=FLAGS.datapath,
-    include_passive_variables=False,
-    concatenate_coeffs=False,
+    file='train.nc',
     time_cutoff_idx=(IDX_FN + 1),
     time_downsample_factor=FLAGS.time_downsample_factor,
     space_downsample_factor=FLAGS.space_downsample_factor,
-    n_train=FLAGS.n_train,
-    n_valid=FLAGS.n_valid,
-    n_test=FLAGS.n_test,
+    splits=[(0, FLAGS.n_train), (FLAGS.n_train, FLAGS.n_train + FLAGS.n_valid)],
     preload=True,
     key=subkey,
   )
@@ -1131,7 +1111,7 @@ def main(argv):
         dummy_graph_builder.build_metadata(
         x_inp=dataset.sample.x[0, 0],
         x_out=dataset.sample.x[0, 0],
-        domain=np.array(dataset.metadata.domain_x),
+        domain=np.array(dataset.metadata.bbox_x),
       )
     )
     dummy_graphs = tree.tree_map(lambda v: jnp.repeat(v, repeats=FLAGS.batch_size, axis=0), dummy_graphs)
@@ -1146,7 +1126,7 @@ def main(argv):
       )
     else:
       dummy_inputs = Inputs(
-        u=jnp.ones(shape=(FLAGS.batch_size, 1, *dataset.sample.c.shape[2:])),
+        u=jnp.ones(shape=(FLAGS.batch_size, 1, *dataset.sample.functions['c'].values.shape[2:])),
         c=None,
         x_inp=dataset.sample.x,
         x_out=dataset.sample.x,
@@ -1164,7 +1144,7 @@ def main(argv):
   logging.info(f'Training a {model.__class__.__name__} with {n_model_parameters} parameters')
 
   # Set transition steps
-  num_batches = dataset.nums['train'] // FLAGS.batch_size
+  num_batches = (dataset.splits[0][1] - dataset.splits[0][0]) // FLAGS.batch_size
   if dataset.time_dependent:
     num_times = dataset.shape[1]
     num_lead_times = num_times - 1
