@@ -455,7 +455,8 @@ def train(
       num_valid_pairs = 1
       # Prepare time-independent input-output pairs
       # -> [1, batch_size_per_device, ...]
-      u_inp_batch = jnp.expand_dims(batch.functions['c'].values, axis=0)
+      # u_inp_batch = jnp.expand_dims(batch.functions['h'].values, axis=0)  # TMP check the input function
+      u_inp_batch = jnp.expand_dims(jnp.concatenate([batch.functions['h'].values, batch.functions['c'].values], axis=-1), axis=0)  # TMP check the input function
       x_inp_batch = jnp.expand_dims(batch.x, axis=0)
       c_inp_batch = None
       t_inp_batch = None
@@ -673,7 +674,8 @@ def train(
         variables={'params': state.params},
         stats=stats,
         inputs=Inputs(
-          u=batch.functions['c'].values[:, [0]],
+          # u=batch.functions['h'].values[:, [0]],  # TMP check the input function
+          u=jnp.concatenate([batch.functions['h'].values, batch.functions['c'].values], axis=-1)[:, [0]],  # TMP check the input function
           c=None,
           x_inp=batch.x,
           x_out=batch.x,
@@ -1126,7 +1128,8 @@ def main(argv):
       )
     else:
       dummy_inputs = Inputs(
-        u=jnp.ones(shape=(FLAGS.batch_size, 1, *dataset.sample.functions['c'].values.shape[2:])),
+        # u=jnp.ones(shape=(FLAGS.batch_size, 1, *dataset.sample.functions['h'].values.shape[2:])),  # TMP check the input function
+        u=jnp.ones(shape=(FLAGS.batch_size, 1, *jnp.concatenate([dataset.sample.functions['h'].values, dataset.sample.functions['c'].values], axis=-1).shape[2:])),  # TMP check the input function
         c=None,
         x_inp=dataset.sample.x,
         x_out=dataset.sample.x,
