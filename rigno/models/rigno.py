@@ -844,6 +844,10 @@ class RIGNO(AbstractOperator):
 
     # Check input functions
     self._check_function(inputs.u, x=inputs.x_inp)
+    self._check_function(inputs.h, x=inputs.x_inp)
+    self._check_function(inputs.m, x=inputs.x_inp)
+    assert inputs.m.dtype == jnp.dtype(bool)
+    assert inputs.m.shape[-1] == inputs.h.shape[-1]
 
     # Read dimensions
     batch_size = inputs.u.shape[0]
@@ -872,7 +876,8 @@ class RIGNO(AbstractOperator):
 
     # Prepare the physical node features
     # u -> [batch_size, num_pnodes_inp, num_inputs]
-    pnode_features = jnp.moveaxis(inputs.u,
+    u_inp = jnp.concatenate([inputs.u, inputs.h, inputs.m.astype(inputs.u.dtype)], axis=-1)  # TODO: Use the masks more wisely
+    pnode_features = jnp.moveaxis(u_inp,
       source=(0, 1, 2, 3), destination=(0, 3, 1, 2)
     ).squeeze(axis=3)
 

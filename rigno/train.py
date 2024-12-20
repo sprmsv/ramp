@@ -209,6 +209,10 @@ def train(
       mean=jnp.concatenate([_stats[key].mean for key in dataset.metadata.inp], axis=-1),
       std=jnp.concatenate([_stats[key].std for key in dataset.metadata.inp], axis=-1),
     ),
+    'seg': Stats(
+      mean=jnp.concatenate([_stats[key].mean for key in dataset.metadata.seg], axis=-1),
+      std=jnp.concatenate([_stats[key].std for key in dataset.metadata.seg], axis=-1),
+    ),
     'out': Stats(
       mean=jnp.concatenate([_stats[key].mean for key in dataset.metadata.out], axis=-1),
       std=jnp.concatenate([_stats[key].std for key in dataset.metadata.out], axis=-1),
@@ -241,6 +245,8 @@ def train(
       key: flax.typing.PRNGKey,
       state: TrainState,
       u_inp: Array,
+      h_inp: Array,
+      m_inp: Array,
       x_inp: Array,
       t_inp: Array,
       tau: Array,
@@ -253,6 +259,8 @@ def train(
         key: flax.typing.PRNGKey,
         params: flax.typing.Collection,
         u_inp: Array,
+        h_inp: Array,
+        m_inp: Array,
         x_inp: Array,
         t_inp: Array,
         tau: Array,
@@ -266,6 +274,8 @@ def train(
         def _compute_loss(
           params: flax.typing.Collection,
           u_inp: Array,
+          h_inp: Array,
+          m_inp: Array,
           x_inp: Array,
           t_inp: Array,
           tau: Array,
@@ -281,6 +291,8 @@ def train(
           key, subkey = jax.random.split(key)
           inputs = Inputs(
             u=u_inp,
+            h=h_inp,
+            m=m_inp,
             x_inp=x_inp,
             x_out=x_out,
             t=t_inp,
@@ -326,6 +338,8 @@ def train(
           key, subkey = jax.random.split(key)
           inputs = Inputs(
             u=u_inp,
+            h=h_inp,
+            m=m_inp,
             x_inp=x_inp,
             x_out=x_out,
             t=t_inp,
@@ -338,11 +352,15 @@ def train(
             graphs=graph_builder.build_graphs(batch.g),
             key=subkey,
           )
+          h_int = h_inp  # NOTE: Assuming fix h in time
+          m_int = m_inp  # NOTE: Assuming fix h in time
           x_int = x_inp  # TODO: Support variable x
           t_int = t_inp + tau_inf
           tau_trn = tau - tau_inf
         else:
           u_int = u_inp
+          h_int = h_inp
+          m_int = m_inp
           x_int = x_inp  # TODO: Support variable x
           t_int = t_inp
           tau_trn = tau
@@ -350,7 +368,7 @@ def train(
         # Compute gradients
         key, subkey = jax.random.split(key)
         loss, grads = jax.value_and_grad(_compute_loss)(
-          params, u_int, x_int, t_int, tau_trn, u_tgt, x_out, key=subkey)
+          params, u_int, h_int, m_int, x_int, t_int, tau_trn, u_tgt, x_out, key=subkey)
 
         return loss, grads
 
@@ -359,6 +377,8 @@ def train(
         key=key,
         params=state.params,
         u_inp=u_inp,
+        h_inp=h_inp,
+        m_inp=m_inp,
         x_inp=x_inp,
         t_inp=t_inp,
         tau=tau,
@@ -474,6 +494,8 @@ def train(
       # Prepare time-independent input-output pairs
       # -> [1, batch_size_per_device, ...]
       u_inp_batch = jnp.concatenate([batch.functions[key].values[None] for key in dataset.metadata.inp], axis=-1)
+      h_inp_batch = jnp.concatenate([batch.functions[key].values[None] for key in dataset.metadata.seg], axis=-1)
+      m_inp_batch = jnp.concatenate([jnp.tile(batch.functions[key].mask[None, ..., None], reps=(1, 1, 1, batch.functions[key].values.shape[-1])) for key in dataset.metadata.seg], axis=-1)
       x_inp_batch = batch.x[None]
       c_inp_batch = None
       t_inp_batch = None
@@ -490,6 +512,8 @@ def train(
         key=_subkey,
         state=_state,
         u_inp=u_inp_batch[i],
+        h_inp=h_inp_batch[i],
+        m_inp=m_inp_batch[i],
         x_inp=x_inp_batch[i],
         t_inp=(t_inp_batch[i] if (t_inp_batch is not None) else None),
         tau=(tau_batch[i] if (tau_batch is not None) else None),
@@ -691,6 +715,8 @@ def train(
         stats=stats,
         inputs=Inputs(
           u=jnp.concatenate([batch.functions[key].values for key in dataset.metadata.inp], axis=-1)[:, [0]],
+          h=jnp.concatenate([batch.functions[key].values for key in dataset.metadata.seg], axis=-1)[:, [0]],
+          m=jnp.concatenate([jnp.tile(batch.functions[key].mask[..., None], reps=(1, 1, 1, batch.functions[key].values.shape[-1])) for key in dataset.metadata.seg], axis=-1)[:, [0]],
           x_inp=batch.x,
           x_out=batch.x,
           t=None,
@@ -1143,6 +1169,8 @@ def main(argv):
     else:
       dummy_inputs = Inputs(
         u=jnp.ones(shape=(FLAGS.batch_size, 1, dataset.metadata.shape[2], sum([dataset.sample.functions[key].values.shape[-1] for key in dataset.metadata.inp]))),
+        h=jnp.ones(shape=(FLAGS.batch_size, 1, dataset.metadata.shape[2], sum([dataset.sample.functions[key].values.shape[-1] for key in dataset.metadata.seg]))),
+        m=jnp.ones(shape=(FLAGS.batch_size, 1, dataset.metadata.shape[2], sum([dataset.sample.functions[key].values.shape[-1] for key in dataset.metadata.seg])), dtype=bool),
         x_inp=dataset.sample.x,
         x_out=dataset.sample.x,
         t=None,

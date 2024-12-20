@@ -16,6 +16,7 @@ class Stepper(ABC):
 
   def normalize_inputs(self, stats: Mapping[str, Stats], inputs: Inputs) -> Inputs:
     u_nrm = normalize(inputs.u, shift=stats['inp'].mean, scale=stats['inp'].std)
+    h_nrm = normalize(inputs.h, shift=stats['seg'].mean, scale=stats['seg'].std)
     x_inp_nrm = 2 * ((inputs.x_inp - stats['x'].min) / (stats['x'].max - stats['x'].min)) - 1
     x_out_nrm = 2 * ((inputs.x_out - stats['x'].min) / (stats['x'].max - stats['x'].min)) - 1
     if inputs.t is None:
@@ -29,6 +30,8 @@ class Stepper(ABC):
 
     inputs_nrm = Inputs(
       u=u_nrm,
+      h=h_nrm,
+      m=inputs.m,  # NOTE: Binary masks are not normalized
       x_inp=x_inp_nrm,
       x_out=x_out_nrm,
       t=t_nrm,

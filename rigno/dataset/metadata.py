@@ -43,6 +43,7 @@ class Metadata:
   bbox_t: Tuple[float, float]
   functions: Mapping[str, ArrayGroup]
   inp: Sequence[str]
+  seg: Sequence[str]
   out: Sequence[str]
 
 DATASET_METADATA = {
@@ -73,7 +74,8 @@ DATASET_METADATA = {
         x_indices='boundaries/dirichlet/indices',
       ),
     },
-    inp=['c', 'h'],
+    inp=['c'],
+    seg=['h'],
     out=['u'],
   ),
   'poisson-circle-bc2': Metadata(
@@ -104,7 +106,8 @@ DATASET_METADATA = {
         x_indices='boundaries/robin/indices',
       ),
     },
-    inp=['c', 'h'],
+    inp=['c'],
+    seg=['h'],
     out=['u'],
   ),
   'poisson-circle-bc3': Metadata(
@@ -141,7 +144,8 @@ DATASET_METADATA = {
         x_indices='boundaries/robin/indices',
       ),
     },
-    inp=['c', 'h_d', 'h_r'],
+    inp=['c'],
+    seg=['h_d', 'h_r'],
     out=['u'],
   ),
 }
