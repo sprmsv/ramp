@@ -194,13 +194,34 @@ def train(
 
   # Set the normalization statistics
   if FLAGS.stepper == 'out':
-    stats = dataset.stats
+    _stats = dataset.stats
   elif FLAGS.stepper == 'der':
-    stats = dataset.stats_der
+    _stats = dataset.stats_der
   elif FLAGS.stepper == 'res':
-    stats = dataset.stats_res
+    _stats = dataset.stats_res
   else:
     raise ValueError(f'Stepper "{FLAGS.stepper}" is not recognized.')
+  # Build input and output variable statistics
+  stats = {
+    'x': _stats['x'],
+    't': _stats['t'],
+    'inp': Stats(
+      mean=jnp.concatenate([_stats[key].mean for key in dataset.metadata.inp], axis=-1),
+      std=jnp.concatenate([_stats[key].std for key in dataset.metadata.inp], axis=-1),
+    ),
+    'out': Stats(
+      mean=jnp.concatenate([_stats[key].mean for key in dataset.metadata.out], axis=-1),
+      std=jnp.concatenate([_stats[key].std for key in dataset.metadata.out], axis=-1),
+    ),
+  }
+  # Add output statistics to the input statistics
+  # NOTE: For time-dependent problems, the solution
+  # at the previous time is concatenated to the inputs
+  if dataset.time_dependent:
+    stats['inp'] = Stats(
+      mean=jnp.concatenate([stats['inp'].mean, stats['out'].mean], axis=-1),
+      std=jnp.concatenate([stats['inp'].std, stats['out'].std], axis=-1),
+    )
 
   # Replicate state, stats, and graphs
   # NOTE: Internally uses jax.device_put_replicate
@@ -220,7 +241,6 @@ def train(
       key: flax.typing.PRNGKey,
       state: TrainState,
       u_inp: Array,
-      c_inp: Array,
       x_inp: Array,
       t_inp: Array,
       tau: Array,
@@ -233,7 +253,6 @@ def train(
         key: flax.typing.PRNGKey,
         params: flax.typing.Collection,
         u_inp: Array,
-        c_inp: Array,
         x_inp: Array,
         t_inp: Array,
         tau: Array,
@@ -247,7 +266,6 @@ def train(
         def _compute_loss(
           params: flax.typing.Collection,
           u_inp: Array,
-          c_inp: Array,
           x_inp: Array,
           t_inp: Array,
           tau: Array,
@@ -263,7 +281,6 @@ def train(
           key, subkey = jax.random.split(key)
           inputs = Inputs(
             u=u_inp,
-            c=c_inp,
             x_inp=x_inp,
             x_out=x_out,
             t=t_inp,
@@ -309,7 +326,6 @@ def train(
           key, subkey = jax.random.split(key)
           inputs = Inputs(
             u=u_inp,
-            c=c_inp,
             x_inp=x_inp,
             x_out=x_out,
             t=t_inp,
@@ -322,13 +338,11 @@ def train(
             graphs=graph_builder.build_graphs(batch.g),
             key=subkey,
           )
-          c_int = c_inp  # TODO: Approximate c_int
           x_int = x_inp  # TODO: Support variable x
           t_int = t_inp + tau_inf
           tau_trn = tau - tau_inf
         else:
           u_int = u_inp
-          c_int = c_inp  # TODO: Approximate c_int
           x_int = x_inp  # TODO: Support variable x
           t_int = t_inp
           tau_trn = tau
@@ -336,7 +350,7 @@ def train(
         # Compute gradients
         key, subkey = jax.random.split(key)
         loss, grads = jax.value_and_grad(_compute_loss)(
-          params, u_int, c_int, x_int, t_int, tau_trn, u_tgt, x_out, key=subkey)
+          params, u_int, x_int, t_int, tau_trn, u_tgt, x_out, key=subkey)
 
         return loss, grads
 
@@ -345,7 +359,6 @@ def train(
         key=key,
         params=state.params,
         u_inp=u_inp,
-        c_inp=c_inp,
         x_inp=x_inp,
         t_inp=t_inp,
         tau=tau,
@@ -361,6 +374,11 @@ def train(
       return state, loss, grads
 
     if dataset.time_dependent:
+      # TODO: Use dataset.metadata.out functions for u_out
+      # TODO: Remove c_inp
+      # TODO: Use dataset.metadata.inp functions for u_inp
+      # TODO: Concatenate dataset.metadata.out functions to u_inp
+
       # Index trajectories and times and collect input/output pairs
       # -> [num_lead_times, batch_size_per_device, ...]
       u_inp_batch = jax.vmap(
@@ -455,14 +473,13 @@ def train(
       num_valid_pairs = 1
       # Prepare time-independent input-output pairs
       # -> [1, batch_size_per_device, ...]
-      # u_inp_batch = jnp.expand_dims(batch.functions['h'].values, axis=0)  # TMP check the input function
-      u_inp_batch = jnp.expand_dims(jnp.concatenate([batch.functions['h'].values, batch.functions['c'].values], axis=-1), axis=0)  # TMP check the input function
-      x_inp_batch = jnp.expand_dims(batch.x, axis=0)
+      u_inp_batch = jnp.concatenate([batch.functions[key].values[None] for key in dataset.metadata.inp], axis=-1)
+      x_inp_batch = batch.x[None]
       c_inp_batch = None
       t_inp_batch = None
       tau_batch = None
-      u_tgt_batch = jnp.expand_dims(batch.functions['u'].values, axis=0)
-      x_out_batch = jnp.expand_dims(batch.x, axis=0)
+      u_tgt_batch = jnp.concatenate([batch.functions[key].values[None] for key in dataset.metadata.out], axis=-1)
+      x_out_batch = batch.x[None]
 
     # Add loss and gradients for each subbatch
     def _update_state(i, carry):
@@ -473,7 +490,6 @@ def train(
         key=_subkey,
         state=_state,
         u_inp=u_inp_batch[i],
-        c_inp=(c_inp_batch[i] if (c_inp_batch is not None) else None),
         x_inp=x_inp_batch[i],
         t_inp=(t_inp_batch[i] if (t_inp_batch is not None) else None),
         tau=(tau_batch[i] if (tau_batch is not None) else None),
@@ -669,14 +685,12 @@ def train(
         )
 
     else:
-      u_tgt = batch.functions['u'].values[:, [0]]
+      u_tgt = jnp.concatenate([batch.functions[key].values for key in dataset.metadata.out], axis=-1)[:, [0]]
       u_prd = stepper.apply(
         variables={'params': state.params},
         stats=stats,
         inputs=Inputs(
-          # u=batch.functions['h'].values[:, [0]],  # TMP check the input function
-          u=jnp.concatenate([batch.functions['h'].values, batch.functions['c'].values], axis=-1)[:, [0]],  # TMP check the input function
-          c=None,
+          u=jnp.concatenate([batch.functions[key].values for key in dataset.metadata.inp], axis=-1)[:, [0]],
           x_inp=batch.x,
           x_out=batch.x,
           t=None,
@@ -983,7 +997,7 @@ def get_model(model_configs: Mapping[str, Any], dataset: Dataset) -> AbstractOpe
   # Set model kwargs
   if not model_configs:
     model_configs = dict(
-      num_outputs=dataset.sample.functions['u'].values.shape[-1],
+      num_outputs=sum([dataset.sample.functions[key].values.shape[-1] for key in dataset.metadata.out]),
       processor_steps=FLAGS.processor_steps,
       node_latent_size=FLAGS.node_latent_size,
       edge_latent_size=FLAGS.edge_latent_size,
@@ -1128,9 +1142,7 @@ def main(argv):
       )
     else:
       dummy_inputs = Inputs(
-        # u=jnp.ones(shape=(FLAGS.batch_size, 1, *dataset.sample.functions['h'].values.shape[2:])),  # TMP check the input function
-        u=jnp.ones(shape=(FLAGS.batch_size, 1, *jnp.concatenate([dataset.sample.functions['h'].values, dataset.sample.functions['c'].values], axis=-1).shape[2:])),  # TMP check the input function
-        c=None,
+        u=jnp.ones(shape=(FLAGS.batch_size, 1, dataset.metadata.shape[2], sum([dataset.sample.functions[key].values.shape[-1] for key in dataset.metadata.inp]))),
         x_inp=dataset.sample.x,
         x_out=dataset.sample.x,
         t=None,

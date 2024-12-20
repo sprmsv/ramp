@@ -840,12 +840,10 @@ class RIGNO(AbstractOperator):
     graphs: RegionInteractionGraphSet,
     key: flax.typing.PRNGKey = None,
   ) -> Array:
-    """Inputs must be of shape [batch_size, 1, num_physical_nodes, num_inputs]"""
+    """Inputs must be of shape [batch_size, 1, num_physical_nodes, num_variables]"""
 
     # Check input functions
     self._check_function(inputs.u, x=inputs.x_inp)
-    if inputs.c is not None:
-      self._check_function(inputs.c, x=inputs.x_inp)
 
     # Read dimensions
     batch_size = inputs.u.shape[0]
@@ -860,6 +858,7 @@ class RIGNO(AbstractOperator):
         t_inp = t_inp[:, :, 0, 0]
       if t_inp.size == 1:
         t_inp = jnp.tile(t_inp.reshape(1, 1), reps=(batch_size, 1))
+
     # Prepare the time difference channel
     if self.concatenate_tau:
       assert inputs.tau is not None
@@ -871,15 +870,9 @@ class RIGNO(AbstractOperator):
     else:
       tau = None
 
-    # Concatenate the known coefficients to the channels of the input function
-    if inputs.c is None:
-      u_inp = inputs.u
-    else:
-      u_inp = jnp.concatenate([inputs.u, inputs.c], axis=-1)
-
     # Prepare the physical node features
     # u -> [batch_size, num_pnodes_inp, num_inputs]
-    pnode_features = jnp.moveaxis(u_inp,
+    pnode_features = jnp.moveaxis(inputs.u,
       source=(0, 1, 2, 3), destination=(0, 3, 1, 2)
     ).squeeze(axis=3)
 
@@ -891,7 +884,7 @@ class RIGNO(AbstractOperator):
       pnode_features_forced.append(jnp.tile(jnp.expand_dims(tau, axis=1), reps=(1, num_pnodes_inp, 1)))
     pnode_features = jnp.concatenate([pnode_features, *pnode_features_forced], axis=-1)
 
-    # Run the GNNs
+    # Pass through the GNNs
     subkey, key = jax.random.split(key) if (key is not None) else (None, None)
     output_pnodes = self._encode_process_decode(
       graphs=graphs, pnode_features=pnode_features, tau=tau, key=subkey)

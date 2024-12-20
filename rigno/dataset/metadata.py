@@ -42,6 +42,8 @@ class Metadata:
   bbox_x: Tuple[Tuple[float, float], Tuple[float, float]]
   bbox_t: Tuple[float, float]
   functions: Mapping[str, ArrayGroup]
+  inp: Sequence[str]
+  out: Sequence[str]
 
 DATASET_METADATA = {
   'poisson-circle-bc1': Metadata(
@@ -68,9 +70,11 @@ DATASET_METADATA = {
         arrays=[
           ArrayMetadata(path='boundaries/dirichlet/g', indices=[0], names=['$g_D$'], signed=[True]),
         ],
-        x_indices='boundaries/dirichlet/indices'
+        x_indices='boundaries/dirichlet/indices',
       ),
-    }
+    },
+    inp=['c', 'h'],
+    out=['u'],
   ),
   'poisson-circle-bc2': Metadata(
     periodic=False,
@@ -97,9 +101,11 @@ DATASET_METADATA = {
           ArrayMetadata(path='boundaries/robin/g', indices=[0], names=['$g_B$'], signed=[True]),
           ArrayMetadata(path='boundaries/robin/alpha', indices=[0], names=['$\\alpha_R$'], signed=[True]),
         ],
-        x_indices='boundaries/robin/indices'
+        x_indices='boundaries/robin/indices',
       ),
-    }
+    },
+    inp=['c', 'h'],
+    out=['u'],
   ),
   'poisson-circle-bc3': Metadata(
     periodic=False,
@@ -132,8 +138,10 @@ DATASET_METADATA = {
           ArrayMetadata(path='boundaries/robin/g', indices=[0], names=['$g_B$'], signed=[True]),
           ArrayMetadata(path='boundaries/robin/alpha', indices=[0], names=['$\\alpha_R$'], signed=[True]),
         ],
-        x_indices='boundaries/robin/indices'
+        x_indices='boundaries/robin/indices',
       ),
-    }
+    },
+    inp=['c', 'h_d', 'h_r'],
+    out=['u'],
   ),
 }

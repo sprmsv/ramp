@@ -15,14 +15,7 @@ class Stepper(ABC):
     self._apply_operator = operator.apply
 
   def normalize_inputs(self, stats: Mapping[str, Stats], inputs: Inputs) -> Inputs:
-
-    # TMP TODO: CHECK: For time-independent datasets, it reads the wrong field 'u' !
-    # TMP TODO: Normalize boundary functions as well
-    u_nrm = normalize(inputs.u, shift=stats['u'].mean, scale=stats['u'].std)
-    if inputs.c is None:
-      c_nrm = None
-    else:
-      c_nrm = normalize(inputs.c, shift=stats['c'].mean, scale=stats['c'].std)
+    u_nrm = normalize(inputs.u, shift=stats['inp'].mean, scale=stats['inp'].std)
     x_inp_nrm = 2 * ((inputs.x_inp - stats['x'].min) / (stats['x'].max - stats['x'].min)) - 1
     x_out_nrm = 2 * ((inputs.x_out - stats['x'].min) / (stats['x'].max - stats['x'].min)) - 1
     if inputs.t is None:
@@ -32,11 +25,10 @@ class Stepper(ABC):
     if inputs.tau is None:
       tau_nrm = None
     else:
-      tau_nrm = (inputs.tau) / (stats['t'].max - stats['t']['min'])
+      tau_nrm = (inputs.tau) / (stats['t'].max - stats['t'].min)
 
     inputs_nrm = Inputs(
       u=u_nrm,
-      c=c_nrm,
       x_inp=x_inp_nrm,
       x_out=x_out_nrm,
       t=t_nrm,
@@ -307,8 +299,8 @@ class OutputStepper(Stepper):
     # Unnormalize predicted output
     u_prd = unnormalize(
       u_prd_nrm,
-      mean=stats['u'].mean,
-      std=stats['u'].std,
+      mean=stats['out'].mean,
+      std=stats['out'].std,
     )
 
     return u_prd
@@ -340,8 +332,8 @@ class OutputStepper(Stepper):
     # Get target normalized output
     u_tgt_nrm = normalize(
       u_tgt,
-      shift=stats['u'].mean,
-      scale=stats['u'].std,
+      shift=stats['out'].mean,
+      scale=stats['out'].std,
     )
 
     return (u_tgt_nrm, u_prd_nrm)

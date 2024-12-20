@@ -7,7 +7,6 @@ from rigno.utils import Array
 
 class Inputs(NamedTuple):
   u: Array
-  c: Union[Array, None]
   x_inp: Array
   x_out: Array
   t: Union[Array, float, None]
