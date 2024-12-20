@@ -124,8 +124,8 @@ class Dataset:
       mask = batch.functions[key].mask
       values = batch.functions[key].values
       self.stats[key] = Stats(
-        mean=np.mean(values[:, :, np.where(mask)[2], :], axis=(0, 1, 2), keepdims=True),
-        std=np.std(values[:, :, np.where(mask)[2], :], axis=(0, 1, 2), keepdims=True),
+        mean=np.mean(values[np.where(mask)], axis=0).reshape(1, 1, 1, -1),
+        std=np.std(values[np.where(mask)], axis=0).reshape(1, 1, 1, -1),
       )
 
     # Compute statistics of the residuals and time derivatives
@@ -144,12 +144,12 @@ class Dataset:
         residuals = np.concatenate(residuals, axis=1)
         derivatives = np.concatenate(derivatives, axis=1)
         self.stats_res[key] = Stats(
-          mean=np.mean(residuals[:, :, np.where(mask)[2], :], axis=(0, 1, 2), keepdims=True),
-          std=np.std(residuals[:, :, np.where(mask)[2], :], axis=(0, 1, 2), keepdims=True),
+          mean=np.mean(residuals[np.where(mask)], axis=0).reshape(1, 1, 1, -1),
+          std=np.std(residuals[np.where(mask)], axis=0).reshape(1, 1, 1, -1),
         )
         self.stats_der[key] = Stats(
-          mean=np.mean(derivatives[:, :, np.where(mask)[2], :], axis=(0, 1, 2), keepdims=True),
-          std=np.std(derivatives[:, :, np.where(mask)[2], :], axis=(0, 1, 2), keepdims=True),
+          mean=np.mean(derivatives[np.where(mask)], axis=0).reshape(1, 1, 1, -1),
+          std=np.std(derivatives[np.where(mask)], axis=0).reshape(1, 1, 1, -1),
         )
 
   def build_graphs(self, builder: RegionInteractionGraphBuilder, rmesh_correction_dsf: int = 1, key: PRNGKey = None) -> None:

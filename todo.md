@@ -1,21 +1,7 @@
-# Project Updates
+# TODOs
 
-- Per-receiver edge features:
-    - Replace segment_sum with axis_sum by using masks and padding the edge features
-    - The inference time was even longer
-        - Computational overhead
-        - Memory overhead
-    - Conclusion: the computational bottleneck is sender/receiver feature concatenation
-        when computing the messages
-
-- Limitations
-    - Speed
-        - Message passing
-        - Graph building overhead
-    - Graph construction for non-periodic BC
-        - Needs better methods
-    - Imposing boundary conditions
-        - Can improve performance a lot
+- Compute loss on the validation set too
+- Do a mini validation more often and use it for best_fn
 
 # Future work
 
@@ -33,11 +19,6 @@
 - Inspect uncertainty with different tau
 - Inspect uncertainty with extrapolation
 
-
-## General Boundary Conditions
-- Extend for general boundary conditions (e.g., open, Robin)
-- Impose Dirichlet boundary conditions differently
-
 ## Thorough study on the time stepping strategies
 
 - A more general approach using the SOTA neural operators
@@ -52,7 +33,6 @@
     - Fine-tuning or from scratch?
     - Warm-up when fine-tuning?
     - Try to assure robustness
-
 
 ## Variable known parameters
 
