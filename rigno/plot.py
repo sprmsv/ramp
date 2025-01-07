@@ -128,6 +128,11 @@ def plot_trajectory(u, x, t, idx_t, idx_s=0, symmetric=True, ylabels=None, domai
 
 def plot_estimates(u_inp, u_gtr, u_prd, x_inp, x_out, symmetric=True, names=None, domain=([0, 0], [1, 1])):
 
+  # TODO: Don't plot the inputs for time-independent datasts
+  # NOTE: Input is only relevant for time-dependent datasets because it's the initial condition
+
+  # TODO: Plot the boundary conditions
+
   _HEIGHT_PER_ROW = 1.9
   _HEIGHT_MARGIN = .2
   _SCATTER_SETTINGS = SCATTER_SETTINGS.copy()

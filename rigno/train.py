@@ -948,6 +948,7 @@ def train(
         step = epochs_before + epoch
         checkpoint_metrics = {
           'step': step,
+          'grad': grad.item(),
           'loss': loss.item(),
           'lr': lr,
           'train': metrics_trn.to_dict(),
@@ -966,7 +967,7 @@ def train(
         # Plot the history of the metrics
         metrics_to_plot = {
           'optimization': (
-            {'label': 'Training loss', 'values': lambda m: m['loss']},
+            {'label': 'Training gradients', 'values': lambda m: m['grad']},
             {'label': 'Training loss', 'values': lambda m: m['loss']},
           ),
           'final': (
