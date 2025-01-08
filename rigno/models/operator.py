@@ -6,9 +6,9 @@ from rigno.utils import Array
 
 
 class Inputs(NamedTuple):
-  u: Array  # TMP This will be the full-domain functions
-  h: Array  # TMP TODO: This will be the segment function values, accomponied by a mask
-  m: Array  # TMP TODO: Use this as binary function masks, make sure to not normalize at all
+  u: Array  # Contains the full-domain functions
+  h: Array  # Contains the segment function values, accomponied by a mask
+  m: Array  # Binary function masks, make sure to not normalize at all
   x_inp: Array
   x_out: Array
   t: Union[Array, float, None]

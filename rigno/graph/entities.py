@@ -19,6 +19,7 @@ class EdgesIndices(NamedTuple):
   """Represents indices to nodes adjacent to the edges."""
   senders: ArrayLike  # [bsz, n_edge]
   receivers: ArrayLike  # [bsz, n_edge]
+  mask: ArrayLike  # [bsz, n_edge]
 
 class EdgeSet(NamedTuple):
   """Represents a set of edges."""

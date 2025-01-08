@@ -34,7 +34,7 @@ import jraph
 
 from rigno.graph.entities import TypedGraph
 from rigno.graph.networks import GraphMapFeatures, InteractionNetwork
-from rigno.models.utils import AugmentedMLP
+from rigno.models.utils import AugmentedMLP, masked_segment_mean
 
 
 class DeepTypedGraphNet(nn.Module):
@@ -106,7 +106,7 @@ class DeepTypedGraphNet(nn.Module):
   cond_norm_hidden_size: int = 16
   activation: str = 'swish'
   f32_aggregation: bool = False
-  aggregate_edges_for_nodes_fn: Callable = jraph.segment_mean
+  aggregate_edges_for_nodes_fn: Callable = masked_segment_mean
 
   def setup(self):
     self._activation = _get_activation_fn(self.activation)

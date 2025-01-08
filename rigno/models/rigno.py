@@ -14,6 +14,7 @@ from rigno.graph.entities import (
 from rigno.models.graphnet import DeepTypedGraphNet
 from rigno.models.operator import AbstractOperator, Inputs
 from rigno.utils import Array, shuffle_arrays
+from rigno.models.utils import masked_segment_mean
 
 
 class RegionInteractionGraphSet(NamedTuple):
@@ -329,6 +330,7 @@ class RegionInteractionGraphBuilder:
       indices=EdgesIndices(
         senders=idx_sen,
         receivers=idx_rec,
+        mask=jnp.ones(shape=(batch_size, num_edg), dtype=bool),
       ),
       features=edge_feats,
     )
@@ -442,7 +444,7 @@ class Encoder(nn.Module):
     self.gnn = DeepTypedGraphNet(
       embed_nodes=True,  # Embed raw features of all nodes
       embed_edges=True,  # Embed raw features of the edges
-      edge_latent_size=dict(p2r=self.edge_latent_size),
+      edge_latent_size=dict(p2r=self.edge_latent_size, b2r=self.edge_latent_size),
       node_latent_size=dict(rnodes=self.node_latent_size, pnodes=self.node_latent_size),
       mlp_num_hidden_layers=self.mlp_hidden_layers,
       num_message_passing_steps=1,
@@ -452,12 +454,14 @@ class Encoder(nn.Module):
       include_sent_messages_in_node_update=False,
       activation='swish',
       f32_aggregation=True,
-      aggregate_edges_for_nodes_fn=jraph.segment_mean,
+      aggregate_edges_for_nodes_fn=masked_segment_mean,
     )
 
   def __call__(self,
     graph: TypedGraph,
     pnode_features: Array,
+    bnode_mask: Array,
+    bnode_features: Array,
     tau: Union[None, float],
     key: Union[flax.typing.PRNGKey, None] = None,
   ) -> tuple[Array, Array]:
@@ -468,9 +472,13 @@ class Encoder(nn.Module):
 
     # Concatenate node structural features with input features
     pnodes = graph.nodes['pnodes']
+    bnodes = graph.nodes['pnodes']
     rnodes = graph.nodes['rnodes']
     new_pnodes = pnodes._replace(
       features=jnp.concatenate([pnode_features, pnodes.features], axis=-1)
+    )
+    new_bnodes = bnodes._replace(
+      features=jnp.concatenate([bnode_features, bnodes.features], axis=-1)
     )
     # CHECK: Is this necessary?
     # To make sure capacity of the embedded is identical for the physical nodes and
@@ -489,16 +497,18 @@ class Encoder(nn.Module):
     # Drop out edges randomly with the given probability
     if key is not None:
       n_edges_after = int((1 - self.p_edge_masking) * edges.features.shape[1])
-      [new_edge_features, new_edge_senders, new_edge_receivers] = shuffle_arrays(
-        key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers], axis=1)
+      [new_edge_features, new_edge_senders, new_edge_receivers, new_edge_mask] = shuffle_arrays(
+        key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers, edges.indices.mask], axis=1)
       new_edge_features = new_edge_features[:, :n_edges_after]
       new_edge_senders = new_edge_senders[:, :n_edges_after]
       new_edge_receivers = new_edge_receivers[:, :n_edges_after]
+      new_edge_mask = new_edge_mask[:, :n_edges_after]
     else:
       n_edges_after = edges.features.shape[1]
       new_edge_features = edges.features
       new_edge_senders = edges.indices.senders
       new_edge_receivers = edges.indices.receivers
+      new_edge_mask = edges.indices.mask
     # Change edge feature dtype
     new_edge_features = new_edge_features.astype(dummy_rnode_features.dtype)
     # Build new edge set
@@ -507,15 +517,31 @@ class Encoder(nn.Module):
       indices=EdgesIndices(
         senders=new_edge_senders,
         receivers=new_edge_receivers,
+        mask=new_edge_mask,
+      ),
+      features=new_edge_features,
+    )
+
+    # Duplicate the edges with a new type (b2r) and use the boundary nodes mask
+    # TMP Make sure to check the shape of the mask for multiple functions !!!
+    # TMP Create multiple b2r types !!
+    b2r_edge_key = EdgeSetKey(name='b2r', node_sets=('bnodes', 'rnodes'))
+    b2r_edges = EdgeSet(
+      n_edge=jnp.tile(jnp.array([n_edges_after]), reps=(batch_size, 1)),
+      indices=EdgesIndices(
+        senders=new_edge_senders,
+        receivers=new_edge_receivers,
+        mask=jax.vmap(lambda m, a: m[a])(bnode_mask[..., 0], new_edge_senders),
       ),
       features=new_edge_features,
     )
 
     input_graph = graph._replace(
-      edges={p2r_edges_key: new_edges},
+      edges={p2r_edges_key: new_edges, b2r_edge_key: b2r_edges},
       nodes={
         'pnodes': new_pnodes,
-        'rnodes': new_rnodes
+        'bnodes': new_bnodes,
+        'rnodes': new_rnodes,
       })
 
     # Run the GNN
@@ -550,7 +576,7 @@ class Processor(nn.Module):
       activation='swish',
       f32_aggregation=False,
       # NOTE: segment_mean because number of edges is not balanced
-      aggregate_edges_for_nodes_fn=jraph.segment_mean,
+      aggregate_edges_for_nodes_fn=masked_segment_mean,
     )
 
   def __call__(self,
@@ -582,16 +608,18 @@ class Processor(nn.Module):
     # time we are seeing this particular set of edges.
     if key is not None:
       n_edges_after = int((1 - self.p_edge_masking) * edges.features.shape[1])
-      [new_edge_features, new_edge_senders, new_edge_receivers] = shuffle_arrays(
-        key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers], axis=1)
+      [new_edge_features, new_edge_senders, new_edge_receivers, new_edge_mask] = shuffle_arrays(
+        key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers, edges.indices.mask], axis=1)
       new_edge_features = new_edge_features[:, :n_edges_after]
       new_edge_senders = new_edge_senders[:, :n_edges_after]
       new_edge_receivers = new_edge_receivers[:, :n_edges_after]
+      new_edge_mask = new_edge_mask[:, :n_edges_after]
     else:
       n_edges_after = edges.features.shape[1]
       new_edge_features = edges.features
       new_edge_senders = edges.indices.senders
       new_edge_receivers = edges.indices.receivers
+      new_edge_mask = edges.indices.mask
     # Change edge feature dtype
     new_edge_features = new_edge_features.astype(rnode_features.dtype)
     # Build new edge set
@@ -600,6 +628,7 @@ class Processor(nn.Module):
       indices=EdgesIndices(
         senders=new_edge_senders,
         receivers=new_edge_receivers,
+        mask=new_edge_mask,
       ),
       features=new_edge_features,
     )
@@ -646,7 +675,7 @@ class Decoder(nn.Module):
     activation='swish',
     f32_aggregation=False,
     # NOTE: segment_mean because number of edges is not balanced
-    aggregate_edges_for_nodes_fn=jraph.segment_mean,
+    aggregate_edges_for_nodes_fn=masked_segment_mean,
   )
 
   def __call__(self,
@@ -680,16 +709,18 @@ class Decoder(nn.Module):
     # Drop out edges randomly with the given probability
     if key is not None:
       n_edges_after = int((1 - self.p_edge_masking) * edges.features.shape[1])
-      [new_edge_features, new_edge_senders, new_edge_receivers] = shuffle_arrays(
-        key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers], axis=1)
+      [new_edge_features, new_edge_senders, new_edge_receivers, new_edge_mask] = shuffle_arrays(
+        key=key, arrays=[edges.features, edges.indices.senders, edges.indices.receivers, edges.indices.mask], axis=1)
       new_edge_features = new_edge_features[:, :n_edges_after]
       new_edge_senders = new_edge_senders[:, :n_edges_after]
       new_edge_receivers = new_edge_receivers[:, :n_edges_after]
+      new_edge_mask = new_edge_mask[:, :n_edges_after]
     else:
       n_edges_after = edges.features.shape[1]
       new_edge_features = edges.features
       new_edge_senders = edges.indices.senders
       new_edge_receivers = edges.indices.receivers
+      new_edge_mask = edges.indices.mask
     # Change edge feature dtype
     new_edge_features = new_edge_features.astype(pnode_features.dtype)
     # Build new edge set
@@ -698,6 +729,7 @@ class Decoder(nn.Module):
       indices=EdgesIndices(
         senders=new_edge_senders,
         receivers=new_edge_receivers,
+        mask=new_edge_mask,
       ),
       features=new_edge_features,
     )
@@ -791,18 +823,24 @@ class RIGNO(AbstractOperator):
   def _encode_process_decode(self,
     graphs: RegionInteractionGraphSet,
     pnode_features: Array,
+    bnode_mask: Array,
+    bnode_features: Array,
     tau: Union[None, float],
     key: flax.typing.PRNGKey = None,
   ) -> Array:
 
     # Add dummy node features
     dummy_pnode_features = jnp.zeros(shape=(pnode_features.shape[0], 1, pnode_features.shape[2]))
+    dummy_bnode_features = jnp.zeros(shape=(bnode_features.shape[0], 1, bnode_features.shape[2]))
+    dummy_bnode_mask = jnp.zeros(shape=(bnode_mask.shape[0], 1, bnode_mask.shape[2])).astype(bnode_mask.dtype)
     pnode_features = jnp.concatenate([pnode_features, dummy_pnode_features], axis=1)
+    bnode_features = jnp.concatenate([bnode_features, dummy_bnode_features], axis=1)
+    bnode_mask = jnp.concatenate([bnode_mask, dummy_bnode_mask], axis=1)
 
     # Transfer data for the physical mesh to the regional mesh
     # -> [batch_size, num_nodes, latent_size]
     subkey, key = jax.random.split(key) if (key is not None) else (None, None)
-    (latent_rnodes, latent_pnodes) = self.encoder(graphs.p2r, pnode_features, tau, key=subkey)
+    (latent_rnodes, latent_pnodes) = self.encoder(graphs.p2r, pnode_features, bnode_mask, bnode_features, tau, key=subkey)
     self.sow(
       col='intermediates', name='pnodes_encoded',
       value=self._prepare_features(latent_pnodes[:, :-1])
@@ -876,8 +914,13 @@ class RIGNO(AbstractOperator):
 
     # Prepare the physical node features
     # u -> [batch_size, num_pnodes_inp, num_inputs]
-    u_inp = jnp.concatenate([inputs.u, inputs.h, inputs.m.astype(inputs.u.dtype)], axis=-1)  # TODO: Use the masks more wisely
-    pnode_features = jnp.moveaxis(u_inp,
+    pnode_features = jnp.moveaxis(inputs.u,
+      source=(0, 1, 2, 3), destination=(0, 3, 1, 2)
+    ).squeeze(axis=3)
+    bnode_features = jnp.moveaxis(inputs.h,
+      source=(0, 1, 2, 3), destination=(0, 3, 1, 2)
+    ).squeeze(axis=3)
+    bnode_mask = jnp.moveaxis(inputs.m,
       source=(0, 1, 2, 3), destination=(0, 3, 1, 2)
     ).squeeze(axis=3)
 
@@ -892,7 +935,7 @@ class RIGNO(AbstractOperator):
     # Pass through the GNNs
     subkey, key = jax.random.split(key) if (key is not None) else (None, None)
     output_pnodes = self._encode_process_decode(
-      graphs=graphs, pnode_features=pnode_features, tau=tau, key=subkey)
+      graphs=graphs, pnode_features=pnode_features, bnode_mask=bnode_mask, bnode_features=bnode_features, tau=tau, key=subkey)
 
     # Reshape the output to u
     # [batch_size, num_pnodes_out, num_outputs] -> [batch_size, 1, num_pnodes_out, num_outputs]
