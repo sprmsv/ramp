@@ -548,8 +548,9 @@ class Encoder(nn.Module):
     p2r_out = self.gnn(input_graph, condition=tau)
     latent_rnodes = p2r_out.nodes['rnodes'].features
     latent_pnodes = p2r_out.nodes['pnodes'].features
+    latent_bnodes = p2r_out.nodes['bnodes'].features
 
-    return latent_rnodes, latent_pnodes
+    return latent_rnodes, latent_pnodes, latent_bnodes
 
 class Processor(nn.Module):
   steps: int
@@ -582,6 +583,9 @@ class Processor(nn.Module):
   def __call__(self,
     graph: TypedGraph,
     rnode_features: Array,
+    graph_p2r: TypedGraph,
+    bnode_mask: Array,
+    bnode_features: Array,
     tau: Union[None, float],
     key: Union[flax.typing.PRNGKey, None] = None,
   ) -> Array:
@@ -595,6 +599,8 @@ class Processor(nn.Module):
     # already part of  the latent state, via the original p2r gnn.
     rnodes = graph.nodes['rnodes']
     new_rnodes = rnodes._replace(features=rnode_features)
+    bnodes = graph_p2r.nodes['pnodes']
+    new_bnodes = bnodes._replace(features=bnode_features)
 
     # Get edges
     r2r_edges_key = graph.edge_key_by_name('r2r')
@@ -633,10 +639,19 @@ class Processor(nn.Module):
       features=new_edge_features,
     )
 
+    # Get b2r edges
+    p2r_edge_key = graph_p2r.edge_key_by_name('p2r')
+    edges_p2r = graph_p2r.edges[p2r_edge_key]
+    b2r_edge_key = EdgeSetKey(name='b2r', node_sets=('bnodes', 'rnodes'))
+    b2r_mask = jax.vmap(lambda m, a: m[a])(bnode_mask[..., 0], edges_p2r.indices.senders)
+    edges_b2r = edges_p2r._replace(
+      indices=edges_p2r.indices._replace(mask=b2r_mask)
+    )
+
     # Build the graph
     input_graph = graph._replace(
-      edges={r2r_edges_key: new_edges},
-      nodes={'rnodes': new_rnodes},
+      edges={r2r_edges_key: new_edges, b2r_edge_key: edges_b2r},
+      nodes={'rnodes': new_rnodes, 'bnodes': new_bnodes},
     )
 
     # Run the GNN
@@ -840,7 +855,7 @@ class RIGNO(AbstractOperator):
     # Transfer data for the physical mesh to the regional mesh
     # -> [batch_size, num_nodes, latent_size]
     subkey, key = jax.random.split(key) if (key is not None) else (None, None)
-    (latent_rnodes, latent_pnodes) = self.encoder(graphs.p2r, pnode_features, bnode_mask, bnode_features, tau, key=subkey)
+    (latent_rnodes, latent_pnodes, latent_bnodes) = self.encoder(graphs.p2r, pnode_features, bnode_mask, bnode_features, tau, key=subkey)
     self.sow(
       col='intermediates', name='pnodes_encoded',
       value=self._prepare_features(latent_pnodes[:, :-1])
@@ -853,7 +868,7 @@ class RIGNO(AbstractOperator):
     # Run message-passing in the regional mesh
     # -> [batch_size, num_rnodes, latent_size]
     subkey, key = jax.random.split(key) if (key is not None) else (None, None)
-    updated_latent_rnodes = self.processor(graphs.r2r, latent_rnodes, tau, key=subkey)
+    updated_latent_rnodes = self.processor(graphs.r2r, latent_rnodes, graphs.p2r, bnode_mask, latent_bnodes, tau, key=subkey)
     self.sow(
       col='intermediates', name='rnodes_processed',
       value=self._prepare_features(updated_latent_rnodes[:, :-1])
