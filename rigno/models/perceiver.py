@@ -32,7 +32,6 @@ class FeedForward(nn.Module):
         x = nn.Dense(features)(x)
         return x
 
-
 class Attention(nn.Module):
     heads: int = 8
     head_features: int = 64
@@ -44,7 +43,7 @@ class Attention(nn.Module):
         dim = self.head_features * h
 
         q = nn.Dense(dim, use_bias=False)(x)
-        k, v = nn.Dense(dim * 2, use_bias=False)(default(context, x)).split(2, axis=-1)
+        k, v = jnp.split(nn.Dense(dim * 2, use_bias=False)(default(context, x)), 2, axis=-1)
 
         q, k, v = map(
             lambda arr: rearrange(arr, "b n (h d) -> (b h) n d", h=h), (q, k, v)
@@ -69,7 +68,7 @@ class ReZero(nn.Module):
 class Perceiver(nn.Module):
     n_fourier_features: int = 4
     depth: int = 2
-    n_latents: int = 256
+    latent_dim: int = 4
     latent_n_heads: int = 8
     latent_head_features: int = 64
     cross_n_heads: int = 2
@@ -80,15 +79,16 @@ class Perceiver(nn.Module):
     tie_layer_weights = False
 
     @nn.compact
-    def __call__(self, x):
-        bs, dim = x.shape[0], x.shape[-1]
-        latents = self.param(
-            "latents", init.normal(), (self.n_latents, dim * self.ff_mult)
-        )
-        latent = repeat(latents, "n d -> b n d", b=bs)
-
+    def __call__(self, x, latent, train: bool = False):
+        # TODO: Use the 'train' argument for all dropouts
         x = fourier_encode(x, self.n_fourier_features)
         x = rearrange(x, "b n ... -> b n (...)")
+
+        latent = nn.Dense(features=self.ff_mult*self.latent_dim)(latent)
+        latent = nn.gelu(latent)
+        latent = nn.Dropout(self.ff_dropout)(latent, deterministic=(not train))
+        latent = nn.Dense(features=self.latent_dim)(latent)
+        latent = ReZero()(latent)
 
         cross_attn = partial(
             Attention,

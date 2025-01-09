@@ -880,8 +880,13 @@ class RIGNO(AbstractOperator):
     pnode_features = jnp.moveaxis(u_inp,
       source=(0, 1, 2, 3), destination=(0, 3, 1, 2)
     ).squeeze(axis=3)
-    # TMP TODO: Use jnp.where with size argument (hard-coded) and extract x and h for boundary nodes only
+    batched_slice = jax.vmap(lambda f, m: f[jnp.where(m[..., 0], size=1004)[0]])  # TMP NOTE: Using the first mask
+    x_bnd = batched_slice(inputs.x_inp.squeeze(1), inputs.m.squeeze(1))
+    h_bnd = batched_slice(inputs.h.squeeze(1), inputs.m.squeeze(1))
+    x_dmn = inputs.x_inp.squeeze(1)
+    # TODO: Add SDF to the initial latent features
     # TMP TODO: Use x and h in a transformer encoder and project it to a full-domain function
+    # TODO: Expand on the time axis
     # TMP TODO: store the intermediate with jax.sow
     # TMP TODO: concatenate this function with inputs.u
 
