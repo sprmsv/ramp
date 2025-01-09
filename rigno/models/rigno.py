@@ -880,6 +880,10 @@ class RIGNO(AbstractOperator):
     pnode_features = jnp.moveaxis(u_inp,
       source=(0, 1, 2, 3), destination=(0, 3, 1, 2)
     ).squeeze(axis=3)
+    # TMP TODO: Use jnp.where with size argument (hard-coded) and extract x and h for boundary nodes only
+    # TMP TODO: Use x and h in a transformer encoder and project it to a full-domain function
+    # TMP TODO: store the intermediate with jax.sow
+    # TMP TODO: concatenate this function with inputs.u
 
     # Concatente with forced features
     pnode_features_forced = []
