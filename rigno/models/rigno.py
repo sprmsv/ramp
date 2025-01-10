@@ -14,7 +14,7 @@ from rigno.graph.entities import (
 from rigno.models.graphnet import DeepTypedGraphNet
 from rigno.models.operator import AbstractOperator, Inputs
 from rigno.models.transformer import TransformerEncoder
-from rigno.models.perceiver import Perceiver
+from rigno.models.perceiver import BCProjector
 from rigno.utils import Array, shuffle_arrays
 
 
@@ -751,14 +751,11 @@ class RIGNO(AbstractOperator):
     # NOTE: Check usages of this attribute
     self.variable_mesh = False
 
-    self.bcencoder = Perceiver(
-      n_fourier_features=4,
-      depth=16,
-      latent_dim=8,  # TMP Parameterize
-      latent_n_heads=8,
-      latent_head_features=32,
-      cross_n_heads=16,
-      cross_head_features=64,
+    self.bcencoder = BCProjector(
+      depth=2,
+      out_dim=4,  # TMP Parameterize
+      n_heads=2,
+      head_dim=16,
       ff_mult=4,
       attn_dropout=.0,
       ff_dropout=.0,
@@ -896,8 +893,8 @@ class RIGNO(AbstractOperator):
     x_bnd = batched_slice(inputs.x_inp.squeeze(1), inputs.m.squeeze(1))
     h_bnd = batched_slice(inputs.h.squeeze(1), inputs.m.squeeze(1))
     psi = self.bcencoder(
-      x=jnp.concatenate([x_bnd, h_bnd], axis=-1),
-      latent=jnp.concatenate([inputs.x_inp.squeeze(1), inputs.u.squeeze(1)], axis=-1),
+      f_boundary=jnp.concatenate([x_bnd, h_bnd], axis=-1),
+      f_domain=jnp.concatenate([inputs.x_inp.squeeze(1), inputs.u.squeeze(1)], axis=-1),
       train=False,  # TMP
     )
     # TMP TODO: store the intermediate with jax.sow

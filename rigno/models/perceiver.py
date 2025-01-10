@@ -59,67 +59,39 @@ class Attention(nn.Module):
         return out
 
 
-class ReZero(nn.Module):
-    @nn.compact
-    def __call__(self, x):
-        scale = self.param("scale", init.zeros, (1,))
-        return scale * x
+class BCProjector(nn.Module):
+  depth: int = 2
+  out_dim: int = 4
+  n_heads: int = 2
+  head_dim: int = 128
+  ff_mult: int = 4
+  attn_dropout: float = 0.0
+  ff_dropout: float = 0.0
 
+  @nn.compact
+  def __call__(self, f_boundary, f_domain, train: bool = False):
+    # TODO: Use the 'train' argument for all dropouts
+    f_boundary = rearrange(f_boundary, "b n ... -> b n (...)")
+    # x_domain = fourier_encode(x_domain, self.n_fourier_features)  # TRY: Enable this line
 
-class Perceiver(nn.Module):
-    n_fourier_features: int = 4
-    depth: int = 2
-    latent_dim: int = 4
-    latent_n_heads: int = 8
-    latent_head_features: int = 64
-    cross_n_heads: int = 2
-    cross_head_features: int = 128
-    ff_mult: int = 4
-    attn_dropout: float = 0.0
-    ff_dropout: float = 0.0
-    tie_layer_weights = False
+    f_domain = nn.Dense(features=self.ff_mult*self.out_dim)(f_domain)
+    f_domain = nn.gelu(f_domain)
+    f_domain = nn.Dropout(self.ff_dropout)(f_domain, deterministic=(not train))
+    f_domain = nn.Dense(features=self.out_dim)(f_domain)
+    f_domain = nn.LayerNorm()(f_domain)
 
-    @nn.compact
-    def __call__(self, x, latent, train: bool = False):
-        # TODO: Use the 'train' argument for all dropouts
-        x = fourier_encode(x, self.n_fourier_features)
-        x = rearrange(x, "b n ... -> b n (...)")
+    cross_attn = partial(
+        Attention,
+        heads=self.n_heads,
+        head_features=self.head_dim,
+        dropout=self.attn_dropout,
+    )
+    ff = partial(FeedForward, mult=self.ff_mult, dropout=self.ff_dropout)
 
-        latent = nn.Dense(features=self.ff_mult*self.latent_dim)(latent)
-        latent = nn.gelu(latent)
-        latent = nn.Dropout(self.ff_dropout)(latent, deterministic=(not train))
-        latent = nn.Dense(features=self.latent_dim)(latent)
-        latent = ReZero()(latent)
+    for i in range(self.depth):
+      f_domain += cross_attn(name=f"cross_attn_{i}")(f_domain, f_boundary)
+      f_domain = nn.LayerNorm()(f_domain)
+      f_domain += ff(name=f"cross_ff_{i}")(f_domain)
+      f_domain = nn.LayerNorm()(f_domain)
 
-        cross_attn = partial(
-            Attention,
-            heads=self.cross_n_heads,
-            head_features=self.cross_head_features,
-            dropout=self.attn_dropout,
-        )
-        latent_attn = partial(
-            Attention,
-            heads=self.latent_n_heads,
-            head_features=self.latent_head_features,
-            dropout=self.attn_dropout,
-        )
-        ff = partial(FeedForward, mult=self.ff_mult, dropout=self.ff_dropout)
-        if self.tie_layer_weights:
-            ca = cross_attn(name="cross_attn")
-            la = latent_attn(name="latent_attn")
-            cf = ff(name="cross_ff")
-            lf = ff(name="latent_ff")
-            for i in range(self.depth):
-                rz = ReZero(name=f"rezero_{i}")
-                latent += rz(ca(latent, x))
-                latent += rz(cf(latent))
-                latent += rz(la(latent))
-                latent += rz(lf(latent))
-        else:
-            for i in range(self.depth):
-                rz = ReZero(name=f"rezero_{i}")
-                latent += rz(cross_attn(name=f"cross_attn_{i}")(latent, x))
-                latent += rz(ff(name=f"cross_ff_{i}")(latent))
-                latent += rz(latent_attn(name=f"latent_attn_{i}")(latent))
-                latent += rz(ff(name=f"latent_ff_{i}")(latent))
-        return latent
+    return f_domain
