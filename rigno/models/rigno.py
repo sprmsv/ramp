@@ -754,6 +754,7 @@ class RIGNO(AbstractOperator):
     self.bcencoder = BCProjector(
       depth=2,
       out_dim=4,  # TMP Parameterize
+      latent_dim=16,
       n_heads=2,
       head_dim=16,
       ff_mult=4,
