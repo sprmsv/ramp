@@ -13,6 +13,8 @@ from rigno.graph.entities import (
     EdgesIndices, NodeSet, Context)
 from rigno.models.graphnet import DeepTypedGraphNet
 from rigno.models.operator import AbstractOperator, Inputs
+from rigno.models.transformer import TransformerEncoder
+from rigno.models.perceiver import Perceiver
 from rigno.utils import Array, shuffle_arrays
 
 
@@ -749,6 +751,20 @@ class RIGNO(AbstractOperator):
     # NOTE: Check usages of this attribute
     self.variable_mesh = False
 
+    self.bcencoder = Perceiver(
+      n_fourier_features=4,
+      depth=16,
+      latent_dim=8,  # TMP Parameterize
+      latent_n_heads=8,
+      latent_head_features=32,
+      cross_n_heads=16,
+      cross_head_features=64,
+      ff_mult=4,
+      attn_dropout=.0,
+      ff_dropout=.0,
+      name='bcencoder',
+    )
+
     self.encoder = Encoder(
       edge_latent_size=self.edge_latent_size,
       node_latent_size=self.node_latent_size,
@@ -876,19 +892,16 @@ class RIGNO(AbstractOperator):
 
     # Prepare the physical node features
     # u -> [batch_size, num_pnodes_inp, num_inputs]
-    u_inp = jnp.concatenate([inputs.u, inputs.h, inputs.m.astype(inputs.u.dtype)], axis=-1)  # TODO: Use the masks more wisely
-    pnode_features = jnp.moveaxis(u_inp,
-      source=(0, 1, 2, 3), destination=(0, 3, 1, 2)
-    ).squeeze(axis=3)
     batched_slice = jax.vmap(lambda f, m: f[jnp.where(m[..., 0], size=1004)[0]])  # TMP NOTE: Using the first mask
     x_bnd = batched_slice(inputs.x_inp.squeeze(1), inputs.m.squeeze(1))
     h_bnd = batched_slice(inputs.h.squeeze(1), inputs.m.squeeze(1))
-    x_dmn = inputs.x_inp.squeeze(1)
-    # TODO: Add SDF to the initial latent features
-    # TMP TODO: Use x and h in a transformer encoder and project it to a full-domain function
-    # TODO: Expand on the time axis
+    psi = self.bcencoder(
+      x=jnp.concatenate([x_bnd, h_bnd], axis=-1),
+      latent=jnp.concatenate([inputs.x_inp.squeeze(1), inputs.u.squeeze(1)], axis=-1),
+      train=False,  # TMP
+    )
     # TMP TODO: store the intermediate with jax.sow
-    # TMP TODO: concatenate this function with inputs.u
+    pnode_features = jnp.concatenate([inputs.u.squeeze(1), psi], axis=-1)
 
     # Concatente with forced features
     pnode_features_forced = []

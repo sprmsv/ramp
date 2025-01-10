@@ -1172,8 +1172,8 @@ def main(argv):
         u=jnp.ones(shape=(FLAGS.batch_size, 1, dataset.metadata.shape[2], sum([dataset.sample.functions[key].values.shape[-1] for key in dataset.metadata.inp]))),
         h=jnp.ones(shape=(FLAGS.batch_size, 1, dataset.metadata.shape[2], sum([dataset.sample.functions[key].values.shape[-1] for key in dataset.metadata.seg]))),
         m=jnp.ones(shape=(FLAGS.batch_size, 1, dataset.metadata.shape[2], sum([dataset.sample.functions[key].values.shape[-1] for key in dataset.metadata.seg])), dtype=bool),
-        x_inp=dataset.sample.x,
-        x_out=dataset.sample.x,
+        x_inp=jnp.tile(dataset.sample.x, reps=(FLAGS.batch_size, 1, 1, 1)),
+        x_out=jnp.tile(dataset.sample.x, reps=(FLAGS.batch_size, 1, 1, 1)),
         t=None,
         tau=None,
       )

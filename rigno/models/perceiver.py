@@ -32,6 +32,7 @@ class FeedForward(nn.Module):
         x = nn.Dense(features)(x)
         return x
 
+
 class Attention(nn.Module):
     heads: int = 8
     head_features: int = 64
