@@ -752,11 +752,11 @@ class RIGNO(AbstractOperator):
     self.variable_mesh = False
 
     self.bcencoder = BCProjector(
-      depth=2,
+      depth=4,
       out_dim=4,  # TMP Parameterize
       latent_dim=16,
-      n_heads=2,
-      head_dim=16,
+      n_heads=4,
+      head_dim=32,
       ff_mult=4,
       attn_dropout=.0,
       ff_dropout=.0,
@@ -898,7 +898,10 @@ class RIGNO(AbstractOperator):
       f_domain=jnp.concatenate([inputs.x_inp.squeeze(1), inputs.u.squeeze(1)], axis=-1),
       train=False,  # TMP
     )
-    # TMP TODO: store the intermediate with jax.sow
+    self.sow(
+      col='intermediates', name='auxiliary_function',
+      value=self._prepare_features(psi)
+    )
     pnode_features = jnp.concatenate([inputs.u.squeeze(1), psi], axis=-1)
 
     # Concatente with forced features
